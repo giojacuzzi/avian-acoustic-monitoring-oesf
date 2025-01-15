@@ -12,14 +12,8 @@ data_species_pool = data_species_pool %>%
 data_species_pool = data_species_pool %>% mutate(status = recode(residency, "Vagrant" = "Migration / Vagrant", "Migration" = "Migration / Vagrant"))
 data_species_pool$status = factor(data_species_pool$status, levels = c('Year-round', 'Breeding', 'Migration / Vagrant', 'Nonbreeding'))
 
-
-# data_species_pool = data_species_pool %>% arrange(status, season_start, common_name)
-# data_species_pool <- data_species_pool %>%
-#   mutate(common_name = fct_reorder(common_name, as.numeric(status)))
 data_species_pool <- data_species_pool %>%
-  # Arrange by status and season_start
   arrange(status, season_start) %>%
-  # Create an ordered factor for common_name
   mutate(common_name = factor(common_name, levels = unique(common_name)))
 
 ggplot(data_species_pool) +
