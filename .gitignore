@@ -7,7 +7,11 @@
 /build/
 /dist/
 
+# Binary files
+*.xlsx
+
 # Output files
+*.pdf
 *.wav
 *.csv
 *.png
@@ -36,8 +40,9 @@
 .Rapp.history
 
 # Session Data files
-.RData
-.RDataTmp
+*.Rproj
+*.RData
+*.RDataTmp
 
 # User-specific files
 .Ruserdata
