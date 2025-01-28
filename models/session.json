@@ -1,0 +1,14 @@
+{
+    "in_path": "E:/OESF/2020/Deployment8",
+    "out_dir_path": "C:/Users/gioj/Desktop/OESF_processed",
+    "out_filetype": "csv",
+    "calc_predictions": 1,
+    "extract_segments": 1,
+    "class_labels_filepath": "C:/Users/gioj/Documents/GitHub/avian-acoustic-monitoring-oesf/models/ensemble/ensemble_species_list.txt",
+    "model_selection": "Ensemble",
+    "target_model_filepath": "C:/Users/gioj/Documents/GitHub/few-shot-transfer-learning-bioacoustics/models/target/OESF_1.0/OESF_1.0.tflite",
+    "ensemble_weights": "C:/Users/gioj/Documents/GitHub/avian-acoustic-monitoring-oesf/models/ensemble/ensemble_weights.txt",
+    "threads": 17,
+    "min_confidence": 0.5,
+    "seg_length": 3
+}
