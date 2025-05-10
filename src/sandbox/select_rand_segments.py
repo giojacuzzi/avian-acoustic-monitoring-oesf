@@ -14,9 +14,9 @@
 #               Species
 #                   [.wav files]
 #
-in_dir = '/Users/giojacuzzi/Desktop/OESF_processed_example/segments'
-out_dir = '/Users/giojacuzzi/Downloads/elephant'
-N = 10
+in_dir = '/Volumes/gioj/OESF_processed/2022/segments'#'/Users/giojacuzzi/Desktop/OESF_processed_example/segments'
+out_dir = '/Volumes/OESF_PAM_1/OESF_samples/2022' #'/Users/giojacuzzi/Downloads/elephant'
+N = 500
 ##############################################################################
 import os
 import shutil
