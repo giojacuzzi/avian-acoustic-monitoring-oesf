@@ -48,8 +48,8 @@ nthin = 1
 summary((y_unmarked = unmarkedFrameOccu(y = as.matrix(y))))
 
 ssom_unmarked = occu(formula = 
-                     ~1 # detection formula
-                     ~1, # occupancy formula 
+                     ~1  # constant detection probability across units and surveys
+                     ~1, # constant occupancy probability across units
                      data = y_unmarked)
 summary_unmarked = round(predict(ssom_unmarked, newdata = data.frame(site = 1), type = "state"), 3) # Occupancy estimate (95% CI)
 summary_unmarked = rbind(summary_unmarked, round(predict(ssom_unmarked, newdata = data.frame(site = 1), type = "det"), 3))   # Detection estimate (95% CI)
