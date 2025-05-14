@@ -1,15 +1,11 @@
 ####################################################################################
 # A single-season occupancy model with covariates
 #
-# Input:
-# - A 4-dimensional array with dimensions [unit × survey × season × species], with each element representing an observation (e.g. max confidence)
+# INPUT:
 path_community_array = "data/cache/1_derive_community_array/community_array.rds"
+path_community_survey_data = "data/cache/1_derive_community_array/community_survey_data.rds"
 path_environmental_data = "data/environment/PAM_PreHarvest_Habitat_results_DD_WD_TM.xlsx"
 path_unit_key = "data/unit_key.csv"
-#
-# Output:
-# - TODO
-
 ####################################################################################
 
 library(MCMCvis)
@@ -20,18 +16,33 @@ library(readxl)
 library(unmarked)
 library(coda)
 
-s = "Pileated Woodpecker" # species s
+s = "Brown Creeper" # species s
 t = "2020"          # season t
+threshold = 0.95
 
-community_array = readRDS(path_community_array)
-y = community_array[, , t, s] # Model observations for a single species from a single season
-y = ifelse(is.na(y), NA, ifelse(y >= 0.95, 1, 0)) # Threshold confidence scores to obtain binary presence-absence data
+# community_array = readRDS(path_community_array)
+# y = community_array[, , t, s] # Model observations for a single species from a single season
+# y = ifelse(is.na(y), NA, ifelse(y >= threshold, 1, 0)) # Threshold confidence scores to obtain binary presence-absence data
+
+community_survey_data = readRDS(path_community_survey_data)
+y = community_survey_data[, , t, s] # Model observations for a single species from a single season
+y = matrix( # Threshold confidence scores to obtain binary presence-absence data
+  unlist(lapply(y, function(x) if (!is.null(x)) as.integer(any(x$confidence >= threshold, na.rm = TRUE)) else NA)),
+  nrow = dim(y)[1],
+  ncol = dim(y)[2],
+  dimnames = dimnames(y)[1:2]
+)
 
 # Clean array
 unit_survey_counts = rowSums(!is.na(y))
 if (sum(rowSums(!is.na(y)) == 0)) {
   warning("Discarding ", sum(rowSums(!is.na(y)) == 0), " units with no survey observations...")
   y = y[rowSums(!is.na(y)) > 0, ]
+}
+survey_unit_counts = colSums(!is.na(y))
+if (sum(survey_unit_counts == 0) > 0) {
+  warning("Discarding ", sum(survey_unit_counts == 0), " surveys with no unit observations...")
+  y = y[ , survey_unit_counts > 0]
 }
 
 nunit = nrow(y)   # unit i
