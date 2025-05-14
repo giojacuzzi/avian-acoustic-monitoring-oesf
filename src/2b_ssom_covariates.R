@@ -16,16 +16,18 @@ library(readxl)
 library(unmarked)
 library(coda)
 
-s = "Brown Creeper" # species s
+s = "Orange-crowned Warbler" # species s
 t = "2020"          # season t
 threshold = 0.95
 
-# community_array = readRDS(path_community_array)
-# y = community_array[, , t, s] # Model observations for a single species from a single season
-# y = ifelse(is.na(y), NA, ifelse(y >= threshold, 1, 0)) # Threshold confidence scores to obtain binary presence-absence data
-
 community_survey_data = readRDS(path_community_survey_data)
 y = community_survey_data[, , t, s] # Model observations for a single species from a single season
+x_yday = matrix( # Survey day of year
+  unlist(lapply(y, function(x) if (!is.null(x)) yday(x$survey_date) else NA)),
+  nrow = dim(y)[1],
+  ncol = dim(y)[2],
+  dimnames = dimnames(y)[1:2]
+)
 y = matrix( # Threshold confidence scores to obtain binary presence-absence data
   unlist(lapply(y, function(x) if (!is.null(x)) as.integer(any(x$confidence >= threshold, na.rm = TRUE)) else NA)),
   nrow = dim(y)[1],
@@ -33,15 +35,17 @@ y = matrix( # Threshold confidence scores to obtain binary presence-absence data
   dimnames = dimnames(y)[1:2]
 )
 
-# Clean array
+# Clean matricies
 unit_survey_counts = rowSums(!is.na(y))
 if (sum(rowSums(!is.na(y)) == 0)) {
   warning("Discarding ", sum(rowSums(!is.na(y)) == 0), " units with no survey observations...")
+  x_yday = x_yday[rowSums(!is.na(y)) > 0, ]
   y = y[rowSums(!is.na(y)) > 0, ]
 }
 survey_unit_counts = colSums(!is.na(y))
 if (sum(survey_unit_counts == 0) > 0) {
   warning("Discarding ", sum(survey_unit_counts == 0), " surveys with no unit observations...")
+  x_yday = x_yday[ , survey_unit_counts > 0]
   y = y[ , survey_unit_counts > 0]
 }
 
@@ -65,18 +69,18 @@ hab = factor(stratum$stratum, levels = hab_levels)
 summary((
   y_unmarked = unmarkedFrameOccu(
     y = as.matrix(y),
-    siteCovs = data.frame(hab = hab)
+    siteCovs = data.frame(hab = hab), # occupancy (site) covariate
+    obsCovs  = list(yday = x_yday)    # detection (observation) covariate
   )
 ))
 
 ssom_unmarked = occu(formula = 
-                     ~1      # constant detection probability across units and surveys
+                     ~yday   # detection probability varies by day of year
                      ~hab-1, # occupancy varies by habitat (no intercept, each habitat has a coefficient)
                      data = y_unmarked)
 summary(ssom_unmarked)
 
-# Predict occupancy probabilities for each habitat type
-# Create a new data frame with each habitat type
+# Predict the mean occupancy probability for each habitat
 new_data = data.frame(hab = factor(c("STAND INIT", "COMP EXCL", "THINNED", "MATURE"),
                                     levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE")))
 pred_psi = predict(ssom_unmarked, type = "state", newdata = new_data)
@@ -88,32 +92,50 @@ ggplot(pred_psi, aes(x = habitat, y = Predicted)) +
   labs(title = paste(s, t, "(unmarked)"), x = "Habitat", y = "Occupancy probability") +
   theme_minimal()
 
+# Predict the mean detection probability across the observed range of yday values
+yday_seq = seq(min(x_yday, na.rm = T), max(x_yday, na.rm = T), length.out = 100)
+pred_rho = predict(ssom_unmarked, type = "det", newdata = data.frame(yday = yday_seq))
+pred_rho$yday = yday_seq
+ggplot(pred_rho, aes(x = yday, y = Predicted)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
+  xlim(min(x_yday, na.rm = T), max(x_yday, na.rm = T)) +
+  ylim(0.0, 1.0) +
+  labs(title = paste(s, t, "(unmarked)"), x = "Day of year", y = "Detection probability") +
+  theme_minimal()
+
 # jags -------------------------------------------------
 niter = 50000
 nburnin = 7500
 nchains = 2
 nthin = 1
 
+# Jags requires all covariates to be completely defined (no NA values), so here we replace NA covariates with a dummy -1 value.
+# Missing observations are excluded from the likelihood, so these dummy values will have no affect 
+x_yday_clean = x_yday
+x_yday_clean[is.na(x_yday_clean)] = 0
+
+# We also should standardize our covariate
+x_yday_clean = scale(x_yday_clean)
+
 jags_file = tempfile(fileext = ".txt")
 sink(jags_file)
 cat("
 model {
-  # Uninformative prior for detection probability
-  rho ~ dunif(0, 1)
-  # Priors for each habitat's effect on occupancy
+  # Priors
+  alpha ~ dnorm(0, 0.001)  # Effect of day of year on detection probability
   for (h in 1:H) {
-    beta[h] ~ dnorm(0, 1)
+    beta[h] ~ dnorm(0, 1)  # Effect of habitat on occupancy
   }
   
   # Likelihood
   for (i in 1:I){ # For each site
-    
-    logit(psi[i]) <- beta[habitat[i]]  # no intercept
-    z[i] ~ dbern(psi[i]) # Occupancy state model
+    logit(psi[i]) <- beta[habitat[i]] # occupancy probability (no intercept)
+    z[i] ~ dbern(psi[i])              # latent occupancy state
     
     for (j in 1:J) { # For each survey
-      
-      y[i,j] ~ dbern(z[i] * rho) # Observation model
+      logit(p[i,j]) <- alpha * yday[i,j] # detection probability
+      y[i,j] ~ dbern(z[i] * p[i,j])      # observed detection-nondetection
     }
   }
 }
@@ -122,21 +144,24 @@ sink()
 
 init_func = function() {
   list( # Initial values to avoid data/model conflicts
-    rho = runif(1, 0, 1),
     z = apply(y, 1, max, na.rm = T) # Initialize z[i] as 1 if a detection occurred at unit i, and 0 otherwise
   )
 }
 
 ssom_jags <- jags(
   data = list(
+    # Observed data
     y = y,
     I = nunit,
     J = nsurvey,
+    # Occupancy covariate
     H = length(unique(hab)),
-    habitat = as.numeric(hab)
+    habitat = as.numeric(hab),
+    # Detection covariate
+    yday = x_yday_clean
   ),
   inits = init_func,
-  parameters.to.save = c("beta", "rho"),
+  parameters.to.save = c("beta", "alpha"),
   model.file = jags_file,
   n.chains = nchains,
   n.thin = nthin,
@@ -147,7 +172,7 @@ ssom_jags <- jags(
 MCMCsummary(ssom_jags)
 
 ## Diagnostics
-MCMCplot(ssom_jags, params = c('beta','rho'),ci=c(50,95))
+MCMCplot(ssom_jags, params = c('beta','alpha'),ci=c(50,95))
 
 # Check for convergence with trace and density plots
 MCMCtrace(ssom_jags$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'trace', Rhat = TRUE, n.eff = TRUE)
@@ -157,25 +182,48 @@ gelman.diag(ssom_jags$samples) # Gelman-Rubin diagnostics
 ## Investigate posterior distributions for covariates
 
 # Visualize posterior distributions for occupancy probability in relation to habitat covariates
-df <- as.data.frame(plogis(ssom_jags$sims.list$beta))
-colnames(df) <- hab_levels
-df_long <- pivot_longer(df, cols = everything(), names_to = "Group", values_to = "Value")
-ggplot(df_long, aes(x = Value, fill = Group)) +
+beta_posterior_occupancy = as.data.frame(plogis(ssom_jags$sims.list$beta))
+colnames(beta_posterior_occupancy) = hab_levels
+ggplot(pivot_longer(beta_posterior_occupancy, cols = everything(), names_to = "Habitat", values_to = "Value"),
+       aes(x = `Value`, fill = `Habitat`)) +
   geom_histogram(binwidth = 0.01, alpha = 0.6, position = "identity") +
-  labs(title = "Posterior distributions by habitat covariate", x = "Value", y = "Frequency") +
+  labs(title = "Posterior occupancy probability distributions by habitat", x = "Occupancy probability", y = "Frequency") +
   theme_minimal()
 
 # Predict the mean occupancy probability for each habitat (beta coefficient)
-pred_summary = data.frame(habitat = factor(hab_levels, levels = hab_levels))
-# Calculate the posterior mean probability for each beta coefficient by transforming
-# each MCMC sample from log-odds to probability and averaging over the samples
-pred_summary$mean  = apply(ssom_jags$sims.list$beta, 2, function(x) mean(plogis(x)))
-# Compute 95% credible intervals for the posterior probability of each beta coefficient
-pred_summary$lower = apply(ssom_jags$sims.list$beta, 2, function(x) quantile(plogis(x), 0.025))
-pred_summary$upper = apply(ssom_jags$sims.list$beta, 2, function(x) quantile(plogis(x), 0.975))
-ggplot(pred_summary, aes(x = habitat, y = mean)) +
+occupancy_summary = data.frame(habitat = factor(hab_levels, levels = hab_levels))
+# Calculate the mean probability and 95% credible intervals for each beta coefficient from the posterior
+# by transforming each MCMC sample from log-odds to probability and averaging over the samples
+beta_posterior_samples = ssom_jags$sims.list$beta
+occupancy_summary$mean  = apply(beta_posterior_samples, 2, function(x) mean(plogis(x)))
+occupancy_summary$lower = apply(beta_posterior_samples, 2, function(x) quantile(plogis(x), 0.025))
+occupancy_summary$upper = apply(beta_posterior_samples, 2, function(x) quantile(plogis(x), 0.975))
+ggplot(occupancy_summary, aes(x = habitat, y = mean)) +
   geom_point(size = 3) +
   geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
   ylim(0.0, 1.0) +
   labs(title = paste(s, t, "(jags)"), x = "Habitat", y = "Occupancy probability") +
   theme_minimal()
+
+# Predict the mean detection probability across the observed range of yday values
+yday_seq = seq(min(x_yday_clean, na.rm = T), max(x_yday_clean, na.rm = T), length.out = 100)
+# For each yday value, calculate the mean detection probability and 95% credible intervals from the
+# posterior by transforming each MCMC sample from log-odds to probability and averaging over the samples
+alpha_posterior_samples = ssom_jags$sims.list$alpha
+# detection_summary = t(sapply(yday_seq, function(yday_val) { # Retain the standardized scale
+#   rho_samples = plogis(alpha_posterior_samples * yday_val)
+#   c(yday = yday_val, mean = mean(rho_samples), quantile(rho_samples, 0.025), quantile(rho_samples, 0.975))
+# }))
+detection_summary = t(sapply(yday_seq, function(yday_val) {
+  yday_original_scale = yday_val * sd(x_yday, na.rm = T) + mean(x_yday, na.rm = T) # Convert back to the original (unstandardized) scale
+  rho_samples = plogis(alpha_posterior_samples * yday_val)
+  c(yday = yday_original_scale, mean = mean(rho_samples), quantile(rho_samples, 0.025), quantile(rho_samples, 0.975))
+}))
+ggplot(detection_summary, aes(x = yday, y = mean)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), alpha = 0.2) +
+  # lims(x = c(min(x_yday_clean, na.rm = T), max(x_yday_clean, na.rm = T)), y = c(0.0, 1.0)) +
+  lims(x = c(min(x_yday, na.rm = T), max(x_yday, na.rm = T)), y = c(0.0, 1.0)) +
+  labs(title = paste(s, t, "(jags)"), x = "Day of year", y = "Detection probability") +
+  theme_minimal()
+
