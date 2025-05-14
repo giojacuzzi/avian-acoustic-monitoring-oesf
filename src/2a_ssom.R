@@ -1,5 +1,5 @@
 ####################################################################################
-# A basic single-season occupancy model with only occupancy and detection intercepts
+# A basic single-species static occupancy model with only occupancy and detection intercepts
 # Model is fit with unmarked, jags, and nimble for comparison
 #
 # INPUT:
@@ -13,9 +13,10 @@ library(unmarked)
 library(jagsUI)
 library(dplyr)
 
-s = "Brown Creeper" # species s
-t = "2020"          # season t
-threshold = 0.95
+# Species `s` and season `t`
+s = "Brown Creeper"
+t = "2020"
+threshold = 0.95 # naive conversion from continuous score prediction to binary detection-nondetection
 
 community_survey_data = readRDS(path_community_survey_data)
 y = community_survey_data[, , t, s] # Model observations for a single species from a single season

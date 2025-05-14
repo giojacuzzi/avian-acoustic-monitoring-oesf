@@ -1,8 +1,7 @@
 ####################################################################################
-# A single-season occupancy model with covariates
+# A single-species static occupancy model with covariates
 #
 # INPUT:
-path_community_array = "data/cache/1_derive_community_array/community_array.rds"
 path_community_survey_data = "data/cache/1_derive_community_array/community_survey_data.rds"
 path_environmental_data = "data/environment/PAM_PreHarvest_Habitat_results_DD_WD_TM.xlsx"
 path_unit_key = "data/unit_key.csv"
@@ -16,9 +15,10 @@ library(readxl)
 library(unmarked)
 library(coda)
 
-s = "Orange-crowned Warbler" # species s
-t = "2020"          # season t
-threshold = 0.95
+# Species `s` and season `t`
+s = "Orange-crowned Warbler"
+t = "2020"
+threshold = 0.95 # naive conversion from continuous score prediction to binary detection-nondetection
 
 community_survey_data = readRDS(path_community_survey_data)
 y = community_survey_data[, , t, s] # Model observations for a single species from a single season
