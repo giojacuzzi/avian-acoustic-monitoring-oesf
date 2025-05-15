@@ -1,5 +1,5 @@
 ####################################################################################
-# A multi-species static occupancy model with covariates
+# A multi-species static occupancy model with occupancy and detection covariates
 #
 # INPUT:
 path_community_survey_data = "data/cache/1_derive_community_array/community_survey_data.rds"
@@ -158,13 +158,18 @@ for (sp in dimnames(y)[[3]]) {
 }
 n_surveys_per_site <- apply(!is.na(y[, , 1]), 1, sum)
 
-# # Get environmental data
-# env_data = read.csv(path_site_key)
-# env_data = env_data %>% filter(unit %in% sites) %>% select(unit, stratum) %>% distinct()
-# strata = c('STAND INIT', 'COMP EXCL', 'THINNED', 'MATURE')
-# x_stratum = env_data %>%
-#   mutate(unit = factor(unit, levels = sites), stratum = factor(stratum, levels = strata)) %>%
-#   arrange(unit) %>% select(unit, stratum) # arrange to match y
+# Get environmental data
+env_data = read.csv(path_site_key)
+env_data = env_data %>% filter(unit %in% sites) %>% select(unit, stratum) %>% distinct()
+strata = c('STAND INIT', 'COMP EXCL', 'THINNED', 'MATURE')
+x_stratum = env_data %>%
+  mutate(site = factor(unit, levels = sites), stratum = factor(stratum, levels = strata)) %>%
+  arrange(site) %>% select(site, stratum) # arrange to match y
+all(x_stratum$site == sites) # check that sites are aligned between observation and covariate data
+x_stratum = x_stratum %>% pull(stratum)
+
+# Distribution of strata among sites
+table(x_stratum)
 
 # Initialize latent occupancy state z[i] as 1 if a detection occurred at unit i, and 0 otherwise
 z = matrix(data = NA, nrow = length(sites), ncol = length(species), dimnames = list(sites, species))
@@ -174,11 +179,16 @@ for (i in 1:length(sites)) {
 z = (z > 0) * 1
 
 msom_data = list(
-  y = y,                                   # detection-nondetection matrix
-  x_yday = x_yday,                         # day of year detection covariate matrix
-  K = length(species),                     # number of species observed
-  I = length(sites),                       # number of sites
-  surveys  = as.vector(n_surveys_per_site) # number of surveys per site
+  # Observed data
+  y = y,                                    # detection-nondetection matrix
+  K = length(species),                      # number of species observed
+  I = length(sites),                        # number of sites
+  surveys  = as.vector(n_surveys_per_site), # number of surveys per site
+  # Occupancy covariates
+  x_stratum = as.numeric(x_stratum),        # forest stratum occupancy covariate site vector
+  n_strata = length(strata),                # number of categories for stratum variable
+  # Detection covariates
+  x_yday = x_yday                           # day of year detection covariate site-survey matrix
 )
 str(msom_data)
 
@@ -191,7 +201,8 @@ model{
     for (i in 1:I) { # for each site
       
       # Ecological process model for latent occurrence z
-      z[i,k] ~ dbern(psi[k])
+      logit(psi[i, k]) <- bstratum[k, x_stratum[i]]
+      z[i,k] ~ dbern(psi[i, k])
       
       for (j in 1:surveys[i]) { # for each survey at site i
 
@@ -202,38 +213,41 @@ model{
       }
     }
     
-    # Priors for psi (species level)
-    lpsi[k] ~ dnorm(mu.lpsi, tau.lpsi) # logit-scale occupancy probability for species k
-    psi[k] <- ilogit(lpsi[k])          # occupancy probability for species k
+    # Priors for occupancy slopes (species level)
+    for (s in 1:n_strata) {
+      bstratum[k, s] ~ dnorm(mu.stratum[s], tau.stratum[s])
+    }
 
-    # Priors for detection intercept and slope (species level)
-    a0[k] ~ dnorm(mu.a0, tau.a0) # baseline detectability of species k when the detection covariate
+    # Priors for detection intercepts and slopes (species level)
+    a0[k] ~ dnorm(mu.a0, tau.a0) # baseline detectability of species k when the x_yday variable is zero
     ayday[k] ~ dnorm(mu.yday, tau.yday)    # species-specific slope describing how detection changes with the covariate
   }
   
-  # Hyperpriors for psi (community level)
-  psi.mean ~ dbeta(1, 1)     # community mean occupancy probability
-  mu.lpsi <- logit(psi.mean) # mean of the species-specific logit-scale occupancy
-  sd.lpsi ~ dunif(0, 5)      # standard deviation of logit-scale occpuancy among species
-  tau.lpsi <- 1/sd.lpsi^2    # precision (inverse variance) of logit-scale occupancy
+  # Hyperpriors for stratum covariate effect (community level)
+  for (s in 1:n_strata) {
+    mu.stratum[s] ~ dnorm(0, 0.001)       # community mean effect of stratum s
+    sd.stratum[s] ~ dunif(0, 5)
+    tau.stratum[s] <- 1 / pow(sd.stratum[s], 2)
+  }
   
   # Hyperpriors for detection intercept (community level)
-  mu.a0 ~ dnorm(0, 0.001)   # community mean of species-specific intercepts (mean baseline detect prob across all species)
+  mu.a0 ~ dnorm(0, 0.001)   # community mean of species-specific intercepts on the logit scale (mean baseline detect prob across all species)
   sd.a0 ~ dunif(0, 5)       # community standard deviation of species-specific intercepts (how much detectability varies between species)
   tau.a0 <- 1 / pow(sd.a0, 2)
 
   # Hyperpriors for yday covariate effect (community level)
-  mu.yday ~ dnorm(0, 0.001) # community mean of the species-specific slopes describing how detection changes with x_yday
+  mu.yday ~ dnorm(0, 0.001) # community mean of the species-specific slopes on the logit scale describing how detection changes with x_yday
   sd.yday ~ dunif(0, 5)     # community standard deviation
   tau.yday <- 1 / pow(sd.yday, 2)
   
   # Derived quantities
   for (k in 1:K) {
-    Nocc[k]  <- sum(z[,k]) # estimated number of occupied sites per species (among the sampled population of sites)
+    Nocc[k]  <- sum(z[ ,k]) # estimated number of occupied sites per species (among the sampled population of sites)
   }
   for (i in 1:I) {
-    Nsite[i] <- sum(z[i,]) # estimated number of species occuring per site (among the species that were detected anywhere)
+    Nsite[i] <- sum(z[i, ]) # estimated number of species occuring per site (among the species that were detected anywhere)
   }
+  psi.mean <- sum(z[ , ]) / (I * K) # community mean occupancy probability
 }
 ", con = model_file)
 
@@ -241,7 +255,7 @@ message("Running JAGS (current time ", time_start <- Sys.time(), ")")
 
 msom = jags(data = msom_data,
             inits = function() { list(z = z) }, # initial values to avoid data/model conflicts
-            parameters.to.save = c("psi.mean", "mu.a0", "mu.yday", "psi", "a0", "ayday", "Nsite", "Nocc"), # monitored parameters
+            parameters.to.save = c("mu.stratum", "bstratum", "mu.a0", "mu.yday", "a0", "ayday", "Nsite", "Nocc", "psi.mean"), # monitored parameters
             model.file = model_file,
             n.chains = 3, n.adapt = 100, n.iter = 10000, n.burnin = 5000, n.thin = 2,
             parallel = TRUE, DIC = FALSE)
@@ -252,28 +266,47 @@ message("Finished running JAGS (", round(as.numeric(difftime(Sys.time(), time_st
 MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'trace', Rhat = TRUE, n.eff = TRUE)
 MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'density', Rhat = TRUE, n.eff = TRUE, ind = TRUE)
 
-# Put psi estimates in a dataframe
-psi_species_estimates <- msom_summary %>%
-  as.data.frame(.) %>%
-  mutate(parameter = row.names(.)) %>%
-  # Filtering to only the estimates of psi for each species 
-  # species psi parameters in our model take the form "psi[1]"
-  filter(parameter %in% c(paste0("psi","[",c(1:length(species)),"]"))) %>%
-  arrange(mean) %>%
-  mutate(species = species[as.numeric(gsub(".*\\[(\\d+)\\]", "\\1", parameter))])
+## Predict mean detection probabilities across the observed range of yday values
 
-# Plot psi estimates
-p = ggplot(psi_species_estimates, aes(x = factor(species, levels = species), y = mean)) +
+# For each species, calculate parameter posterior means (and 95% credible intervals) of occupancy probability
+# by transforming each MCMC sample from log-odds to probability and averaging over the samples per stratum
+species_stratum_posterior = data.frame()
+b0_samples = msom$sims.list$bstratum
+for (sp in species) {
+  species_idx = which(species == sp)
+  occupancy_summary = data.frame(stratum = factor(strata, levels = strata))
+  occupancy_summary$species = sp
+  occupancy_summary$mean    = apply(b0_samples[ , species_idx, ], 2, function(x) mean(plogis(x)))
+  occupancy_summary$lower   = apply(b0_samples[ , species_idx, ], 2, function(x) quantile(plogis(x), 0.025))
+  occupancy_summary$upper   = apply(b0_samples[ , species_idx, ], 2, function(x) quantile(plogis(x), 0.975))
+  species_stratum_posterior = rbind(species_stratum_posterior, occupancy_summary)
+}
+
+# Visualize relationship between stratum and occupancy probability for the community
+# TODO: Add a line for community mean
+stratum_name = "THINNED"
+ggplot(species_stratum_posterior %>% filter(stratum == stratum_name) %>% arrange(mean) %>% mutate(species = factor(species, levels = species)),
+       aes(x = mean, y = species)) +
   geom_point() +
-  geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`), width = 0) +
-  geom_hline(yintercept = msom_summary["psi.mean", "mean"], color = "blue") +
-  geom_hline(yintercept = msom_summary["psi.mean", "2.5%"], color = "blue", linetype = "dashed") +
-  geom_hline(yintercept = msom_summary["psi.mean", "97.5%"], color = "blue", linetype = "dashed") +
-  labs(title = "Occupancy probability", x = "Species", y = "Occupancy estimate") +
-  scale_x_discrete(labels = psi_species_estimates$species)+ 
-  scale_y_continuous(limits = c(0, 1.0), breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1.0)) +
-  coord_flip() +
-  theme_minimal(); print(p)
+  geom_errorbar(aes(xmin = lower, xmax = upper), width = 0.2, alpha = 0.2) +
+  xlim(0.0, 1.0) +
+  labs(title = stratum_name, x = "Occupancy probability", y = "") +
+  theme_minimal()
+
+# Visualize relationship between stratum and occupancy probability for a specific species
+species_name = "Brown Creeper"
+species_idx = which(species == species_name)
+occupancy_summary = data.frame(stratum = factor(strata, levels = strata))
+occupancy_summary$species = species_name
+occupancy_summary$mean    = apply(b0_samples[ , species_idx, ], 2, function(x) mean(plogis(x)))
+occupancy_summary$lower   = apply(b0_samples[ , species_idx, ], 2, function(x) quantile(plogis(x), 0.025))
+occupancy_summary$upper   = apply(b0_samples[ , species_idx, ], 2, function(x) quantile(plogis(x), 0.975))
+ggplot(occupancy_summary, aes(x = stratum, y = mean)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+  ylim(0.0, 1.0) +
+  labs(title = species_name, x = "Habitat", y = "Occupancy probability") +
+  theme_minimal()
 
 ## Predict mean detection probabilities across the observed range of yday values
 yday_seq = seq(min(x_yday, na.rm = TRUE), max(x_yday, na.rm = TRUE), by = 1)
@@ -323,7 +356,7 @@ p = ggplot(data = species_yday_posterior %>% filter(species == species_idx), aes
   labs(x = "Day of year", y = "Detection probability", title = paste0(species_name, " (", species_idx,")")) +
   theme_minimal(); print(p)
 
-# Plot observed versus estimated number of species per site
+# Visualize estimated number of species per site
 Nsite_posterior = as.data.frame(msom_summary[grepl("^Nsite", rownames(msom_summary)), ])
 Nsite_posterior$site = rownames(Nsite_posterior)
 ggplot(Nsite_posterior, aes(x = site, y = mean)) +
