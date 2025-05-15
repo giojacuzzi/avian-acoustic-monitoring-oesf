@@ -296,28 +296,30 @@ p = ggplot(psi_species_estimates, aes(x = factor(species, levels = species), y =
 alpha_samples <- msom_simple_out$sims.list$alpha  # matrix: iterations x nSpecies
 beta_samples <- msom_simple_out$sims.list$beta    # matrix: iterations x nSpecies
 
-# Define a sequence of day-of-year values
-doy_seq <- seq(min(x_yday_new, na.rm = TRUE), max(x_yday_new, na.rm = TRUE), by = 1)
+## Predict mean detection probabilities across the observed range of yday values
+yday_seq <- seq(min(x_yday_new, na.rm = TRUE), max(x_yday_new, na.rm = TRUE), by = 1)
 
 # For each species, calculate posterior mean (and optionally 95% CI) of detection probability across doy
 nSpecies <- ncol(alpha_samples)
 posterior_df <- data.frame()
 
+# For each species, calculate parameter posterior mean (and 95% credible interval) of detection probability
+# by transforming each MCMC sample from log-odds to probability and averaging over the samples
 for (k in 1:nSpecies) {
-  probs <- sapply(doy_seq, function(x) {
+  probs <- sapply(yday_seq, function(x) {
     plogis(alpha_samples[, k] + beta_samples[, k] * x)
   })
   
   probs_summary <- apply(probs, 2, function(x) {
-    c(mean = mean(x), lower = quantile(x, 0.025), upper = quantile(x, 0.975))
+    c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
   })
   
   tmp <- data.frame(
-    doy = doy_seq,
+    yday = yday_seq,
     mean = probs_summary["mean", ],
-    lower = probs_summary["lower.2.5%", ],
-    upper = probs_summary["upper.97.5%", ],
-    species = paste0("Species_", k)
+    lower = probs_summary["lower", ],
+    upper = probs_summary["upper", ],
+    species = as.character(k)
   )
   
   posterior_df <- rbind(posterior_df, tmp)
@@ -327,38 +329,37 @@ for (k in 1:nSpecies) {
 alpha_mean_samples <- msom_simple_out$sims.list$alpha.mean
 beta_mean_samples <- msom_simple_out$sims.list$beta.mean
 
-# Calculate detection probability across doy for the community
-comm_probs <- sapply(doy_seq, function(x) {
+# For the community, calculate hyperparameter posterior mean (and 95% credible interval) of detection probability
+comm_probs <- sapply(yday_seq, function(x) {
   plogis(alpha_mean_samples + beta_mean_samples * x)
 })
 
 comm_summary <- apply(comm_probs, 2, function(x) {
-  c(mean = mean(x), lower = quantile(x, 0.025), upper = quantile(x, 0.975))
+  c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
 })
 
 community_df <- data.frame(
-  doy = doy_seq,
+  yday = yday_seq,
   mean = comm_summary["mean", ],
-  lower = comm_summary["lower.2.5%", ],
-  upper = comm_summary["upper.97.5%", ],
-  species = "Community Mean"
+  lower = comm_summary["lower", ],
+  upper = comm_summary["upper", ],
+  species = "Community mean"
 )
 
 plot_df <- bind_rows(posterior_df, community_df)
 
 # Plot
 ggplot() +
-  geom_line(data = posterior_df, aes(x = doy, y = mean, group = species), alpha = 0.2) +
-  geom_line(data = community_df, aes(x = doy, y = mean), color = "blue", linewidth = 2) +
-  geom_ribbon(data = community_df, aes(x = doy, y = mean, ymin = lower, ymax = upper), alpha = 0.2, fill = NA, color = "blue", linetype = "dashed") +
+  geom_line(data = posterior_df, aes(x = yday, y = mean, group = species), alpha = 0.2) +
+  geom_line(data = community_df, aes(x = yday, y = mean), color = "blue", linewidth = 2) +
+  geom_ribbon(data = community_df, aes(x = yday, y = mean, ymin = lower, ymax = upper), alpha = 0.2, fill = NA, color = "blue", linetype = "dashed") +
   labs(x = "Day of year", y = "Detection probability", title = "Detected community") +
   theme_minimal()
 
 species_name = "Orange-crowned Warbler"
-species_idx = which(species == species_name)
-species_param = paste0("Species_", species_idx)
-posterior_for_species = posterior_df %>% filter(species == species_param)
-ggplot(data = posterior_df %>% filter(species == species_param), aes(x = doy, y = mean)) +
+species_idx = as.character(which(species == species_name))
+posterior_for_species = posterior_df %>% filter(species == species_idx)
+ggplot(data = posterior_df %>% filter(species == species_idx), aes(x = yday, y = mean)) +
   geom_line() +
   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
   lims(y = c(0.0, 1.0)) +
