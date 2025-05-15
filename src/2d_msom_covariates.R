@@ -288,51 +288,50 @@ p = ggplot(psi_species_estimates, aes(x = factor(species, levels = species), y =
   scale_x_discrete(labels = psi_species_estimates$species)+ 
   scale_y_continuous(limits = c(0, 1.0), breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1.0)) +
   coord_flip() +
-  theme_classic(); print(p)
-
-#############################
+  theme_minimal(); print(p)
 
 ## Predict mean detection probabilities across the observed range of yday values
-yday_seq <- seq(min(x_yday_new, na.rm = TRUE), max(x_yday_new, na.rm = TRUE), by = 1)
+yday_seq = seq(min(x_yday_new, na.rm = TRUE), max(x_yday_new, na.rm = TRUE), by = 1)
 
 # For each species, calculate parameter posterior mean (and 95% credible interval) of detection probability
 # by transforming each MCMC sample from log-odds to probability and averaging over the samples
 alpha_samples = msom_simple_out$sims.list$alpha
 beta_samples  = msom_simple_out$sims.list$beta
-posterior_df  = data.frame()
+species_yday_posterior = data.frame()
 for (k in 1:ncol(alpha_samples)) {
   probs = sapply(yday_seq, function(x) {
     plogis(alpha_samples[, k] + beta_samples[, k] * x)
   })
-  probs_summary = apply(probs, 2, function(x) {
+  probs_mean_ci = apply(probs, 2, function(x) {
     c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
   })
-  posterior_df = rbind(posterior_df, data.frame(yday = yday_seq, mean = probs_summary["mean", ], lower = probs_summary["lower", ], upper = probs_summary["upper", ], species = as.character(k)
+  species_yday_posterior = rbind(species_yday_posterior, data.frame(yday = yday_seq, mean = probs_mean_ci["mean", ], lower = probs_mean_ci["lower", ], upper = probs_mean_ci["upper", ], species = as.character(k)
   ))
 }
 
 # For the community, calculate hyperparameter posterior mean (and 95% credible interval) of detection probability
 alpha_mean_samples = msom_simple_out$sims.list$alpha.mean
 beta_mean_samples  = msom_simple_out$sims.list$beta.mean
-comm_probs = sapply(yday_seq, function(x) {
+probs = sapply(yday_seq, function(x) {
   plogis(alpha_mean_samples + beta_mean_samples * x)
 })
-comm_summary = apply(comm_probs, 2, function(x) {
+probs_mean_ci = apply(probs, 2, function(x) {
   c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
 })
-community_df = data.frame(yday = yday_seq, mean = comm_summary["mean", ], lower = comm_summary["lower", ], upper = comm_summary["upper", ], species = "Community mean")
+community_yday_posterior = data.frame(yday = yday_seq, mean = probs_mean_ci["mean", ], lower = probs_mean_ci["lower", ], upper = probs_mean_ci["upper", ], species = "Community mean")
 
-# Plot
+# Visualize relationship between yday and detection probability for the community
 ggplot() +
-  geom_line(data = posterior_df, aes(x = yday, y = mean, group = species), alpha = 0.2) +
-  geom_line(data = community_df, aes(x = yday, y = mean), color = "blue", linewidth = 2) +
-  geom_ribbon(data = community_df, aes(x = yday, y = mean, ymin = lower, ymax = upper), alpha = 0.2, fill = NA, color = "blue", linetype = "dashed") +
+  geom_line(data = species_yday_posterior, aes(x = yday, y = mean, group = species), alpha = 0.2) +
+  geom_line(data = community_yday_posterior, aes(x = yday, y = mean), color = "blue", linewidth = 1.5) +
+  geom_ribbon(data = community_yday_posterior, aes(x = yday, y = mean, ymin = lower, ymax = upper), alpha = 0.2, fill = NA, color = "blue", linetype = "dashed") +
   labs(x = "Day of year", y = "Detection probability", title = "Detected community") +
   theme_minimal()
 
+# Visualize relationship between yday and detection probability for a specific species
 species_name = "Orange-crowned Warbler"
 species_idx = as.character(which(species == species_name))
-ggplot(data = posterior_df %>% filter(species == species_idx), aes(x = yday, y = mean)) +
+ggplot(data = species_yday_posterior %>% filter(species == species_idx), aes(x = yday, y = mean)) +
   geom_line() +
   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
   lims(y = c(0.0, 1.0)) +
