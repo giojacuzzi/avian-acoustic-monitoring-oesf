@@ -292,61 +292,35 @@ p = ggplot(psi_species_estimates, aes(x = factor(species, levels = species), y =
 
 #############################
 
-# Extract posterior samples
-alpha_samples <- msom_simple_out$sims.list$alpha  # matrix: iterations x nSpecies
-beta_samples <- msom_simple_out$sims.list$beta    # matrix: iterations x nSpecies
-
 ## Predict mean detection probabilities across the observed range of yday values
 yday_seq <- seq(min(x_yday_new, na.rm = TRUE), max(x_yday_new, na.rm = TRUE), by = 1)
 
-# For each species, calculate posterior mean (and optionally 95% CI) of detection probability across doy
-nSpecies <- ncol(alpha_samples)
-posterior_df <- data.frame()
-
 # For each species, calculate parameter posterior mean (and 95% credible interval) of detection probability
 # by transforming each MCMC sample from log-odds to probability and averaging over the samples
-for (k in 1:nSpecies) {
-  probs <- sapply(yday_seq, function(x) {
+alpha_samples = msom_simple_out$sims.list$alpha
+beta_samples  = msom_simple_out$sims.list$beta
+posterior_df  = data.frame()
+for (k in 1:ncol(alpha_samples)) {
+  probs = sapply(yday_seq, function(x) {
     plogis(alpha_samples[, k] + beta_samples[, k] * x)
   })
-  
-  probs_summary <- apply(probs, 2, function(x) {
+  probs_summary = apply(probs, 2, function(x) {
     c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
   })
-  
-  tmp <- data.frame(
-    yday = yday_seq,
-    mean = probs_summary["mean", ],
-    lower = probs_summary["lower", ],
-    upper = probs_summary["upper", ],
-    species = as.character(k)
-  )
-  
-  posterior_df <- rbind(posterior_df, tmp)
+  posterior_df = rbind(posterior_df, data.frame(yday = yday_seq, mean = probs_summary["mean", ], lower = probs_summary["lower", ], upper = probs_summary["upper", ], species = as.character(k)
+  ))
 }
 
-# Extract hyperparameter samples
-alpha_mean_samples <- msom_simple_out$sims.list$alpha.mean
-beta_mean_samples <- msom_simple_out$sims.list$beta.mean
-
 # For the community, calculate hyperparameter posterior mean (and 95% credible interval) of detection probability
-comm_probs <- sapply(yday_seq, function(x) {
+alpha_mean_samples = msom_simple_out$sims.list$alpha.mean
+beta_mean_samples  = msom_simple_out$sims.list$beta.mean
+comm_probs = sapply(yday_seq, function(x) {
   plogis(alpha_mean_samples + beta_mean_samples * x)
 })
-
-comm_summary <- apply(comm_probs, 2, function(x) {
+comm_summary = apply(comm_probs, 2, function(x) {
   c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
 })
-
-community_df <- data.frame(
-  yday = yday_seq,
-  mean = comm_summary["mean", ],
-  lower = comm_summary["lower", ],
-  upper = comm_summary["upper", ],
-  species = "Community mean"
-)
-
-plot_df <- bind_rows(posterior_df, community_df)
+community_df = data.frame(yday = yday_seq, mean = comm_summary["mean", ], lower = comm_summary["lower", ], upper = comm_summary["upper", ], species = "Community mean")
 
 # Plot
 ggplot() +
@@ -358,7 +332,6 @@ ggplot() +
 
 species_name = "Orange-crowned Warbler"
 species_idx = as.character(which(species == species_name))
-posterior_for_species = posterior_df %>% filter(species == species_idx)
 ggplot(data = posterior_df %>% filter(species == species_idx), aes(x = yday, y = mean)) +
   geom_line() +
   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
