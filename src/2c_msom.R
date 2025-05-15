@@ -3,8 +3,6 @@
 #
 # INPUT:
 path_community_survey_data = "data/cache/1_derive_community_array/community_survey_data.rds"
-path_environmental_data = "data/environment/PAM_PreHarvest_Habitat_results_DD_WD_TM.xlsx"
-path_unit_key = "data/unit_key.csv"
 ####################################################################################
 
 library(ggplot2)
@@ -94,24 +92,19 @@ p = ggplot(units_detected, aes(x = units, y = species)) +
   labs(title = "Species detections across sampling units", x = "Number of units with a detection", y = "") +
   theme_minimal(); print(p)
 
-# TODO: Exclude species that were never detected
+# Exclude species that were never detected
 message("The following species were never detected and are excluded from the model:")
 species_never_detected = units_detected %>% filter(units == 0) %>% pull(species)
 print(species_never_detected)
 ylist[as.character(species_never_detected)] <- NULL
 species = names(ylist)
 
-# Get environmental data
-env_data = read.csv(path_unit_key)
-env_data = env_data %>% filter(unit %in% units) %>% select(unit, stratum) %>% distinct()
-strata = c('STAND INIT', 'COMP EXCL', 'THINNED', 'MATURE')
-x_stratum = env_data %>%
-  mutate(unit = factor(unit, levels = units), stratum = factor(stratum, levels = strata)) %>%
-  arrange(unit) %>% select(unit, stratum) # arrange to match y
-
 ##### Following https://jamesepaterson.github.io/jamespatersonblog/2024-12-08_multispeciesoccupancymodels.html
 
-# Restructure detection history data to summarize how many surveys a species was detected at
+# Restructure detection history data as detection frequency (i.e. how many surveys a species was detected at).
+# Modeling detection frequency as a binomial random variable is computationally efficient. However, noet that
+# this assumes equal survey effort across units, and prevents the modeling of (detection) covariates that vary
+# by survey!
 y = matrix(data = NA, nrow = length(units), ncol = length(species))
 rownames(y) = units
 colnames(y) = species
@@ -149,35 +142,36 @@ msom_simple <- tempfile()
 #Write model to file
 writeLines("
 model{
-  for(k in 1:nSobs){  # Loop through species
+  for(k in 1:nSobs){  # loop through species
+    
     # Likelihood
-    for(i in 1:nSites) { # Loop through sites
+    for(i in 1:nSites) { # loop through sites
       # Ecological model
       z[i, k] ~ dbern(psi[k])
       # Observation model
-      y[i, k] ~ dbin(p[k] * z[i, k], nOcc)
+      y[i, k] ~ dbin(p[k] * z[i, k], nOcc) # note that nOcc is assumed constant for all units and species
     }
     
     # Priors for Psi (species level)
-    lpsi[k] ~ dnorm(mu.lpsi, tau.lpsi)
-    psi[k] <- ilogit(lpsi[k])
+    lpsi[k] ~ dnorm(mu.lpsi, tau.lpsi) # logit-scale occupancy probability for species k
+    psi[k] <- ilogit(lpsi[k])          # occupancy probability for species k
     
     # Priors for p (species level)
-    lp[k] ~ dnorm(mu.lp, tau.lp)
-    p[k] <- ilogit(lp[k])
+    lp[k] ~ dnorm(mu.lp, tau.lp) # logit-scale detection probability for species k
+    p[k] <- ilogit(lp[k])        # detection probability for species k
   }
   
   # Hyperpriors for Psi (community level)
-  psi.mean ~ dbeta(1, 1)
-  mu.lpsi <- logit(psi.mean)
-  sd.lpsi ~ dunif(0, 5)
-  tau.lpsi <- 1/sd.lpsi^2
+  psi.mean ~ dbeta(1, 1)     # community mean occupancy probability
+  mu.lpsi <- logit(psi.mean) # mean of the species-specific logit-scale occupancy
+  sd.lpsi ~ dunif(0, 5)      # standard deviation of logit-scale occpuancy among species
+  tau.lpsi <- 1/sd.lpsi^2    # precision (inverse variance) of logit-scale occupancy
   
   # Hyperpriors for p (community level)
-  p.mean ~ dbeta(1, 1)
-  mu.lp <- logit(p.mean)
-  sd.lp ~ dunif(0, 5)
-  tau.lp <- 1/sd.lp^2
+  p.mean ~ dbeta(1, 1)       # community mean detection probability
+  mu.lp <- logit(p.mean)     # mean of species-specific logit-scale detection probability
+  sd.lp ~ dunif(0, 5)        # standard deviation of logit-scale detection among species
+  tau.lp <- 1/sd.lp^2        # precision of logit-scale detection
 }
 ", con = msom_simple)
 
