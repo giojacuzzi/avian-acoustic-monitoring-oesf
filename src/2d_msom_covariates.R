@@ -4,7 +4,7 @@
 # INPUT:
 path_community_survey_data = "data/cache/1_derive_community_array/community_survey_data.rds"
 path_environmental_data = "data/environment/PAM_PreHarvest_Habitat_results_DD_WD_TM.xlsx"
-path_unit_key = "data/unit_key.csv"
+path_site_key = "data/unit_key.csv"
 ####################################################################################
 
 library(ggplot2)
@@ -45,24 +45,24 @@ for (sp in species) {
   xlist_yday[[sp]] = covariate_yday_matrix
 }
 
-# Discard units with no survey observations and surveys with no unit observations
-unit_survey_counts = lapply(ylist, function(x) { rowSums(!is.na(x))})
-surveys_per_unit = as.data.frame(t(do.call(rbind, unit_survey_counts)))
-units_not_surveyed = rownames(surveys_per_unit)[rowSums(surveys_per_unit) == 0]
-if (length(units_not_surveyed) > 0) {
-  message("Discarding ", length(units_not_surveyed), " units with no survey observations")
+# Discard sites with no survey observations and surveys with no site observations
+site_survey_counts = lapply(ylist, function(x) { rowSums(!is.na(x))})
+surveys_per_site = as.data.frame(t(do.call(rbind, site_survey_counts)))
+sites_not_surveyed = rownames(surveys_per_site)[rowSums(surveys_per_site) == 0]
+if (length(sites_not_surveyed) > 0) {
+  message("Discarding ", length(sites_not_surveyed), " sites with no survey observations")
   ylist = lapply(ylist, function(mat) {
-    mat[!(rownames(mat) %in% units_not_surveyed), , drop = FALSE]
+    mat[!(rownames(mat) %in% sites_not_surveyed), , drop = FALSE]
   })
   xlist_yday = lapply(xlist_yday, function(mat) {
-    mat[!(rownames(mat) %in% units_not_surveyed), , drop = FALSE]
+    mat[!(rownames(mat) %in% sites_not_surveyed), , drop = FALSE]
   })
 }
-survey_unit_counts = lapply(ylist, function(x) { colSums(!is.na(x))})
-units_per_survey = as.data.frame(t(do.call(rbind, survey_unit_counts)))
-surveys_not_conducted = rownames(units_per_survey)[rowSums(units_per_survey) == 0]
+survey_site_counts = lapply(ylist, function(x) { colSums(!is.na(x))})
+sites_per_survey = as.data.frame(t(do.call(rbind, survey_site_counts)))
+surveys_not_conducted = rownames(sites_per_survey)[rowSums(sites_per_survey) == 0]
 if (length(surveys_not_conducted) > 0) {
-  message("Discarding ", length(surveys_not_conducted), " surveys with no unit observations")
+  message("Discarding ", length(surveys_not_conducted), " surveys with no site observations")
   ylist = lapply(ylist, function(mat) {
     mat[, !(colnames(mat) %in% surveys_not_conducted), drop = FALSE]
   })
@@ -71,204 +71,189 @@ if (length(surveys_not_conducted) > 0) {
   })
 }
 
-units = rownames(surveys_per_unit)[rowSums(surveys_per_unit) != 0]
-surveys = rownames(units_per_survey)[rowSums(units_per_survey) != 0]
+sites   = rownames(surveys_per_site)[rowSums(surveys_per_site) != 0]
+surveys = rownames(sites_per_survey)[rowSums(sites_per_survey) != 0]
 
 # Inspect the detection history and covariate data
 lapply(ylist, head)
 lapply(xlist_yday, head)
 
-message("Frequency distribution of number of surveys conducted per unit:")
+message("Frequency distribution of number of surveys conducted per site:")
 print(table(apply(!is.na(ylist[[1]]), 1, sum)))
 
 message("Generating summary plots for detection history data")
 
-# Plot detected number of species per unit
-species_per_unit = setNames(rep(0, length(units)), units)
+# Plot detected number of species per site
+species_per_site = setNames(rep(0, length(sites)), sites)
 for (sp in ylist) {
   detected = rowSums(sp, na.rm = TRUE) > 0
-  species_per_unit[detected] = species_per_unit[detected] + 1
+  species_per_site[detected] = species_per_site[detected] + 1
 }
-species_per_unit = data.frame(
-  unit = names(species_per_unit),
-  species_detected = as.vector(species_per_unit)
+species_per_site = data.frame(
+  site = names(species_per_site),
+  species_detected = as.vector(species_per_site)
 )
-mean_species_detected = mean(species_per_unit$species_detected)
-p = ggplot(species_per_unit, aes(x = species_detected)) +
+mean_species_detected = mean(species_per_site$species_detected)
+p = ggplot(species_per_site, aes(x = species_detected)) +
   geom_histogram(binwidth = 1) +
   geom_vline(xintercept = mean_species_detected, color = "blue") +
-  labs(title = "Naive species richness per unit", x = "Number of species detected", y = "Number of units") +
+  labs(title = "Naive species richness per site", x = "Number of species detected", y = "Number of sites") +
   theme_minimal(); print(p)
 
 # Plot species detection frequency distribution
-units_detected = sapply(ylist, function(mat) {
+sites_detected = sapply(ylist, function(mat) {
   sum(apply(mat, 1, function(x) any(x == 1, na.rm = TRUE)))
 })
-units_detected = data.frame(species = names(units_detected), units = units_detected) %>%
-  arrange(desc(units)) %>% mutate(species = factor(species, levels = rev(species)))
-p = ggplot(units_detected, aes(x = units, y = species)) +
+sites_detected = data.frame(species = names(sites_detected), sites = sites_detected) %>%
+  arrange(desc(sites)) %>% mutate(species = factor(species, levels = rev(species)))
+p = ggplot(sites_detected, aes(x = sites, y = species)) +
   geom_bar(stat = "identity") +
-  labs(title = "Species detections across sampling units", x = "Number of units with a detection", y = "") +
+  labs(title = "Species detections across sampling sites", x = "Number of sites with a detection", y = "") +
   theme_minimal(); print(p)
 
 # Exclude species that were never detected
 message("The following species were never detected and are excluded from the model:")
-species_never_detected = units_detected %>% filter(units == 0) %>% pull(species)
+species_never_detected = sites_detected %>% filter(sites == 0) %>% pull(species)
 print(species_never_detected)
 ylist[as.character(species_never_detected)]      <- NULL
 xlist_yday[as.character(species_never_detected)] <- NULL
 species = names(ylist)
 
-# Format y for modeling as a 3D array (site × survey × species)
+# Format observation detection-nondetection and covariate data for modeling as 3D arrays (site × survey × species)
+
+# Observed detection-nondetection data
 y = array(NA,
-          dim = c(length(units), length(surveys), length(species)),
-          dimnames = list(site = units, survey = surveys, species = species))
+          dim = c(length(sites), length(surveys), length(species)),
+          dimnames = list(site = sites, survey = surveys, species = species))
 for (sp in seq_along(ylist)) {
   y[, , sp] = as.matrix(ylist[[sp]])
 }
 
+# Detection covariate data
+# TODO: Standardize
 x_yday = array(NA,
-               dim = c(length(units), length(surveys), length(species)),
-               dimnames = list(site = units, survey = surveys, species = species))
+               dim = c(length(sites), length(surveys), length(species)),
+               dimnames = list(site = sites, survey = surveys, species = species))
 for (sp in seq_along(xlist_yday)) {
   x_yday[, , sp] = as.matrix(xlist_yday[[sp]])
 }
 
 # Left-align data (moving any missing NA surveys to the right) to allow for direct indexing by number of surveys per site
-left_align_row <- function(x) {
-  non_na <- x[!is.na(x)]
-  len <- length(x)
-  c(non_na, rep(NA, len - length(non_na)))
+y_unaligned = y
+x_yday_unaligned = x_yday
+left_align_row = function(x) {
+  non_na = x[!is.na(x)]
+  c(non_na, rep(NA, length(x) - length(non_na)))
 }
-
-y_new = y
-x_yday_new = x_yday
 for (sp in dimnames(y)[[3]]) {
-  y_mat <- y[, , sp]
-  y_aligned <- t(apply(y_mat, 1, left_align_row))
-  dimnames(y_aligned) <- dimnames(y_mat)
-  y_new[, , sp] <- y_aligned
+  sp_y_mat = y[, , sp]
+  sp_y_aligned = t(apply(sp_y_mat, 1, left_align_row))
+  dimnames(sp_y_aligned) = dimnames(sp_y_mat)
+  y[, , sp] = sp_y_aligned
   
-  x_yday_mat <- x_yday[, , sp]
-  x_yday_aligned <- t(apply(x_yday_mat, 1, left_align_row))
-  dimnames(x_yday_aligned) <- dimnames(x_yday_mat)
-  x_yday_new[, , sp] <- x_yday_aligned
+  sp_x_yday_mat = x_yday[, , sp]
+  sp_x_yday_aligned = t(apply(sp_x_yday_mat, 1, left_align_row))
+  dimnames(sp_x_yday_aligned) = dimnames(sp_x_yday_mat)
+  x_yday[, , sp] = sp_x_yday_aligned
 }
-
-# Number of surveys per site (excluding NAs)
-nOcc <- apply(!is.na(y_new[, , 1]), 1, sum)
+n_surveys_per_site <- apply(!is.na(y[, , 1]), 1, sum)
 
 # # Get environmental data
-# env_data = read.csv(path_unit_key)
-# env_data = env_data %>% filter(unit %in% units) %>% select(unit, stratum) %>% distinct()
+# env_data = read.csv(path_site_key)
+# env_data = env_data %>% filter(unit %in% sites) %>% select(unit, stratum) %>% distinct()
 # strata = c('STAND INIT', 'COMP EXCL', 'THINNED', 'MATURE')
 # x_stratum = env_data %>%
-#   mutate(unit = factor(unit, levels = units), stratum = factor(stratum, levels = strata)) %>%
+#   mutate(unit = factor(unit, levels = sites), stratum = factor(stratum, levels = strata)) %>%
 #   arrange(unit) %>% select(unit, stratum) # arrange to match y
 
-y_flattened = matrix(data = NA, nrow = length(units), ncol = length(species))
-rownames(y_flattened) = units
-colnames(y_flattened) = species
-for (i in 1:length(units)) {
-  for (sp in 1:length(species)) {
-    y_flattened[i,sp] = sum(y_new[i, , sp], na.rm = TRUE)
-  }
+# Initialize latent occupancy state z[i] as 1 if a detection occurred at unit i, and 0 otherwise
+z = matrix(data = NA, nrow = length(sites), ncol = length(species), dimnames = list(sites, species))
+for (i in 1:length(sites)) {
+  for (sp in 1:length(species)) { z[i,sp] = sum(y[i, , sp], na.rm = TRUE) }
 }
-z = (y_flattened > 0)*1
-z[z == 0] = NA
+z = (z > 0) * 1
 
-# Pack up data for JAGS
-msom_jags_data = list(y        = y_new,           # detection-nondetection matrix
-                      x_yday   = x_yday_new,      # day of year detection covariate matrix
-                      nSpecies = length(species), # number of species observed
-                      nSites   = length(units),   # number of sites
-                      surveys  = as.vector(nOcc), # number of surveys per site vector
-                      z = z)
-# Look at structure
-str(msom_jags_data)
+msom_data = list(
+  y = y,                                   # detection-nondetection matrix
+  x_yday = x_yday,                         # day of year detection covariate matrix
+  K = length(species),                     # number of species observed
+  I = length(sites),                       # number of sites
+  surveys  = as.vector(n_surveys_per_site) # number of surveys per site
+)
+str(msom_data)
 
-# Hierarchical model
-# For fitting basic multi-species occupancy models, we can think of the components as
-# 1. Ecological model
-# 2. Observation model
-# 3. Priors that describe species level variation in psi and p
-# 4. Hyperpriors that describe parameters for the community 
-
-# Create and save file name "msom_simple.jags"
-# Identify filepath of model file
-msom_simple <- tempfile()
-
-#Write model to file
+# Specify hierarhical model and write to file
+model_file = tempfile()
 writeLines("
 model{
-  for(k in 1:nSpecies) {  # loop through species
-    
-    # Likelihood
-    for (i in 1:nSites) { # loop through sites
-      # Ecological model
+
+  for(k in 1:K) { # for each species
+    for (i in 1:I) { # for each site
+      
+      # Ecological process model for latent occurrence z
       z[i,k] ~ dbern(psi[k])
       
-      for (j in 1:surveys[i]) { # loop through surveys at site i
-      
-        logit(p[i,j,k]) <- alpha[k] + beta[k] * x_yday[i,j,k] # logit of detection prob depends on survey-specific covariate
+      for (j in 1:surveys[i]) { # for each survey at site i
+
+        # Observation model for observed data y
+        logit(p[i,j,k]) <- a0[k] + ayday[k] * x_yday[i,j,k] # logit of detection prob depends on survey-specific covariate
         
-        # Observation model
         y[i,j,k] ~ dbern(p[i,j,k] * z[i,k])
       }
     }
     
-    # Priors for Psi (species level)
+    # Priors for psi (species level)
     lpsi[k] ~ dnorm(mu.lpsi, tau.lpsi) # logit-scale occupancy probability for species k
     psi[k] <- ilogit(lpsi[k])          # occupancy probability for species k
-    
-    # Priors for p (species level)
-    # lp[k] ~ dnorm(mu.lp, tau.lp) # logit-scale detection probability for species k
-    # p[k] <- ilogit(lp[k])        # detection probability for species k
-    
+
     # Priors for detection intercept and slope (species level)
-    alpha[k] ~ dnorm(alpha.mean, tau.alpha) # baseline detectability of species k when the detection covariate
-    beta[k] ~ dnorm(beta.mean, tau.beta)    # species-specific slope describing how detection changes with the covariate
+    a0[k] ~ dnorm(mu.a0, tau.a0) # baseline detectability of species k when the detection covariate
+    ayday[k] ~ dnorm(mu.yday, tau.yday)    # species-specific slope describing how detection changes with the covariate
   }
   
-  # Hyperpriors for Psi (community level)
+  # Hyperpriors for psi (community level)
   psi.mean ~ dbeta(1, 1)     # community mean occupancy probability
   mu.lpsi <- logit(psi.mean) # mean of the species-specific logit-scale occupancy
   sd.lpsi ~ dunif(0, 5)      # standard deviation of logit-scale occpuancy among species
   tau.lpsi <- 1/sd.lpsi^2    # precision (inverse variance) of logit-scale occupancy
   
-  # Hyperpriors for p (community level)
-  # p.mean ~ dbeta(1, 1)       # community mean detection probability
-  # mu.lp <- logit(p.mean)     # mean of species-specific logit-scale detection probability
-  # sd.lp ~ dunif(0, 5)        # standard deviation of logit-scale detection among species
-  # tau.lp <- 1/sd.lp^2        # precision of logit-scale detection
+  # Hyperpriors for detection intercept (community level)
+  mu.a0 ~ dnorm(0, 0.001)   # community mean of species-specific intercepts (mean baseline detect prob across all species)
+  sd.a0 ~ dunif(0, 5)       # community standard deviation of species-specific intercepts (how much detectability varies between species)
+  tau.a0 <- 1 / pow(sd.a0, 2)
+
+  # Hyperpriors for yday covariate effect (community level)
+  mu.yday ~ dnorm(0, 0.001) # community mean of the species-specific slopes describing how detection changes with x_yday
+  sd.yday ~ dunif(0, 5)     # community standard deviation
+  tau.yday <- 1 / pow(sd.yday, 2)
   
-  # Hyperpriors for detection intercept
-  alpha.mean ~ dnorm(0, 0.001) # community-level mean of species-specific intercepts (mean baseline detect prob across all species)
-  sd.alpha ~ dunif(0, 5)       # community-level standard deviation of species-specific intercepts (how much detectability varies between species)
-  tau.alpha <- 1 / pow(sd.alpha, 2)
-
-  # Hyperpriors for detection slope (covariate effect)
-  beta.mean ~ dnorm(0, 0.001) # community-level mean of the species-specific slopes describing how detection changes with x_yday
-  sd.beta ~ dunif(0, 5)       # community-level standard deviation
-  tau.beta <- 1 / pow(sd.beta, 2)
+  # Derived quantities
+  for (k in 1:K) {
+    Nocc[k]  <- sum(z[,k]) # estimated number of occupied sites per species (among the sampled population of sites)
+  }
+  for (i in 1:I) {
+    Nsite[i] <- sum(z[i,]) # estimated number of species occuring per site (among the species that were detected anywhere)
+  }
 }
-", con = msom_simple)
-
-# Vector of monitored parameters
-wanted <- c("psi.mean", "alpha.mean", "beta.mean", "psi", "alpha", "beta")
+", con = model_file)
 
 message("Running JAGS (current time ", time_start <- Sys.time(), ")")
-msom_simple_out <- jags(msom_jags_data, NULL, wanted, msom_simple,
-                        n.chains = 3, n.adapt = 100, n.iter = 10000, 
-                        n.burnin = 5000, n.thin = 2, parallel = TRUE, DIC = FALSE)
-message("Finished running JAGS (", round(as.numeric(Sys.time() - time_start) / 60, 2), " minutes)")
 
-(summary = MCMCsummary(msom_simple_out))
-MCMCtrace(msom_simple_out$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'trace', Rhat = TRUE, n.eff = TRUE)
-MCMCtrace(msom_simple_out$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'density', Rhat = TRUE, n.eff = TRUE, ind = TRUE)
+msom = jags(data = msom_data,
+            inits = function() { list(z = z) }, # initial values to avoid data/model conflicts
+            parameters.to.save = c("psi.mean", "mu.a0", "mu.yday", "psi", "a0", "ayday", "Nsite", "Nocc"), # monitored parameters
+            model.file = model_file,
+            n.chains = 3, n.adapt = 100, n.iter = 10000, n.burnin = 5000, n.thin = 2,
+            parallel = TRUE, DIC = FALSE)
+
+message("Finished running JAGS (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)")
+
+(msom_summary = summary(msom))
+MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'trace', Rhat = TRUE, n.eff = TRUE)
+MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'density', Rhat = TRUE, n.eff = TRUE, ind = TRUE)
 
 # Put psi estimates in a dataframe
-psi_species_estimates <- summary(msom_simple_out) %>%
+psi_species_estimates <- msom_summary %>%
   as.data.frame(.) %>%
   mutate(parameter = row.names(.)) %>%
   # Filtering to only the estimates of psi for each species 
@@ -281,9 +266,9 @@ psi_species_estimates <- summary(msom_simple_out) %>%
 p = ggplot(psi_species_estimates, aes(x = factor(species, levels = species), y = mean)) +
   geom_point() +
   geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`), width = 0) +
-  geom_hline(yintercept = summary(msom_simple_out)["psi.mean", "mean"], color = "blue") +
-  geom_hline(yintercept = summary(msom_simple_out)["psi.mean", "2.5%"], color = "blue", linetype = "dashed") +
-  geom_hline(yintercept = summary(msom_simple_out)["psi.mean", "97.5%"], color = "blue", linetype = "dashed") +
+  geom_hline(yintercept = msom_summary["psi.mean", "mean"], color = "blue") +
+  geom_hline(yintercept = msom_summary["psi.mean", "2.5%"], color = "blue", linetype = "dashed") +
+  geom_hline(yintercept = msom_summary["psi.mean", "97.5%"], color = "blue", linetype = "dashed") +
   labs(title = "Occupancy probability", x = "Species", y = "Occupancy estimate") +
   scale_x_discrete(labels = psi_species_estimates$species)+ 
   scale_y_continuous(limits = c(0, 1.0), breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1.0)) +
@@ -291,16 +276,16 @@ p = ggplot(psi_species_estimates, aes(x = factor(species, levels = species), y =
   theme_minimal(); print(p)
 
 ## Predict mean detection probabilities across the observed range of yday values
-yday_seq = seq(min(x_yday_new, na.rm = TRUE), max(x_yday_new, na.rm = TRUE), by = 1)
+yday_seq = seq(min(x_yday, na.rm = TRUE), max(x_yday, na.rm = TRUE), by = 1)
 
 # For each species, calculate parameter posterior mean (and 95% credible interval) of detection probability
 # by transforming each MCMC sample from log-odds to probability and averaging over the samples
-alpha_samples = msom_simple_out$sims.list$alpha
-beta_samples  = msom_simple_out$sims.list$beta
+a0_samples = msom$sims.list$a0
+ayday_samples  = msom$sims.list$ayday
 species_yday_posterior = data.frame()
-for (k in 1:ncol(alpha_samples)) {
+for (k in 1:ncol(a0_samples)) {
   probs = sapply(yday_seq, function(x) {
-    plogis(alpha_samples[, k] + beta_samples[, k] * x)
+    plogis(a0_samples[, k] + ayday_samples[, k] * x)
   })
   probs_mean_ci = apply(probs, 2, function(x) {
     c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
@@ -309,11 +294,11 @@ for (k in 1:ncol(alpha_samples)) {
   ))
 }
 
-# For the community, calculate hyperparameter posterior mean (and 95% credible interval) of detection probability
-alpha_mean_samples = msom_simple_out$sims.list$alpha.mean
-beta_mean_samples  = msom_simple_out$sims.list$beta.mean
+# For the community, calculate hyperparameter posterior mean (and 95% CRI) of detection probability
+a0_mean_samples    = msom$sims.list$mu.a0
+yday_mean_samples  = msom$sims.list$mu.yday
 probs = sapply(yday_seq, function(x) {
-  plogis(alpha_mean_samples + beta_mean_samples * x)
+  plogis(a0_mean_samples + yday_mean_samples * x)
 })
 probs_mean_ci = apply(probs, 2, function(x) {
   c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
@@ -321,21 +306,27 @@ probs_mean_ci = apply(probs, 2, function(x) {
 community_yday_posterior = data.frame(yday = yday_seq, mean = probs_mean_ci["mean", ], lower = probs_mean_ci["lower", ], upper = probs_mean_ci["upper", ], species = "Community mean")
 
 # Visualize relationship between yday and detection probability for the community
-ggplot() +
+p = ggplot() +
   geom_line(data = species_yday_posterior, aes(x = yday, y = mean, group = species), alpha = 0.2) +
   geom_line(data = community_yday_posterior, aes(x = yday, y = mean), color = "blue", linewidth = 1.5) +
-  geom_ribbon(data = community_yday_posterior, aes(x = yday, y = mean, ymin = lower, ymax = upper), alpha = 0.2, fill = NA, color = "blue", linetype = "dashed") +
+  geom_ribbon(data = community_yday_posterior, aes(x = yday, y = mean, ymin = lower, ymax = upper), fill = NA, color = "blue", linetype = "dashed") +
   labs(x = "Day of year", y = "Detection probability", title = "Detected community") +
-  theme_minimal()
+  theme_minimal(); print(p)
 
 # Visualize relationship between yday and detection probability for a specific species
 species_name = "Orange-crowned Warbler"
 species_idx = as.character(which(species == species_name))
-ggplot(data = species_yday_posterior %>% filter(species == species_idx), aes(x = yday, y = mean)) +
+p = ggplot(data = species_yday_posterior %>% filter(species == species_idx), aes(x = yday, y = mean)) +
   geom_line() +
   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
   lims(y = c(0.0, 1.0)) +
   labs(x = "Day of year", y = "Detection probability", title = paste0(species_name, " (", species_idx,")")) +
+  theme_minimal(); print(p)
+
+# Plot observed versus estimated number of species per site
+Nsite_posterior = as.data.frame(msom_summary[grepl("^Nsite", rownames(msom_summary)), ])
+Nsite_posterior$site = rownames(Nsite_posterior)
+ggplot(Nsite_posterior, aes(x = site, y = mean)) +
+  geom_pointrange(aes(ymin = `2.5%`, ymax = `97.5%`)) +
+  labs(x = "Site", y = "Estimated richness", title = "Estimated number of species per site") +
   theme_minimal()
-
-
