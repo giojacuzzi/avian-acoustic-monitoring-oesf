@@ -111,12 +111,13 @@ p = ggplot(sites_detected, aes(x = sites, y = species)) +
   labs(title = "Species detections across sampling sites", x = "Number of sites with a detection", y = "") +
   theme_minimal(); print(p)
 
-# Exclude species that were never detected
+# Exclude species that were detected below a minimum number of sites
 message("The following species were never detected and are excluded from the model:")
-species_never_detected = sites_detected %>% filter(sites == 0) %>% pull(species)
-print(species_never_detected)
-ylist[as.character(species_never_detected)]      <- NULL
-xlist_yday[as.character(species_never_detected)] <- NULL
+min_sites_detected = 5
+species_to_remove = sites_detected %>% filter(sites < min_sites_detected) %>% pull(species)
+print(species_to_remove)
+ylist[as.character(species_to_remove)]      <- NULL
+xlist_yday[as.character(species_to_remove)] <- NULL
 species = names(ylist)
 
 # Format observation detection-nondetection and covariate data for modeling as 3D arrays (site × survey × species)
@@ -201,7 +202,7 @@ model{
     for (i in 1:I) { # for each site
       
       # Ecological process model for latent occurrence z
-      logit(psi[i, k]) <- bstratum[k, x_stratum[i]]
+      logit(psi[i, k]) <- b0[k] + bstratum[k, x_stratum[i]]
       z[i,k] ~ dbern(psi[i, k])
       
       for (j in 1:surveys[i]) { # for each survey at site i
@@ -214,31 +215,37 @@ model{
     }
     
     # Priors for occupancy slopes (species level)
+    b0[k] ~ dnorm(mu.b0, tau.b0)                            # baseline occupancy of species k when the x_yday variable is zero
     for (s in 1:n_strata) {
-      bstratum[k, s] ~ dnorm(mu.stratum[s], tau.stratum[s])
+      bstratum[k, s] ~ dnorm(mu.stratum[s], tau.stratum[s]) # species-specific effect of stratum on occupancy
     }
 
     # Priors for detection intercepts and slopes (species level)
-    a0[k] ~ dnorm(mu.a0, tau.a0) # baseline detectability of species k when the x_yday variable is zero
-    ayday[k] ~ dnorm(mu.yday, tau.yday)    # species-specific slope describing how detection changes with the covariate
+    a0[k] ~ dnorm(mu.a0, tau.a0)           # baseline detectability of species k when the x_yday variable is zero
+    ayday[k] ~ dnorm(mu.yday, tau.yday)    # species-specific effect of yday on detection
   }
+  
+  # Hyperpriors for occupancy intercept (community level)
+  mu.b0 ~ dnorm(0, 0.01)
+  sd.b0 ~ dunif(0, 5) # TODO: choose bounds of uniform by trial and error?
+  tau.b0 <- pow(sd.b0, -2)
   
   # Hyperpriors for stratum covariate effect (community level)
   for (s in 1:n_strata) {
     mu.stratum[s] ~ dnorm(0, 0.001)       # community mean effect of stratum s
     sd.stratum[s] ~ dunif(0, 5)
-    tau.stratum[s] <- 1 / pow(sd.stratum[s], 2)
+    tau.stratum[s] <- pow(sd.stratum[s], -2)
   }
   
   # Hyperpriors for detection intercept (community level)
   mu.a0 ~ dnorm(0, 0.001)   # community mean of species-specific intercepts on the logit scale (mean baseline detect prob across all species)
   sd.a0 ~ dunif(0, 5)       # community standard deviation of species-specific intercepts (how much detectability varies between species)
-  tau.a0 <- 1 / pow(sd.a0, 2)
+  tau.a0 <- pow(sd.a0, -2)
 
   # Hyperpriors for yday covariate effect (community level)
   mu.yday ~ dnorm(0, 0.001) # community mean of the species-specific slopes on the logit scale describing how detection changes with x_yday
   sd.yday ~ dunif(0, 5)     # community standard deviation
-  tau.yday <- 1 / pow(sd.yday, 2)
+  tau.yday <- pow(sd.yday, -2)
   
   # Derived quantities
   for (k in 1:K) {
@@ -247,7 +254,6 @@ model{
   for (i in 1:I) {
     Nsite[i] <- sum(z[i, ]) # estimated number of species occuring per site (among the species that were detected anywhere)
   }
-  psi.mean <- sum(z[ , ]) / (I * K) # community mean occupancy probability
 }
 ", con = model_file)
 
@@ -255,58 +261,97 @@ message("Running JAGS (current time ", time_start <- Sys.time(), ")")
 
 msom = jags(data = msom_data,
             inits = function() { list(z = z) }, # initial values to avoid data/model conflicts
-            parameters.to.save = c("mu.stratum", "bstratum", "mu.a0", "mu.yday", "a0", "ayday", "Nsite", "Nocc", "psi.mean"), # monitored parameters
+            parameters.to.save = c("mu.b0", "mu.stratum", "b0", "bstratum", "mu.a0", "mu.yday", "a0", "ayday", "Nsite", "Nocc", "psi.mean"), # monitored parameters
             model.file = model_file,
             n.chains = 3, n.adapt = 100, n.iter = 10000, n.burnin = 5000, n.thin = 2,
             parallel = TRUE, DIC = FALSE)
 
 message("Finished running JAGS (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)")
 
+## Diagnostics, checking chains for mixing and convergence with trace and density plots
+# https://m-clark.github.io/bayesian-basics/diagnostics.html#monitoring-convergence
+
+# We want Rhat values that are very close to 1.0. This is a test statistic for testing if the variance within chains is different than the variance between chains. It is meant to test if each chain was sampling from similar distributions.
 (msom_summary = summary(msom))
+mcmc_summary = MCMCsummary(msom)
+message("The following parameters may not have converged:")
+params_poor_rhat = rownames(mcmc_summary[mcmc_summary$Rhat > 1.01, ])
+# species_poor_rhat = as.numeric(gsub(".*\\[(\\d+)\\]", "\\1", params_poor_rhat))
+# print(mcmc_summary[params_poor_rhat, ] %>% mutate(species = species[species_poor_rhat]))
+
+# Examine trace plots for good mixing and convergence among chains. Each chain is displayed in a different colour. This means random paths exploring a lot of the parameter space on the y-axis without a clear pattern and each chain converging on the same value.
 MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'trace', Rhat = TRUE, n.eff = TRUE)
+
+# Examine density plots for not super-wide or with irregular peaks. The more parameter space the density plots include, the higher the uncertainty in a parameter estimate. The density curves don’t have to be normal but shouldn’t have multiple peaks and each chain colour should have approximately the same peak.
 MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'density', Rhat = TRUE, n.eff = TRUE, ind = TRUE)
 
-## Predict mean detection probabilities across the observed range of yday values
+# TODO: Gelman-Rubin convergence diagnostics (Potential Scale Reduction Factor). Values substantially above 1 indicate lack of convergence. If the chains have not converged, Bayesian credible intervals based on the t-distribution are too wide, and have the potential to shrink by this factor if the MCMC run is continued.
+# coda::gelman.diag(msom$samples)
+
+## Predict mean occupancy probabilities across the categories of forest strata
 
 # For each species, calculate parameter posterior means (and 95% credible intervals) of occupancy probability
 # by transforming each MCMC sample from log-odds to probability and averaging over the samples per stratum
+b0_samples       = msom$sims.list$b0
+bstratum_samples = msom$sims.list$bstratum
 species_stratum_posterior = data.frame()
-b0_samples = msom$sims.list$bstratum
-for (sp in species) {
-  species_idx = which(species == sp)
-  occupancy_summary = data.frame(stratum = factor(strata, levels = strata))
-  occupancy_summary$species = sp
-  occupancy_summary$mean    = apply(b0_samples[ , species_idx, ], 2, function(x) mean(plogis(x)))
-  occupancy_summary$lower   = apply(b0_samples[ , species_idx, ], 2, function(x) quantile(plogis(x), 0.025))
-  occupancy_summary$upper   = apply(b0_samples[ , species_idx, ], 2, function(x) quantile(plogis(x), 0.975))
-  species_stratum_posterior = rbind(species_stratum_posterior, occupancy_summary)
+for (k in 1:ncol(b0_samples)) {
+  for (l in 1:length(strata)) {
+    probs = sapply(l, function(l) {
+      plogis(b0_samples[, k] + bstratum_samples[, k, l])
+    })
+    probs_mean_ci = apply(probs, 2, function(x) {
+      c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
+    })
+    species_stratum_posterior = rbind(species_stratum_posterior, data.frame(
+      stratum = l, mean = probs_mean_ci["mean", ], lower = probs_mean_ci["lower", ], upper = probs_mean_ci["upper", ], sp = species[k]
+    ))
+  }
+}
+species_stratum_posterior = species_stratum_posterior %>% arrange(mean) %>% mutate(sp = factor(sp, levels = species))
+
+# For the community, calculate hyperparameter posterior mean (and 95% CRI) of detection probability
+b0_mean_samples       = msom$sims.list$mu.b0
+stratum_mean_samples  = msom$sims.list$mu.stratum
+community_stratum_posterior = data.frame()
+for (l in 1:length(strata)) {
+  probs = sapply(l, function(x) {
+    plogis(b0_mean_samples + stratum_mean_samples[, l])
+  })
+  probs_mean_ci = apply(probs, 2, function(x) {
+    c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
+  })
+  community_stratum_posterior = rbind(community_stratum_posterior, data.frame(
+    stratum = l, mean = probs_mean_ci["mean", ], lower = probs_mean_ci["lower", ], upper = probs_mean_ci["upper", ], sp = "Community mean"
+  ))
 }
 
 # Visualize relationship between stratum and occupancy probability for the community
-# TODO: Add a line for community mean
-stratum_name = "THINNED"
-ggplot(species_stratum_posterior %>% filter(stratum == stratum_name) %>% arrange(mean) %>% mutate(species = factor(species, levels = species)),
-       aes(x = mean, y = species)) +
-  geom_point() +
-  geom_errorbar(aes(xmin = lower, xmax = upper), width = 0.2, alpha = 0.2) +
-  xlim(0.0, 1.0) +
-  labs(title = stratum_name, x = "Occupancy probability", y = "") +
-  theme_minimal()
+for (stratum_name in strata) {
+  stratum_idx  = which(strata == stratum_name)
+  p = ggplot() +
+    geom_point(data = species_stratum_posterior %>% filter(stratum == stratum_idx) %>% arrange(mean) %>% mutate(sp = factor(sp, levels = unique(sp))),
+               aes(x = mean, y = sp)) +
+    geom_errorbar(data = species_stratum_posterior %>% filter(stratum == stratum_idx) %>% arrange(mean) %>% mutate(sp = factor(sp, levels = unique(sp))),
+                  aes(x = mean, y = sp, xmin = lower, xmax = upper), width = 0.2, alpha = 0.2) +
+    geom_vline(xintercept = community_stratum_posterior %>% filter(stratum == stratum_idx) %>% pull(mean), color = "blue") +
+    geom_vline(xintercept = community_stratum_posterior %>% filter(stratum == stratum_idx) %>% pull(lower), color = "blue", linetype = "dashed") +
+    geom_vline(xintercept = community_stratum_posterior %>% filter(stratum == stratum_idx) %>% pull(upper), color = "blue", linetype = "dashed") +
+    xlim(0.0, 1.0) +
+    labs(title = stratum_name, x = "Occupancy probability", y = "") +
+    theme_classic(); print(p)
+}
 
 # Visualize relationship between stratum and occupancy probability for a specific species
 species_name = "Brown Creeper"
 species_idx = which(species == species_name)
-occupancy_summary = data.frame(stratum = factor(strata, levels = strata))
-occupancy_summary$species = species_name
-occupancy_summary$mean    = apply(b0_samples[ , species_idx, ], 2, function(x) mean(plogis(x)))
-occupancy_summary$lower   = apply(b0_samples[ , species_idx, ], 2, function(x) quantile(plogis(x), 0.025))
-occupancy_summary$upper   = apply(b0_samples[ , species_idx, ], 2, function(x) quantile(plogis(x), 0.975))
-ggplot(occupancy_summary, aes(x = stratum, y = mean)) +
+p = ggplot(species_stratum_posterior %>% filter(sp == species_name) %>% mutate(stratum = factor(strata[stratum], levels = strata)),
+           aes(x = stratum, y = mean)) +
   geom_point(size = 3) +
   geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
   ylim(0.0, 1.0) +
-  labs(title = species_name, x = "Habitat", y = "Occupancy probability") +
-  theme_minimal()
+  labs(title = paste0(species_name, " (", species_idx,")"), x = "Stratum", y = "Occupancy probability") +
+  theme_classic(); print(p)
 
 ## Predict mean detection probabilities across the observed range of yday values
 yday_seq = seq(min(x_yday, na.rm = TRUE), max(x_yday, na.rm = TRUE), by = 1)
@@ -344,7 +389,7 @@ p = ggplot() +
   geom_line(data = community_yday_posterior, aes(x = yday, y = mean), color = "blue", linewidth = 1.5) +
   geom_ribbon(data = community_yday_posterior, aes(x = yday, y = mean, ymin = lower, ymax = upper), fill = NA, color = "blue", linetype = "dashed") +
   labs(x = "Day of year", y = "Detection probability", title = "Detected community") +
-  theme_minimal(); print(p)
+  theme_classic(); print(p)
 
 # Visualize relationship between yday and detection probability for a specific species
 species_name = "Orange-crowned Warbler"
@@ -354,7 +399,7 @@ p = ggplot(data = species_yday_posterior %>% filter(species == species_idx), aes
   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
   lims(y = c(0.0, 1.0)) +
   labs(x = "Day of year", y = "Detection probability", title = paste0(species_name, " (", species_idx,")")) +
-  theme_minimal(); print(p)
+  theme_classic(); print(p)
 
 # Visualize estimated number of species per site
 Nsite_posterior = as.data.frame(msom_summary[grepl("^Nsite", rownames(msom_summary)), ])
@@ -362,4 +407,4 @@ Nsite_posterior$site = rownames(Nsite_posterior)
 ggplot(Nsite_posterior, aes(x = site, y = mean)) +
   geom_pointrange(aes(ymin = `2.5%`, ymax = `97.5%`)) +
   labs(x = "Site", y = "Estimated richness", title = "Estimated number of species per site") +
-  theme_minimal()
+  theme_classic()
