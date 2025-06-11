@@ -18,6 +18,8 @@
 *.svg
 *.ai
 *.parquet
+*.feather
+*.rds
 
 # Model and training files
 /data/training/*
