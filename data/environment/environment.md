@@ -1,0 +1,7 @@
+| Resource                 | Description                                                  | Download                                                     |
+| ------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| Origin year              | https://data-wadnr.opendata.arcgis.com/maps/wadnr::rs-fris-combined-origin-year-1/about | https://fortress.wa.gov/dnr/adminsa/gisdata/datadownload/rs_fris_origin_year.zip |
+| Remote sensing rasters   | https://data-wadnr.opendata.arcgis.com/maps/wadnr::raster-all-rs-fris-rasters/about?path= | https://wadnr.maps.arcgis.com/sharing/rest/content/items/cfdfaab44b9b49adb2740e84ed722b68/info/metadata/metadata.xml?format=default&output=html |
+| Hydrography watercourses | https://data-wadnr.opendata.arcgis.com/datasets/wadnr::dnr-hydrography-watercourses-forest-practices-regulation/about | https://data-wadnr.opendata.arcgis.com/datasets/wadnr::dnr-hydrography-watercourses-forest-practices-regulation/about |
+| Hydrography water bodies | https://data-wadnr.opendata.arcgis.com/datasets/wadnr::dnr-hydrography-water-bodies-forest-practices-regulation/about | https://data-wadnr.opendata.arcgis.com/datasets/wadnr::dnr-hydrography-water-bodies-forest-practices-regulation/about |
+| Topography               | https://gis-dev.dnr.wa.gov/site2/rest/services/Public_Forest_Mgmt/WADNR_PUBLIC_Topography/MapServer | ?                                                            |
