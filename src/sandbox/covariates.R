@@ -46,10 +46,6 @@ site_data = aru_sites
 # Study area bounding buffer
 study_area = st_buffer(st_as_sfc(st_bbox(aru_sites)), dist = 100)
 
-# Roads
-roads = st_read('data/environment/GIS Data/T3roads.shp') %>%
-  st_zm(drop = TRUE) %>% janitor::clean_names() %>% st_transform(crs = crs_m)
-
 # Strata and forest inventory units
 
   # Seral stage class
@@ -287,8 +283,24 @@ mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
 # Edge density
 
 # Density of roads (km/km2)
+  
+  # TODO: Hoh mainline road is missing from both datasets?
+  
+  roads_wadnr = st_read('data/environment/GIS Data/T3roads.shp') %>%
+    st_zm(drop = TRUE) %>% janitor::clean_names() %>% st_transform(crs = crs_m) %>% select(road_usgs1, road_surfa, geometry)
+
+  mapview(roads_wadnr, zcol = 'road_usgs1')
+  
+  roads_usgs = st_read('/Users/giojacuzzi/repos/avian-acoustic-monitoring-oesf/data/environment/TRAN_Washington_State_Shape/Shape/Trans_RoadSegment_0.shp')
+  roads_usgs = roads_usgs %>% st_crop(st_transform(study_area, st_crs(roads_usgs))) %>% st_transform(crs_m)
 
 # Density of streams (km/km2)
+  
+  watercourses = st_read('data/environment/DNR_Hydrography/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation.shp')
+  watercourses = watercourses %>% st_crop(st_transform(study_area, st_crs(watercourses))) %>% st_transform(crs_m) %>% janitor::clean_names()
+  
+  waterbodies = st_read('data/environment/DNR_Hydrography/DNR_Hydrography_-_Water_Bodies_-_Forest_Practices_Regulation/DNR_Hydrography_-_Water_Bodies_-_Forest_Practices_Regulation.shp')
+  waterbodies = waterbodies %>% st_crop(st_transform(study_area, st_crs(waterbodies))) %>% st_transform(crs_m) %>% janitor::clean_names()
 
 ####################################################################################################
 # Local habitat data
