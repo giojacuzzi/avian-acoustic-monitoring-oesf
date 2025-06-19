@@ -5,26 +5,11 @@ library(mapview)
 options(mapview.maxpixels = 9000000)
 library(ggrepel)
 theme_set(theme_minimal())
+library(landscapemetrics)
+library(lwgeom)
+library(units)
 
 # TODO: GET RASTER DATED FOR 2020!
-
-## Helper functions
-
-# Load a raster, cropped, projected, and masked to the study area
-load_raster = function(path_rast) {
-  r = rast(path_rast)
-  r_crop = crop(r, vect(st_transform(study_area, crs(r))))
-  r_proj = project(r_crop, crs(study_area))
-  r_mask = mask(r_proj, vect(study_area))
-  return(r_mask)
-}
-
-# Computer raster function value for a buffer
-computer_raster_buffer_value_func = function(raster, points, buffer_distance, func) {
-  r = project(raster, crs(points))
-  site_buffers = st_buffer(points, dist = buffer_distance)
-  buffer_values = terra::extract(r, vect(site_buffers), fun = func, na.rm = TRUE)
-}
 
 ### Study area
 
@@ -36,8 +21,6 @@ aru_sites = st_read('data/environment/GIS Data/AcousticStations.shp') %>%
   st_as_sf(coords = c("utm_e", "utm_n"), crs = crs_m) %>%
   select(name, ces, treatment, geometry) %>% rename(site = name)
 mapview(aru_sites, label = aru_sites$name)
-
-site_data = aru_sites
 
 # site_data = gpx::read_gpx('data/sites/PAMlocations20230510.gpx')$waypoints %>%
 #   janitor::clean_names() %>% rename(site = name) %>% select(site, latitude, longitude)
@@ -55,7 +38,10 @@ study_area = st_buffer(st_as_sfc(st_bbox(aru_sites)), dist = 100)
   poly_seral_class = st_read('data/environment/GIS Data/Forest Development Strata/AgeStrataFixedDIS_RSFRIS20200130.shp') %>%
     st_transform(crs_m) %>% janitor::clean_names() %>% mutate(class_seral = stratum %>% str_to_lower()) %>%
     mutate(stratum = factor(stratum, levels = seral_classes)) %>% select(-stratum)
+  
   # rsfris_units = st_set_crs(st_read('data/environment/GIS Data/Forest Development Strata/AgeStrataFixedRSFRIS20200130.shp'), 'NAD83')
+  # poly_rsfris = st_read('data/environment/rs_fris/Polygon_RS-FRIS/Polygon_RS-FRIS.shp')
+  # poly_rsfris = st_crop(poly_rsfris, st_transform(study_area, st_crs(poly_rsfris))) %>% st_transform(crs_m) %>% janitor::clean_names() %>% select(riu_id, age, land_cov_c, land_cov_n, geometry)
   
   # Thinning treatment
   poly_thinning_treatment = st_read('data/environment/GIS Data/Forest Development Strata/ThinAfter94NoHarvSinceClipByInitBuf3.shp') %>% 
@@ -63,48 +49,132 @@ study_area = st_buffer(st_as_sfc(st_bbox(aru_sites)), dist = 100)
     mutate(technique = technique %>% str_to_lower(), fma_status = fma_status %>% str_to_lower()) %>%
     rename(thinning_treatment = technique, thinning_status = fma_status, thinning_date = fma_dt)
 
+mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
+  mapview(poly_seral_class, col.regions = class_colors) +
+  mapview(aru_sites, label = aru_sites$site) + mapview(st_buffer(aru_sites, 100), col.regions = 'transparent', lwd = 2)
+
+# Define patches by seral class, waterbodies, and road intersection (all road types)
+patches = poly_seral_class
+
+waterbodies = st_read('data/environment/DNR_Hydrography/DNR_Hydrography_-_Water_Bodies_-_Forest_Practices_Regulation/DNR_Hydrography_-_Water_Bodies_-_Forest_Practices_Regulation.shp')
+waterbodies = waterbodies %>% st_crop(st_transform(study_area, st_crs(waterbodies))) %>% st_transform(crs_m) %>% janitor::clean_names()
+
+patches = st_difference(patches, st_union(waterbodies))
+
+# Roads
+roads_wadnr = st_read('data/environment/GIS Data/T3roads.shp') %>%
+  st_zm(drop = TRUE) %>% janitor::clean_names() %>% st_transform(crs = crs_m) %>% select(road_usgs1, road_surfa, geometry) %>%
+  mutate(geometry = st_cast(geometry, "MULTILINESTRING"))
+
+# Get Hoh Mainline Road / Clearwater Road from WSDOT
+roads_wsdot = st_read('data/environment/WSDOT_-_Local_Agency_Public_Road_Routes/WSDOT_-_Local_Agency_Public_Road_Routes.shp') %>% filter(RouteIdent %in% c("400000220i", "031265969i")) %>% st_transform(crs_m) %>% select(geometry)
+roads_wsdot$road_usgs1 = 'Primary Highway'
+roads_wsdot$road_surfa = NA
+
+roads = rbind(roads_wsdot, roads_wadnr)
+
+mapview(roads, zcol = 'road_usgs1') +
+  mapview(aru_sites, label = aru_sites$site) + mapview(st_buffer(aru_sites, 100), col.regions = 'transparent', lwd = 2)
+
+roads_highway    = roads %>% filter(road_usgs1 %in% c('Primary Highway'))
+roads_lightduty  = roads %>% filter(road_usgs1 %in% c('Light-Duty Road'))
+roads_unimproved = roads %>% filter(!(road_usgs1 %in% c('Primary Highway', 'Light-Duty Road')))
+roads_highway_buff    = st_buffer(st_union(roads_highway), dist = 5) # half of road width (m)
+roads_lightduty_buff  = st_buffer(st_union(roads_lightduty), dist = 3)
+roads_unimproved_buff = st_buffer(st_union(roads_unimproved), dist = 2)
+roads_buff = st_union(st_union(roads_highway_buff, roads_lightduty_buff), roads_unimproved_buff)
+
+patches = st_difference(patches, st_union(roads_buff))
+
+# Re-id patches as individual polygons (not multipolygons)
+patches = patches %>% st_cast("POLYGON")
+
+# "We defined minimum patch size as 0.785 ha and > 50 m wide in the narrowest dimension. This minimum area corresponds roughly to the smallest estimated home range size of any bird species found in the study area (Brown 1985)."
+# TODO: Rather than erasing the fragements, consider recursively merging these tiny fragments into the nearest polygon with the smallest area until there are none left
+patches = patches %>% mutate(area_m2 = as.numeric(st_area(.)))
+bbox_dims = patches %>%
+  st_geometry() %>%
+  map(~ st_bbox(.x)) %>% map_dfr(~ {
+    data.frame(
+      width  = .x["xmax"] - .x["xmin"],
+      height = .x["ymax"] - .x["ymin"]
+    )
+  }) %>%
+  mutate(min_dim = pmin(width, height))
+
+patches = patches %>%
+  bind_cols(bbox_dims) %>%
+  filter(area_m2 > 7850, min_dim > 50)
+
+# Add patch id to sites
+patches = patches %>% mutate(patch_id = row_number())
+
+site_data = aru_sites
+site_data = st_join(site_data, patches[, c("patch_id")])
+
+n_na = sum(is.na(site_data$patch_id))
+if (n_na > 0) {
+  warning(sprintf("Removing %d sites(s) not located in any patch", n_na))
+  print(site_data %>% filter(is.na(patch_id)) %>% pull(site))
+  site_data = site_data %>% filter(!is.na(patch_id))
+}
+
 # Classify sites based on the seral class and thinning prescription polygons in which they reside
 site_data = st_join(site_data, poly_seral_class)
 table(site_data$class_seral, useNA = 'ifany')
 site_data = st_join(site_data, poly_thinning_treatment)
 table(site_data$thinning_treatment, useNA = 'ifany')
 
-mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
-  mapview(poly_seral_class, col.regions = class_colors) +
-  mapview(site_data, zcol = 'class_seral', col.regions = class_colors, legend = T)
+# Count number of sites in each patch
+point_counts = site_data %>%
+  st_drop_geometry() %>%
+  count(patch_id, name = "nsites")
+patches = patches %>%
+  left_join(point_counts, by = "patch_id") %>%
+  mutate(nsites = replace_na(nsites, 0))
 
-# Forest origin (age)
-rast_origin = load_raster('data/environment/rs_fris/rs_fris_Origin_Year/RS_FRIS_ORIGIN_YEAR.tif')
-sort(unique(terra::values(rast_origin)))
+mapview(study_area, col.regions = 'transparent', color = "black", lwd = 2) +
+  mapview(patches, zcol = 'class_seral', col.regions = class_colors, label = patches$patch_id) +
+  mapview(aru_sites, label = aru_sites$site) + mapview(st_buffer(aru_sites, 100), col.regions = 'transparent', lwd = 2)
 
-rast_age = 2024 - rast_origin
+## Helper functions =================================================
 
-# Classify origin raster based on number of years since 2020
-age_classes = c("early", "mid", "late", "old-growth")
-rast_age_class = classify(rast_age, rcl = matrix(c(
-  0,   24,  1,   # "early"
-  25,  79,  2,   # "mid"
-  80, 199,  3,   # "late"
-  200, Inf, 4    # "old-growth"
-), ncol = 3, byrow = TRUE))
-levels(rast_age_class) = data.frame(value = 1:4, class_age = age_classes)
-rast_age_class = ifel(rast_age_class %in% 1:4, rast_age_class, NA) # discard erroneous / NA values
-unique(terra::values(rast_age_class))
-levels(rast_age_class) = data.frame(value = 1:4, class_age = age_classes)
+# Load a raster, cropped, projected, and masked to the study area
+load_raster = function(path_rast) {
+  r = rast(path_rast)
+  r_crop = crop(r, vect(st_transform(study_area, crs(r))))
+  r_proj = project(r_crop, crs(study_area))
+  r_mask = mask(r_proj, vect(study_area))
+  return(r_mask)
+}
 
-# Classify sites based on most abundant origin class within a 100m buffer
-site_data$class_age = as.factor(computer_raster_buffer_value_func(rast_age_class, site_data, 100, modal)[,2])
-table(as.numeric(site_data$class_age))
+# Computer raster function value for a buffer
+computer_raster_buffer_value_func = function(raster, points, buffer_distance, func) {
+  r = project(raster, crs(points))
+  site_buffers = st_buffer(points, dist = buffer_distance)
+  buffer_values = terra::extract(r, vect(site_buffers), fun = func, na.rm = TRUE)
+}
 
-# Get mean age
-site_data$age = as.numeric(computer_raster_buffer_value_func(rast_age, site_data, 100, modal)[,2])
-table(site_data$age)
+## Plot data ============================================================
 
-mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
-  mapview(as.factor(rast_age_class), col.regions = class_colors) +
-  mapview(site_data, zcol = 'class_age', col.regions = class_colors, legend = T)
+plot_data_path = 'data/environment/PAM_PreHarvest_Habitat_results_DD_WD_TM.xlsx'
 
-### Plot scale variables
+# Load and clean plot-level data
+plot_data = list(
+  readxl::read_xlsx(plot_data_path, sheet = 2, skip = 1) %>% janitor::clean_names(),
+  readxl::read_xlsx(plot_data_path, sheet = 4, skip = 1) %>% janitor::clean_names(),
+  readxl::read_xlsx(plot_data_path, sheet = 5, skip = 1) %>% janitor::clean_names(),
+  readxl::read_xlsx(plot_data_path, sheet = 6, skip = 1) %>% janitor::clean_names()
+) %>%
+  reduce(full_join, by = c("station", "strata")) %>%
+  rename(site = station, stratum = strata) %>%
+  mutate(
+    tag = str_extract(site, "_.*$") %>% str_remove("^_"),
+    site = str_remove(site, "_.*$")
+  )
+plot_data = plot_data %>% group_by(site) %>% summarise(across(everything(), ~ coalesce(.[!is.na(.)][1], NA))) # coalesce duplicate site entries
+
+### Plot scale variables ==============================================================================================
 
 # Elevation (m)
 
@@ -112,9 +182,42 @@ mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
 
   # Regional: TODO
 
+# Origin (age)
+
+  rast_origin = load_raster('data/environment/rs_fris/rs_fris_Origin_Year/RS_FRIS_ORIGIN_YEAR.tif')
+  sort(unique(terra::values(rast_origin)))
+  
+  rast_age = 2024 - rast_origin
+  
+  # Classify origin raster based on number of years since 2020
+  age_classes = c("early", "mid", "late", "old-growth")
+  rast_age_class = classify(rast_age, rcl = matrix(c(
+    0,   24,  1,   # "early"
+    25,  79,  2,   # "mid"
+    80, 199,  3,   # "late"
+    200, Inf, 4    # "old-growth"
+  ), ncol = 3, byrow = TRUE))
+  levels(rast_age_class) = data.frame(value = 1:4, class_age = age_classes)
+  rast_age_class = ifel(rast_age_class %in% 1:4, rast_age_class, NA) # discard erroneous / NA values
+  unique(terra::values(rast_age_class))
+  levels(rast_age_class) = data.frame(value = 1:4, class_age = age_classes)
+  
+  # Classify sites based on most abundant origin class within a 100m buffer
+  site_data$class_age = as.factor(computer_raster_buffer_value_func(rast_age_class, site_data, 100, modal)[,2])
+  table(as.numeric(site_data$class_age))
+  
+  # Get mean age
+  site_data$age = as.numeric(computer_raster_buffer_value_func(rast_age, site_data, 100, modal)[,2])
+  table(site_data$age)
+  
+  mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
+    mapview(as.factor(rast_age_class), col.regions = class_colors) +
+    mapview(site_data, zcol = 'class_age', col.regions = class_colors, legend = T)
+
 # Total basal area (m2/ha)
 
   # Local: TODO
+  plot_data$ba_ha_all
 
   # Regional
   rast_ba = load_raster('data/environment/rs_fris/rs_fris_BA/RS_FRIS_BA.tif')
@@ -130,6 +233,11 @@ mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
     mapview(site_data, zcol = 'ba_mean_100m', legend = T)
 
 # Tree height distribution (e.g. SD of height) (m)
+  
+  # Local: TODO
+  plot_data$avg_height_m_all
+  plot_data$cv_height_all
+  plot_data$avg_hlc_all
   
   # Regional
   rast_ht_lorey = load_raster('data/environment/rs_fris/rs_fris_HT_LOREY/RS_FRIS_HT_LOREY.tif')
@@ -158,8 +266,6 @@ mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
 
 # Canopy layers (#)
   
-  # Local: TODO
-  
   # Regional
   rast_canopy_layers = load_raster('data/environment/rs_fris/rs_fris_CANOPY_LAYERS/RS_FRIS_CANOPY_LAYERS.tif')
   site_data$canopy_layers_mean_100m = as.numeric(computer_raster_buffer_value_func(rast_canopy_layers, site_data, 100, mean)[,2])
@@ -174,8 +280,6 @@ mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
     mapview(site_data, zcol = 'canopy_layers_mean_100m', legend = T)
 
 # Canopy cover
-  
-  # Local: TODO
   
   # Regional
   rast_canopy_cover = load_raster('data/environment/rs_fris/rs_fris_COVER/RS_FRIS_COVER.tif')
@@ -208,6 +312,7 @@ mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
 # Number/density of all snags
   
   # Local: TODO
+  plot_data$snags_ha
   
   # Regional
   rast_snags = load_raster('data/environment/rs_fris/rs_fris_SNAG_ACRE_15/RS_FRIS_SNAG_ACRE_15.tif')
@@ -225,12 +330,19 @@ mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
 # Understory vegetation density/cover/volume
   
   # Local: TODO
+  plot_data$avg_understory_heights
+  plot_data$cv_avg_understory_heights
+  plot_data$per_cover_hgf
+  plot_data$per_cover_all_shrubs
+  plot_data$per_cover_total_understory
+  plot_data$shrub_layer_vol
   
   # Regional: TODO
   
 # Dead and downed woody material
   
   # Local: TODO
+  plot_data$vol_alldown_m3
   
   # Regional
   rast_ddwm = load_raster('data/environment/rs_fris/rs_fris_CFVOL_DDWM/RS_FRIS_CFVOL_DDWM.tif')
@@ -248,6 +360,7 @@ mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
 # Tree species composition/richness/diversity
   
   # Local: TODO
+  plot_data$ba_ha_psme
   
   # Regional
   rast_bap_hwd = load_raster('data/environment/rs_fris/rs_fris_BAP_HWD/RS_FRIS_BAP_HWD.tif')
@@ -262,67 +375,206 @@ mapview(study_area, col.regions = "transparent", color = "black", lwd = 2) +
   mapview(rast_bap_hwd) +
     mapview(site_data, zcol = 'bap_hwd_mean_100m', legend = T)
 
-### Patch scale variables
+### Patch scale variables ==========================================================================
+  
+  # Area (ha)
+  patches$area_m2 = st_area(patches)
+  
+  # Core area index (%)
+  
+    core_edge_buffer = 100 # meters inward from patch edge
+    core_areas = st_buffer(patches, dist = -core_edge_buffer)
+    patches$core_area = st_area(core_areas)
+    patches$core_area_index = as.numeric(patches$core_area) / as.numeric(patches$patch_area) * 100
+    
+    mapview(core_areas) + mapview(patches, zcol = 'patch_area')
+  
+  # Edge contrast index (%)
+  id = 1741 # mature surrounded by stemex
+  id = 891 # init surrounded by mostly stemex
+  patches$edge_contrast_index = NA
+  patch_ids_to_evaluate = patches[patches$nsites > 0, 'patch_id'] %>% pull(patch_id)
+  for (id in patch_ids_to_evaluate) {
+    print(id)
+    patch = st_make_valid(patches %>% filter(patch_id == id))
+    # mapview(patch) + mapview(rast_canopy_cover)
+    
+    edge_buffer <- 50  # meters
+    inner_edge = st_difference(patch, st_buffer(patch, dist = -edge_buffer))
+    outer_edge = st_difference(st_buffer(patch, dist = edge_buffer), patch)
 
-# Area (ha)
+    v_inner <- vect(inner_edge)
+    v_outer <- vect(outer_edge)
+    inner_canopy_cover <- mask(rast_canopy_cover, v_inner)
+    outer_canopy_cover <- mask(rast_canopy_cover, v_outer)
+    vals_inner <- values(inner_canopy_cover, na.rm = TRUE)
+    vals_outer <- values(outer_canopy_cover, na.rm = TRUE)
+    mean_inner <- mean(vals_inner)
+    mean_outer <- mean(vals_outer)
+    
+    # Mean edge contrast index
+    patches[patches$patch_id == id, 'edge_contrast_index'] = abs(mean_inner - mean_outer)
+  }
+  mapview(patches, zcol = 'edge_contrast_index') +
+    mapview(rast_canopy_cover)
 
-# Core area index (%)
+### Landscape scale variables (in a buffered radius) ===============================================
 
+buffer_size = 500
+buffer_area = pi * buffer_size^2
+  
 # Distance to edge (m)
 
-# Edge contrast index (%)
-
-### Landscape scale variables (in a buffered radius)
-
+  site_data = site_data %>% mutate(min_dist_m = NA)
+  for (i in seq_len(nrow(site_data))) {
+    site = site_data[i, ]
+    containing_patch = patches %>% filter(patch_id == site$patch_id)
+    if (nrow(containing_patch) == 1) {
+      site_data[i, 'min_dist_m'] <- st_distance(st_geometry(site), st_boundary(containing_patch))
+    } else {
+      site_data[i, 'min_dist_m'] <- NA
+    }
+  }
+  
 # Proportional abundance of each patch class (%)
+  site_data = site_data %>% mutate(
+      propab_initiation_500m = NA,
+      propab_canclose_500m = NA,
+      propab_stemex_500m = NA,
+      propab_mature_500m = NA
+    )
+  for (i in seq_len(nrow(site_data))) {
+    site = site_data[i, ]
+    site_buff = st_intersection(patches, st_buffer(site, dist = buffer_size))
+    site_buff = site_buff %>% mutate(area_m2 = st_area(geometry))
+    
+    area_by_class = site_buff %>%
+      group_by(class_seral) %>%
+      summarise(total_area_m2 = sum(area_m2)) %>%
+      ungroup()
+    area_by_class = area_by_class %>%
+      mutate(proportional_abundance = as.numeric(total_area_m2) / buffer_area)
+    # mapview(area_by_class, zcol = 'proportional_abundance)
+    
+    site_data[i, 'propab_initiation_500m'] = area_by_class %>%
+      filter(class_seral == 'initiation') %>%
+      pull(proportional_abundance) %>% { if (length(.) == 0) 0 else . }
+    site_data[i, 'propab_canclose_500m'] = area_by_class %>%
+      filter(class_seral == 'canclose') %>%
+      pull(proportional_abundance) %>% { if (length(.) == 0) 0 else . }
+    site_data[i, 'propab_stemex_500m'] = area_by_class %>%
+      filter(class_seral == 'stemex') %>%
+      pull(proportional_abundance) %>% { if (length(.) == 0) 0 else . }
+    site_data[i, 'propab_mature_500m'] = area_by_class %>%
+      filter(class_seral == 'mature') %>%
+      pull(proportional_abundance) %>% { if (length(.) == 0) 0 else . }
+  }
 
 # Patch diversity/evenness/richness (#)
+  
+  site_data = site_data %>% mutate(
+    richness = NA, diversity_simpson = NA, diversity_shannon = NA, evenness_shannon = NA
+  )
+  for (i in seq_len(nrow(site_data))) {
+    site = site_data[i, ]
+    propab = c( # proportional abundances
+      site$propab_initiation_500m,
+      site$propab_canclose_500m,
+      site$propab_stemex_500m,
+      site$propab_mature_500m
+    )
+    propab_nonzero = propab[propab > 0] # avoid invalid products with log(0)
+    
+    S = length(propab_nonzero) # Richness (count of non-zero forest cover classes)
+    
+    D = 1 - sum(propab_nonzero^2) # Simpson diversity index
+    
+    H = -sum(propab_nonzero * log(propab_nonzero)) # Shannon diversity index
+    
+    E = if (S > 1) H / log(S) else 0 # Shannon evenness index
+    
+    site_data[i, 'richness'] = S
+    site_data[i, 'diversity_simpson'] = D
+    site_data[i, 'diversity_shannon'] = H
+    site_data[i, 'evenness_shannon'] = E
+  }
 
 # Patch similarity/isolation index (#)
-
-# Edge density
-
-# Density of roads (km/km2)
   
-  # TODO: Hoh mainline road is missing from both datasets?
-  
-  roads_wadnr = st_read('data/environment/GIS Data/T3roads.shp') %>%
-    st_zm(drop = TRUE) %>% janitor::clean_names() %>% st_transform(crs = crs_m) %>% select(road_usgs1, road_surfa, geometry)
+  # TODO
 
-  mapview(roads_wadnr, zcol = 'road_usgs1')
+# Edge density: TODO - incorporate waterbodies as well
   
-  roads_usgs = st_read('/Users/giojacuzzi/repos/avian-acoustic-monitoring-oesf/data/environment/TRAN_Washington_State_Shape/Shape/Trans_RoadSegment_0.shp')
-  roads_usgs = roads_usgs %>% st_crop(st_transform(study_area, st_crs(roads_usgs))) %>% st_transform(crs_m)
+  site_data = site_data %>% mutate(edges_m_per_m2 = NA)
+  for (i in seq_len(nrow(site_data))) {
+    print(i)
+    site = site_data[i, ]
+    site_buff = st_buffer(site, dist = buffer_size)
+    site_patches = st_intersection(poly_seral_class, site_buff) # NOTE: poly_seral_class, not patches, to avoid double-counting roads as two edges
+    
+    # Get patch edges, including roads, but remove artificial edges produced on the buffer boundary
+    patch_edges = st_boundary(site_patches)
+    patch_edges = st_difference(patch_edges, st_boundary(site_buff))
+    road_edges = st_union(st_intersection(roads, site_buff))
+    n_patch_edges = length(st_geometry(patch_edges))
+    n_road_edges = length(st_geometry(road_edges))
+    edges = st_sf(geometry = st_sfc(), crs = crs_m)
+    if (n_patch_edges == 0 & n_road_edges > 0) {
+      edges = road_edges # contiguous patch
+    } else if (n_patch_edges > 0 & n_road_edges == 0) {
+      edges = patch_edges
+    } else if (n_patch_edges > 0 & n_road_edges > 0) {
+      edges = st_union(patch_edges, road_edges)
+    }
+    
+    # mapview(site) + mapview(site_patches) + mapview(edges)
+
+    edge_density = as.numeric(sum(st_length(edges))) / as.numeric(buffer_area) # * 10000 for m/ha
+    site_data$edges_m_per_m2[i] = edge_density
+  }
+  
+# TODO: Consider contrast-weighted edge density
+
+# Density of roads (m/m2)
+  
+  buffer_size = 500
+  buffer_area = pi * buffer_size^2
+  roads_paved_buffers = st_intersection(roads_paved, st_buffer(site_data, dist = buffer_size))
+  
+  roads_paved_buffers = roads_paved_buffers %>% # calculate total paved road length per site
+    mutate(roads_paved_length = st_length(geometry)) %>%
+    group_by(site) %>%
+    summarize(roads_paved_total_length_m = sum(roads_paved_length)) %>%
+    ungroup()
+  roads_paved_buffers = roads_paved_buffers %>% # calculate density of paved roads
+    mutate(roads_paved_m_per_m2 = as.numeric(roads_paved_total_length_m) / buffer_area)
+  
+  site_data = site_data %>% left_join(roads_paved_buffers %>% st_drop_geometry(), by = 'site')
+  
+  # roads_usgs = st_read('/Users/giojacuzzi/repos/avian-acoustic-monitoring-oesf/data/environment/TRAN_Washington_State_Shape/Shape/Trans_RoadSegment_0.shp')
+  # roads_usgs = roads_usgs %>% st_crop(st_transform(study_area, st_crs(roads_usgs))) %>% st_transform(crs_m)
 
 # Density of streams (km/km2)
   
   watercourses = st_read('data/environment/DNR_Hydrography/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation.shp')
-  watercourses = watercourses %>% st_crop(st_transform(study_area, st_crs(watercourses))) %>% st_transform(crs_m) %>% janitor::clean_names()
+  watercourses = watercourses %>% st_crop(st_transform(study_area, st_crs(watercourses))) %>% st_transform(crs_m) %>% janitor::clean_names() %>% select(geometry, wc_cart_1)
+
+  buffer_size = 500
+  buffer_area = pi * buffer_size^2
+  watercourse_buffers = st_intersection(watercourses, st_buffer(aru_sites, dist = buffer_size))
+
+  watercourse_buffers = watercourse_buffers %>% # calculate total watercourse length per site
+    mutate(watercourse_length = st_length(geometry)) %>%
+    group_by(site) %>%
+    summarize(watercourse_total_length_m = sum(watercourse_length)) %>%
+    ungroup()
+  watercourse_buffers = watercourse_buffers %>% # calculate density of watercourses
+    mutate(watercourse_m_per_m2 = as.numeric(watercourse_total_length_m) / buffer_area)
   
-  waterbodies = st_read('data/environment/DNR_Hydrography/DNR_Hydrography_-_Water_Bodies_-_Forest_Practices_Regulation/DNR_Hydrography_-_Water_Bodies_-_Forest_Practices_Regulation.shp')
-  waterbodies = waterbodies %>% st_crop(st_transform(study_area, st_crs(waterbodies))) %>% st_transform(crs_m) %>% janitor::clean_names()
+  site_data = site_data %>% left_join(watercourse_buffers %>% st_drop_geometry(), by = 'site')
 
 ####################################################################################################
 # Local habitat data
-
-plot_data_path = 'data/environment/PAM_PreHarvest_Habitat_results_DD_WD_TM.xlsx'
-
-# Load and clean plot-level data
-plot_data = list(
-  readxl::read_xlsx(plot_data_path, sheet = 2, skip = 1) %>% janitor::clean_names(),
-  readxl::read_xlsx(plot_data_path, sheet = 4, skip = 1) %>% janitor::clean_names(),
-  readxl::read_xlsx(plot_data_path, sheet = 5, skip = 1) %>% janitor::clean_names(),
-  readxl::read_xlsx(plot_data_path, sheet = 6, skip = 1) %>% janitor::clean_names()
-) %>%
-  reduce(full_join, by = c("station", "strata")) %>%
-  rename(site = station, stratum = strata) %>%
-  mutate(
-    tag = str_extract(site, "_.*$") %>% str_remove("^_"),
-    site = str_remove(site, "_.*$")
-  )
-
-# Coalesce duplicate site entries
-plot_data = plot_data %>% group_by(site) %>% summarise(across(everything(), ~ coalesce(.[!is.na(.)][1], NA)))
 
 # NA entries by column
 na_values =  t(as.data.frame(plot_data %>% summarise(across(everything(), ~ sum(is.na(.))))))
@@ -408,3 +660,56 @@ correlation_threshold(cor_matrix_reduced, 0.7)
 
 
 
+
+
+
+
+######## DEBUG
+
+grain = c(20.10835, 20.10835) # 0.1 acre spatial grain (~404.35 m²)
+grain = 3 # 2 meter spatial grain
+
+# Define rasterized patches according to seral class and road intersection
+rast_seral_class = rasterize(vect(patches), rast(vect(patches), resolution = grain), field = 'class_seral')
+check_landscape(rast_seral_class)
+lsm_l_np(rast_seral_class) # number of patches
+lsm_c_np(rast_seral_class) # number of patches per class
+
+rast_patches = get_patches(rast_seral_class)
+
+p_area_m2 = lsm_p_area(rast_seral_class)
+
+
+# check for patches of class 1
+rast_patches_0 <- get_patches(rast_seral_class, class = 0)[[1]][[1]]
+rast_patches_1 <- get_patches(rast_seral_class, class = 1)[[1]][[1]]
+rast_patches_2 <- get_patches(rast_seral_class, class = 2)[[1]][[1]]
+rast_patches_3 <- get_patches(rast_seral_class, class = 3)[[1]][[1]]
+
+rast_patches = get_patches(rast_seral_class)
+mapview(rast_patches$layer_1$class_0, col.regions = 'red') +
+  mapview(rast_patches$layer_1$class_1, col.regions = 'blue') +
+  mapview(rast_patches$layer_1$class_2, col.regions = 'green') +
+  mapview(rast_patches$layer_1$class_3, col.regions = 'yellow')
+
+p <- get_patches(rast_seral_class, class = 1)[[1]][[1]]
+length(unique(na.omit(values(p))))
+max_val <- max(values(p), na.rm = TRUE)
+plot(p, col = rainbow(max_val), main = "Individual patches")
+
+
+p_area_m2 = lsm_p_area(rast_seral_class)
+
+cores <- calculate_lsm(rast_seral_class, what = "lsm_p_core")
+
+patches_list <- get_patches(rast_seral_class, return_raster = TRUE)
+
+# Example: take the first patch layer (patches for class 1)
+patch_raster <- patches_list[[1]][1]
+
+# Apply negative buffer (shrink edges = simulate core area)
+core_area <- terra::buffer(patch_raster, width = -100)  # 100 meters inward
+
+plot(core_area, main = "Buffered Core Area - Class 1")
+
+r_cat <- classify(rast_canopy_cover, rbind(c(-Inf, 50, 0), c(50, Inf, 1)), include.lowest = TRUE)
