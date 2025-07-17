@@ -5,8 +5,13 @@
 # "rs" refers to data derived via remote-sensing imagery.
 ##############################################################################
 
+# TODO: Ensure that aru site locations are correctly poisitioned within patches (i.e. not near edges so as to get incorrect covariate estimates)
+
 overwrite_rast_cover_cache = FALSE
 path_rast_cover_clean_out = "data/cache/occurrence_covariates/rast_cover_clean.tif"
+
+overwrite_homerange_data_cache = FALSE
+path_homerange_data_out = "data/cache/occurrence_covariates/homerange_data.rds"
 
 library(tidyverse)
 library(sf)
@@ -334,10 +339,12 @@ if (overwrite_rast_cover_cache) {
   
   mapview(rast_cover_clean) + mapview(patch_stack[['cover_class']])
 
+  message('Saving raster cover data cache ', path_rast_cover_clean_out)
   dir.create(dirname(path_rast_cover_clean_out), recursive = TRUE, showWarnings = FALSE)
   writeRaster(rast_cover_clean, path_rast_cover_clean_out, overwrite=TRUE)
   
 } else { # overwrite_rast_cover_cache is FALSE
+  message('Loading raster cover data from cache ', path_rast_cover_clean_out)
   rast_cover_clean = rast(path_rast_cover_clean_out)
 }
 rast_cover_clean = as.factor(rast_cover_clean)
@@ -473,7 +480,8 @@ mapview(rast_qmd) +
 site_data = site_data %>% left_join(data_plot %>% select(site, plot_ht_hs = avg_height_m_all), by = 'site')
 site_data = site_data %>% left_join(data_plot %>% select(site, plot_ht_cv_hs = cv_height_all), by = 'site')
 
-rast_htmax = load_raster('data/environment/rs_fris/rs_fris_HTMAX/RS_FRIS_HTMAX.tif') # TODO: Update!
+rast_htmax = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_HTMAX.img')) # NOTE: feet
+max_ht_m = max(values(rast_htmax), na.rm = TRUE) * conv_ft_m
 site_data$plot_htmax_rs = as.numeric(compute_raster_buffer_value_func(rast_htmax, site_data, plot_buffer, mean)[,2]) * conv_ft_m
 site_data$plot_htmax_cv_rs = as.numeric(compute_raster_buffer_value_func(rast_htmax, site_data, plot_buffer, compute_cv)[,2]) * conv_ft_m * 100
 
@@ -483,7 +491,7 @@ ggplot(site_data, aes(x = plot_ht_hs, y = plot_htmax_rs, label = site)) +
   ylim(0, max(site_data$plot_ht_hs, site_data$plot_htmax_rs, na.rm = TRUE)) +
   ggtitle('Tree height (mean) [m]')
 
-rast_canopy_layers = load_raster('data/environment/rs_fris/rs_fris_CANOPY_LAYERS/RS_FRIS_CANOPY_LAYERS.tif') # TODO: Update!
+rast_canopy_layers = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_CANOPY_LAYERS.img'))
 site_data$canopy_layers_rs = as.numeric(compute_raster_buffer_value_func(rast_canopy_layers, site_data, plot_buffer, mean)[,2])
 
 # Canopy cover and closure [%]
@@ -657,107 +665,238 @@ mapview(rast_cover_clean) + mapview(site_data, label = site_data$site, zcol = 'd
 ##############################################################################
 # Focal patch scale and home range neighborhood scale covariates (limited to the extent of the species home range)
 
-# For now, just calculate at a fixed radius plot scale (e.g. median predicted radius of 200 m)
-# TODO: Calculate per species according to predicted home range size
-home_range_buffer = 300 # meters
+if (overwrite_homerange_data_cache) {
 
-# "Edge influences on distributions of organisms or factors affecting organisms (such as predation and nest parasitism) are concentrated within 50m of the edge." (Kremaster L. & Bunnell F. L. (1999) Edge effects: Theory, evidence and implications to management of western North American forests. In: Forest Fragmentation: Wildlife and Management Implications (eds J. Wisniewski, J. A. Rochelle & L. Lehmann) pp. 117–53. Leiden, Boston, MA.)
-core_area_buffer = 50 # meters
-core_area_buffer_ncells = round(core_area_buffer / res(rast_cover_clean)[1], 0)
-
-for (i in 1:nrow(site_data)) {
-  site = site_data[i,]
-  cover_class = extract(rast_cover_clean, vect(site))[,2]
+  homerange_data = list()
   
-  homerange_and_edge_buffer = st_buffer(site, home_range_buffer + core_area_buffer) # additional buffer to ensure that edges are retained in mask
-  homerange_buffer = st_buffer(site, home_range_buffer)
-  homerange_and_edge_crop = crop(rast_cover_clean, vect(homerange_and_edge_buffer))
-  homerange_and_edge = mask(homerange_and_edge_crop, vect(homerange_and_edge_buffer))
+  # For now, just calculate at a fixed radius plot scale (e.g. median predicted radius of 200 m)
+  # TODO: Calculate per species according to predicted home range size
+  homeranges = data.frame(
+    scale = c('Plot', 'Median', 'Mean', 'Nearmax'),
+    size    = c(100, # plot scale
+                204, # median
+                468, # mean
+                1000) # meters
+  )
+  for (i in 1:nrow(homeranges)) {
+    scale = homeranges[i,'scale']
+    homerange_buffer_size = homeranges[i,'size']
+    message("Scale ", scale, ", home range buffer size ", homerange_buffer_size)
+    
+    homerange_data_species = data.frame()
   
-  patch_ids = patches(homerange_and_edge, directions=8, values=TRUE)
-  pid = extract(patch_ids, vect(site))[,2]
-  focal_patch = trim(classify(patch_ids, cbind(pid, 1), others = NA))
-  focal_patch = crop(focal_patch, vect(homerange_buffer))
-  focal_patch = mask(focal_patch, vect(homerange_buffer))
+    # "Edge influences on distributions of organisms or factors affecting organisms (such as predation and nest parasitism) are concentrated within 50m of the edge." (Kremaster L. & Bunnell F. L. (1999) Edge effects: Theory, evidence and implications to management of western North American forests. In: Forest Fragmentation: Wildlife and Management Implications (eds J. Wisniewski, J. A. Rochelle & L. Lehmann) pp. 117–53. Leiden, Boston, MA.)
+    core_area_buffer = 50 # meters
+    core_area_buffer_ncells = round(core_area_buffer / res(rast_cover_clean)[1], 0)
+    
+    sites = 1:nrow(site_data)
+    for (j in sites) {
+      site = site_data[j,]
+      message(site$site, ' (', j / length(n_sites), ')')
+      cover_class = extract(rast_cover_clean, vect(site))[,2]
+      
+      homerange_and_edge_buffer = st_buffer(site, homerange_buffer_size + core_area_buffer) # additional buffer to ensure that edges are retained in mask
+      homerange_buffer = st_buffer(site, homerange_buffer_size)
+      homerange_and_edge_crop = crop(rast_cover_clean, vect(homerange_and_edge_buffer))
+      homerange_and_edge = mask(homerange_and_edge_crop, vect(homerange_and_edge_buffer))
+      
+      patch_ids = patches(homerange_and_edge, directions=8, values=TRUE)
+      pid = extract(patch_ids, vect(site))[,2]
+      focal_patch = trim(classify(patch_ids, cbind(pid, 1), others = NA))
+      focal_patch = crop(focal_patch, vect(homerange_buffer))
+      focal_patch = mask(focal_patch, vect(homerange_buffer))
+      
+      # Focal patch area [ha]
+      # lsm_p_area(focal_patch, directions = 8)[1, 'value'] # in hectares (ha)
+      # global(!is.na(focal_patch), sum, na.rm = TRUE) * prod(res(focal_patch)) # in sq meters
+      # mapview(site) + mapview(homerange_and_edge) + mapview(homerange_buffer, col.regions = 'transparent', lwd = 2) + mapview(focal_patch)
+      
+      ncells_focal_patch = sum(!is.na(values(focal_patch)))
+      (focal_patch_area = ncells_focal_patch * prod(res(focal_patch)) * conv_m2_ha)
+      
+      # Focal patch core area [ha]
+      focal_patch_and_edge_buffer = trim(classify(patch_ids, cbind(pid, 1), others = NA))
+      focal_patch_inv = ifel(is.na(focal_patch_and_edge_buffer), 1, NA)
+      focal_patch_edge_dist = distance(focal_patch_inv)
+      focal_patch_edge_dist = ifel(focal_patch_edge_dist == 0, NA, focal_patch_edge_dist)
+      focal_patch_core = ifel(focal_patch_edge_dist >= core_area_buffer, 1, NA)
+      focal_patch_core = crop(focal_patch_core, vect(homerange_buffer))
+      focal_patch_core = mask(focal_patch_core, vect(homerange_buffer))
+      # mapview(homerange_buffer, col.regions = 'transparent', lwd = 2) + mapview(focal_patch_edge_dist) + mapview(focal_patch) + mapview(focal_patch_and_edge_buffer) + mapview(focal_patch_core)
+      
+      ncells_focal_patch_core = sum(!is.na(values(focal_patch_core)))
+      (focal_patch_core_area = ncells_focal_patch_core * prod(res(focal_patch)) * conv_m2_ha)
+      
+      homerange_crop = crop(rast_cover_clean, vect(homerange_buffer))
+      homerange_cover = mask(homerange_crop, vect(homerange_buffer))
+      homerange_cover_forest = homerange_cover
+      homerange_cover_forest[!(homerange_cover_forest[] %in% c(1, 2, 3, 4))] <- NA
+      # mapview(homerange_cover)
+      ncells_homerange = sum(!is.na(values(homerange_cover)))
+      
+      # Focal patch percentage of home range [%]
+      (focal_patch_pcnt = sum(!is.na(values(focal_patch))) / ncells_homerange)
+      
+      # Focal patch core percentage of home range [%]
+      (focal_patch_core_pcnt = sum(!is.na(values(focal_patch_core))) / ncells_homerange)
   
-  # Area [ha]
-  lsm_p_area(focal_patch, directions = 8)[1, 'value'] # in hectares (ha)
-  global(!is.na(focal_patch), sum, na.rm = TRUE) * prod(res(focal_patch)) # in sq meters
-  mapview(site) +
-    mapview(homerange_and_edge) + mapview(homerange_buffer, col.regions = 'transparent', lwd = 2) + mapview(focal_patch)
+      # Focal patch euclidean nearest neighbor distance [m]
+      # Quantifies habitat isolation
+      # Approaches 0 as the distance to the nearest neighbor decreases. Minimum is constrained by the cell size.
+      focal_cover_class = as.numeric(site$stage)
+      matching_cover = rast_cover_clean
+      matching_cover[matching_cover != focal_cover_class] = NA
+      focal_patch_extended = extend(focal_patch, matching_cover)
+      matching_neighbors = mask(matching_cover, focal_patch_extended, maskvalue=NA, inverse=TRUE)
+      focal_patch_distance = distance(focal_patch_extended)
+      matching_neighbor_distance = mask(focal_patch_distance, matching_neighbors, maskvalue=NA, inverse=FALSE)
+      # mapview(matching_neighbors) + mapview(focal_patch) + mapview(focal_patch_distance) + mapview(matching_neighbor_distance)
+      (focal_patch_isolation = min(values(matching_neighbor_distance), na.rm = TRUE))
+      
+      # Cover class richness [#]
+      # Quantifies the number of cover types present in home range
+      cover_freq = freq(homerange_cover) %>% select(value, count) %>% mutate(value = as.integer(value))
+      cover_freq = data.frame(value = 1:6) %>%
+        left_join(cover_freq, by = "value") %>%
+        mutate(count = ifelse(is.na(count), 0, count))
+      cover_forest_freq = cover_freq %>% filter(value %in% c(1,2,3,4))
+      (cover_richness = cover_freq %>% filter(count != 0) %>% nrow())
+      (cover_forest_richness = cover_forest_freq %>% filter(count != 0) %>% nrow())
+      
+      # Cover class evenness (i.e. dominance) [#]
+      # Quantifies the degree of evenness versus dominance in cover type distribution 
+      # 0 when only one cover type is present, 1 when types are equally distributed
+      cover_evenness = lsm_l_shei(homerange_cover) %>% pull(value)
+      cover_forest_evenness = lsm_l_shei(homerange_cover_forest) %>% pull(value)
+      
+      # Cover class diversity (shannon) [#]
+      # Quantifies both the richness and evenness of cover type distributions (inversely related to contagion)
+      # 0 when only one cover type is present and increases as the number of classes increases while the proportions are equally distributed
+      cover_diversity = lsm_l_shdi(homerange_cover) %>% pull(value)
+      cover_forest_diversity = lsm_l_shdi(homerange_cover_forest) %>% pull(value)
+      
+      # Proportional abundance of each cover class [%]
+      (prop_abund_1 = cover_freq %>% filter(value == 1) %>% pull(count) / ncells_homerange)
+      (prop_abund_2 = cover_freq %>% filter(value == 2) %>% pull(count) / ncells_homerange)
+      (prop_abund_3 = cover_freq %>% filter(value == 3) %>% pull(count) / ncells_homerange)
+      (prop_abund_4 = cover_freq %>% filter(value == 4) %>% pull(count) / ncells_homerange)
+      (prop_abund_5 = cover_freq %>% filter(value == 5) %>% pull(count) / ncells_homerange)
+      (prop_abund_6 = cover_freq %>% filter(value == 6) %>% pull(count) / ncells_homerange)
+      
+      # Aggregation index [#]
+      # Quantifies degree of habitat contiguity versus fragmentation
+      # Equals 0 when the patch types are maximally disaggregated (i.e., when there are no like adjacencies); AI increases as the landscape is increasingly aggregated and equals 100 when the landscape consists of a single patch.
+      aggregation_idx = lsm_l_ai(homerange_cover, directions = 8) %>% pull(value)
+      
+      # Shape index [#]
+      # Quantifies patch shape complexity
+      # Equals 1 if all patches are squares. Increases, without limit, as the shapes of patches become more complex.
+      shape_idx = lsm_l_shape_mn(homerange_cover, directions = 8) %>% pull(value)
+      
+      # Contrast-weighted edge density [m/ha]
+      # The density of patch edges weighted by their contrast
+      # Equals 0 when there is no edge in the landscape (i.e. landscape consists of a single patch). Increases as the amount of edge in the landscape increases and/or as the contrast in edges increase (i.e. contrast weight approaches 1).
+      homerange_height = mask(crop(rast_htmax, homerange_and_edge_buffer), homerange_and_edge_buffer)
+      # mapview(patch_ids) + mapview(homerange_height)
+      
+      height_aligned <- resample(homerange_height, patch_ids, method = "bilinear")
+      zonal_means <- zonal(height_aligned, patch_ids, fun = "median", na.rm = TRUE) # TODO: consider min instead
+      
+      if (nrow(zonal_means) > 1) {
+        # Equals the sum of the lengths (m) of each edge segment in the landscape multiplied by the
+        # corresponding contrast weight, divided by the total landscape area (m2), converted to hectares.
+        colnames(zonal_means) = c('class', 'height')
+        # mapview(classify(patch_ids, rcl = zonal_means))
+        edge_lengths = get_adjacencies(patch_ids, neighbourhood = 8, what = "unlike", upper = FALSE)[[1]] * res(patch_ids)[1]
+        heights <- zonal_means$height
+        names(heights) <- zonal_means$class
+        height_diff_matrix <- outer(heights, heights, FUN = function(x, y) abs(x - y))
+        
+        # Weights are derived from proportion of difference in height relative to the maximum potential difference in height (Hou and Walz 2016, Huang et al. 2014)
+        # d = 0 --> 0 m difference
+        # d = 1 --> max m difference (i.e. maximum tree height of entire landscape)
+        weights = height_diff_matrix / max_ht_m
+        homerange_rast_area = ncells_homerange * res(homerange)[1] * res(homerange)[2] * conv_m2_ha
+        (cw_edge_density = sum(edge_lengths * weights, na.rm = TRUE) / homerange_rast_area)
+      } else { 
+        # Only one patch type
+        (cw_edge_density = 0.0)
+      }
+      cw_edge_density = set_units(cw_edge_density, 'm/ha')
+      
+      homerange_buffer_area_ha = set_units(st_area(homerange_buffer), ha)
+      
+      # Density of roads (paved and all) [m/ha]
+      homerange_roads_paved = st_intersection(st_geometry(st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway", "Light-Duty Road")))), homerange_buffer)
+      homerange_roads = st_intersection(st_geometry(st_make_valid(roads)), homerange_buffer)
+      homerange_roads_paved_length = sum(st_length(homerange_roads_paved))
+      homerange_roads_length = sum(st_length(homerange_roads))
+      (density_roads_paved = homerange_roads_paved_length / homerange_buffer_area_ha)
+      (density_roads = homerange_roads_length / homerange_buffer_area_ha)
+      # mapview(homerange_roads_paved) + mapview(homerange_roads) + mapview(homerange_buffer) + homerange_cover
+      
+      # Density of streams (type 1-3 and all types) [m/ha]
+      homerange_streams_major = st_intersection(st_geometry(st_make_valid(watercourses %>% filter(sl_wtrty_c %in% c(1, 2, 3)))), homerange_buffer)
+      homerange_streams = st_intersection(st_geometry(st_make_valid(watercourses)), homerange_buffer)
+      homerange_streams_major_length = sum(st_length(homerange_streams_major))
+      homerange_streams_length = sum(st_length(homerange_streams))
+      (density_streams_major = homerange_streams_major_length / homerange_buffer_area_ha)
+      (density_streams = homerange_streams_length / homerange_buffer_area_ha)
+      # mapview(homerange_streams_major) + mapview(homerange_streams) + mapview(homerange_buffer) + homerange_cover
+      
+      homerange_data_species = rbind(homerange_data_species, data.frame(
+        site = site$site,
+        buffer = homerange_buffer_size,
+        focal_patch_pcnt,
+        focal_patch_core_pcnt,
+        focal_patch_isolation,
+        cover_richness,
+        cover_forest_richness,
+        cover_evenness,
+        cover_forest_evenness,
+        cover_diversity,
+        cover_forest_diversity,
+        prop_abund_1,
+        prop_abund_2,
+        prop_abund_3,
+        prop_abund_4,
+        prop_abund_5,
+        prop_abund_6,
+        aggregation_idx,
+        shape_idx,
+        cw_edge_density,
+        density_roads_paved,
+        density_roads,
+        density_streams_major,
+        density_streams
+      ))
+    }
+    
+    # Sanity check results
+    if (FALSE) {
+      site_check = homerange_data_species %>% slice_max(focal_patch_isolation, n = 1, with_ties = FALSE) %>% pull(site)
+      site_check = site_data %>% filter(site == site_check)
+      site_check_buffer = st_buffer(site_check, homerange_buffer_size)
+      mapview(site_check) + mapview(mask(crop(rast_cover_clean, site_check_buffer), site_check_buffer))
+      
+      site_check = homerange_data_species %>% slice_min(focal_patch_isolation, n = 1, with_ties = FALSE) %>% pull(site)
+      site_check = site_data %>% filter(site == site_check)
+      site_check_buffer = st_buffer(site_check, homerange_buffer_size)
+      mapview(site_check) + mapview(mask(crop(rast_cover_clean, site_check_buffer), site_check_buffer))
+    }
+    
+    homerange_data[[scale]] = homerange_data_species
+  }
+  message('Saving homerange data cache ', path_homerange_data_out)
+  dir.create(dirname(path_homerange_data_out), recursive = TRUE, showWarnings = FALSE)
+  saveRDS(homerange_data, path_homerange_data_out)
   
-  ncells_focal_patch = sum(!is.na(values(focal_patch)))
-  (focal_patch_area = ncells_focal_patch * prod(res(focal_patch)) * conv_m2_ha)
-  
-  # Core area [ha]
-  focal_patch_and_edge_buffer = trim(classify(patch_ids, cbind(pid, 1), others = NA))
-  focal_patch_inv = ifel(is.na(focal_patch_and_edge_buffer), 1, NA)
-  focal_patch_edge_dist = distance(focal_patch_inv)
-  focal_patch_edge_dist = ifel(focal_patch_edge_dist == 0, NA, focal_patch_edge_dist)
-  focal_patch_core = ifel(focal_patch_edge_dist >= core_area_buffer, 1, NA)
-  focal_patch_core = crop(focal_patch_core, vect(homerange_buffer))
-  focal_patch_core = mask(focal_patch_core, vect(homerange_buffer))
-  mapview(homerange_buffer, col.regions = 'transparent', lwd = 2) + mapview(focal_patch_edge_dist) + mapview(focal_patch) + mapview(focal_patch_and_edge_buffer) + mapview(focal_patch_core)
-  
-  ncells_focal_patch_core = sum(!is.na(values(focal_patch_core)))
-  (focal_patch_core_area = ncells_focal_patch_core * prod(res(focal_patch)) * conv_m2_ha)
-  
-  homerange_crop = crop(rast_cover_clean, vect(homerange_buffer))
-  homerange_cover = mask(homerange_crop, vect(homerange_buffer))
-  homerange_cover_forest = homerange_cover
-  homerange_cover_forest[!(homerange_cover_forest[] %in% c(1, 2, 3, 4))] <- NA
-  mapview(homerange_cover)
-  ncells_homerange = sum(!is.na(values(homerange_cover)))
-  
-  # Focal patch class percentage of home range [%]
-  (focal_patch_pcnt = sum(!is.na(values(focal_patch))) / ncells_homerange)
-  
-  # Focal patch class core area percentage of home range [%]
-  (focal_patch_core_pcnt = sum(!is.na(values(focal_patch_core))) / ncells_homerange)
-  
-  # Proportional abundance of each forest cover class [%]
-  (as.numeric(global(homerange_cover == 1, fun = "sum", na.rm = TRUE)) / ncells_homerange)
-  (as.numeric(global(homerange_cover == 2, fun = "sum", na.rm = TRUE)) / ncells_homerange)
-  (as.numeric(global(homerange_cover == 3, fun = "sum", na.rm = TRUE)) / ncells_homerange)
-  (as.numeric(global(homerange_cover == 4, fun = "sum", na.rm = TRUE)) / ncells_homerange)
-  
-  # Forest cover class richness and evenness (i.e. dominance) [#]
-  cover_freq = freq(homerange_cover) %>% select(value, count) %>% filter(value %in% c(1,2,3,4))
-  (cover_richness = nrow(cover_freq))
-  lsm_l_shei(homerange_cover_forest) # 0 when only one forest cover present, 1 when equally distributed
-  
-  # Contagion index [#]
-  # NOTE: The number of classes to calculate contagion must be >= 2
-  lsm_l_contag(homerange_cover, verbose = FALSE)
-  
-  # Interspersion and juxtaposition index [#]
-  # NOTE: The number of classes to calculate iji index must be >= 3
-  lsm_l_iji(homerange_cover, verbose = FALSE)
-  
-  # Aggregation index [#]
-  lsm_l_ai(homerange_cover, directions = 8)
-  
-  # Shape and fractal dimension indices [#]
-  # NOTE:The number of classes to calculate fractal dimension index must be >= 10
-  lsm_l_shape_mn(homerange_cover, directions = 8)
-  lsm_l_pafrac(homerange_cover, directions = 8, verbose = FALSE)
-  
-  # Nearest neighbor distance, proximity and similarity indices [TODO: UNITS]
-  
-  # Contrast-weighted edge density [TODO: UNITS]
-  
-  # Density of roads (paved and all) [TODO: UNITS]
-  homerange_roads_paved = st_intersection(st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway", "Light-Duty Road"))), homerange_buffer)
-  homerange_roads = st_intersection(st_make_valid(roads), homerange_buffer)
-  homerange_roads_paved_length = sum(st_length(homerange_roads_paved))
-  homerange_roads_length = sum(st_length(homerange_roads))
-  mapview(homerange_roads_paved) + mapview(homerange_roads) + mapview(homerange_buffer) + homerange_cover
-  
-  # Density of streams (type 1-3 and all types) [TODO: UNITS]
-  homerange_streams_major = st_intersection(st_make_valid(watercourses %>% filter(sl_wtrty_c %in% c(1, 2, 3))), homerange_buffer)
-  homerange_streams = st_intersection(st_make_valid(watercourses), homerange_buffer)
-  homerange_streams_major_length = sum(st_length(homerange_streams_major))
-  homerange_streams_length = sum(st_length(homerange_streams))
-  mapview(homerange_streams_major) + mapview(homerange_streams) + mapview(homerange_buffer) + homerange_cover
+} else { # overwrite_homerange_data_cache is FALSE
+  message('Loading homerange data from cache ', path_homerange_data_out)
+  homerange_data = readRDS(path_homerange_data_out)
 }
 
+# Inspect different scales
+hist(homerange_data[["Nearmax"]]$focal_patch_pcnt)
+hist(homerange_data[["Nearmax"]]$cover_forest_richness)
+hist(homerange_data[["Plot"]]$cw_edge_density)
