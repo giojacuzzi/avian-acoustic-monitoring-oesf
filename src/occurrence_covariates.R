@@ -41,7 +41,7 @@ aru_sites = st_read('data/environment/GIS Data/AcousticStations.shp') %>%
 mapview(aru_sites, label = aru_sites$name)
 
 # Study area boundary buffer
-study_area = st_buffer(st_as_sfc(st_bbox(aru_sites)), dist = 100) # TODO: Re-run with larger buffer
+study_area = st_buffer(st_as_sfc(st_bbox(aru_sites)), dist = 100) # TODO: Re-run with larger buffer (10000)
 
 # Load a raster, cropped, projected, and masked to the study area
 load_raster = function(path_rast) {
@@ -111,7 +111,7 @@ rast_origin = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_ORIGIN_YEAR.img')
 summary((terra::values(rast_origin)))
 
 # Flag patches of missing origin year data
-# TODO: Impute these patches from canopy cover, size class, canopy layers, and surrounding classes (see Powell vegetation stages white paper). Also consult ESRI World Imagery Wayback for visual inspection.
+# TODO: Impute patches identified on Desktop pdf from canopy cover, size class, canopy layers, and surrounding classes (see Powell vegetation stages white paper). Also consult ESRI World Imagery Wayback for visual inspection.
 rast_origin_missing = rast_origin
 values(rast_origin_missing)[values(rast_origin_missing) <= 2020] = NA
 values(rast_origin)[values(rast_origin) > 2020] = NA
@@ -144,16 +144,32 @@ unique(terra::values(rast_wadnr_class))
 data_plot_scale$wadnr_stage_rast = terra::extract(rast_wadnr_class, vect(data_plot_scale))[, 2]
 data_plot_scale$wadnr_stage_rast = factor(data_plot_scale$wadnr_stage_rast, labels = wadnr_classes)
 
+# Fill in missing patches with WADNR predictions
+rast_impute = mask(rasterize(vect(vect_patches), rast_origin_missing, field = "wadnr_stage_vect"), rast_origin_missing)
+rast_impute = classify(rast_impute, matrix(c(
+  1, 2, 1,    # "initiation" > "stand initiation"
+  3, 4, 2,    # "stemex" > "stem exclusion"
+  0, 1, 2,    # "canclose" > "stem exclusion"
+  2, 3, 3     # "understory reinitiation"
+), ncol = 3, byrow = TRUE), include.lowest = TRUE, right = FALSE)
+rast_stage_class = cover(rast_impute, rast_stage_class)
+
 # Determine thinning treatment
 poly_thinning_treatment = st_read('data/environment/GIS Data/Forest Development Strata/ThinAfter94NoHarvSinceClipByInitBuf3.shp') %>% 
   st_transform(crs_m) %>% select(TECHNIQUE_, FMA_DT, FMA_STATUS) %>% janitor::clean_names() %>%
   mutate(technique = technique %>% str_to_lower(), fma_status = fma_status %>% str_to_lower()) %>%
   rename(thinning_treatment = technique, thinning_status = fma_status, thinning_date = fma_dt)
 data_plot_scale = st_join(data_plot_scale, poly_thinning_treatment)
-data_plot_scale = data_plot_scale %>% mutate(stratum = if_else(!is.na(thinning_treatment), "thinned", stage))
-strata = c("stand initiation", "stem exclusion", "thinned", "understory reinitiation", "old forest") 
-data_plot_scale$stratum = factor(data_plot_scale$stratum, labels = strata)
 table(data_plot_scale$thinning_treatment, useNA = 'ifany')
+
+# Create a "stratum" rast from rast_stage_class,
+rast_stratum = rast_stage_class
+
+# Overlap rast_stratum with thinning treatment as an additional class
+rast_thinning = rasterize(vect(poly_thinning_treatment), rast(ext(rast_stratum), resolution = res(rast_stratum), crs = crs(rast_stratum)), field = "thinning_status", background = NA)
+values(rast_thinning)[!is.na(values(rast_thinning))] = 5
+rast_stratum = cover(rast_thinning, rast_stratum)
+data_plot_scale$stratum = terra::extract(rast_stratum, vect(data_plot_scale))[, 2]
 table(data_plot_scale$stratum, useNA = 'ifany')
 
 # TODO: Resolve the small number of sites that are ambiguously classified due to origin age near class boundaries:
@@ -161,11 +177,10 @@ table(data_plot_scale$stratum, useNA = 'ifany')
 # Ca263i > age 86, understory reinit, WADNR stemex
 # Dp166i > age 24, stand init / canopy closure / WANDR stemex
 
-# From here forward, we use "rast_stage_class" as the classification scheme to delineate patches
-# TODO: Also consider instead using a raster with stratum (i.e. classifying thinned stands as their own cover types)
+# From here forward, we use "rast_stratum" as the classification scheme to delineate patches
 mapview(vect_patches) + mapview(poly_thinning_treatment)
 summary(data_plot_scale$stage)
-mapview(rast_stage_class) + mapview(aru_sites, label = aru_sites$site) + mapview(st_buffer(aru_sites, 100), col.regions = 'transparent', lwd = 2)
+mapview(rast_stratum) + mapview(aru_sites, label = aru_sites$site) + mapview(st_buffer(aru_sites, 100), col.regions = 'transparent', lwd = 2)
 
 # Further delineate patch boundaries by roads, waterbodies, and watercourses
 
@@ -181,22 +196,22 @@ mapview(roads, zcol = 'road_usgs1') + mapview(aru_sites, label = aru_sites$site)
 
 # "The Hoh-Clearwater Mainline is our only double-lane mainline, and it is about 26 feet wide for the asphalt surface. If we’re looking at right of way widths, we could easily assume a minimum width of about 50 feet for a 12-foot road, probably a good 60-80 feet for a 14-20 foot wide road, and about 100 feet for the Hoh Mainline. 100 feet might be good for US 101 as well for right of way width, and maybe about 30 feet for actual road surface width."
 paved_primary_roads   = st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway")))
-road_half_width_primary = max(100 / 2 * conv_ft_m, res(rast_stage_class)[1] / 2)
+road_half_width_primary = max(100 / 2 * conv_ft_m, res(rast_stratum)[1] / 2)
 # mapview(paved_primary_roads) + mapview(st_union(st_buffer(paved_primary_roads, road_half_width_primary)))
 # "Our minimum road surface width is going to be 12 feet. That would cover most of our roads. Main arterials/single lane mainlines will have a minimum surface width of 14 feet, with a few up to 20 feet."
 paved_secondary_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Light-Duty Road")))
-road_half_width_secondary = max(30 / 2 * conv_ft_m, res(rast_stage_class)[1] / 2)
+road_half_width_secondary = max(30 / 2 * conv_ft_m, res(rast_stratum)[1] / 2)
 # mapview(paved_secondary_roads) + mapview(st_union(st_buffer(paved_secondary_roads, road_half_width_secondary)))
 
-template = rast(ext(rast_stage_class), resolution = res(rast_stage_class), crs = crs(rast_stage_class))
+template = rast(ext(rast_stratum), resolution = res(rast_stratum), crs = crs(rast_stratum))
 paved_roads_primary_buffered = (st_buffer(paved_primary_roads, dist = road_half_width_primary))
 paved_roads_secondary_buffered = (st_buffer(paved_secondary_roads, dist = road_half_width_secondary))
-rast_paved_roads_primary = rasterize(vect(paved_roads_primary_buffered), template, field = 5, background = NA, touches=TRUE)
-rast_paved_roads_secondary = rasterize(vect(paved_roads_secondary_buffered), template, field = 5, background = NA, touches=TRUE)
+rast_paved_roads_primary = rasterize(vect(paved_roads_primary_buffered), template, field = 6, background = NA, touches=TRUE)
+rast_paved_roads_secondary = rasterize(vect(paved_roads_secondary_buffered), template, field = 6, background = NA, touches=TRUE)
 # mapview(rast_paved_roads_primary) + mapview(paved_roads_primary_buffered)
 # mapview(rast_paved_roads_secondary) + mapview(paved_roads_secondary_buffered)
 # mapview(rast_paved_roads_primary) + mapview(rast_paved_roads_secondary)
-rast_updated = rast_stage_class
+rast_updated = rast_stratum
 rast_updated = cover(rast_paved_roads_primary, rast_updated)
 rast_updated = cover(rast_paved_roads_secondary, rast_updated)
 
@@ -208,9 +223,9 @@ watercourses = watercourses %>% st_crop(st_transform(study_area, st_crs(watercou
 
 boundary_watercourses = watercourses %>% filter(sl_wtrty_c %in% c(1, 2, 3))
 boundary_watercourses$sl_wtrty_c = 1
-watercourse_half_width = res(rast_stage_class)[1] / 2
+watercourse_half_width = res(rast_stratum)[1] / 2
 watercourses_buffered = (st_buffer(boundary_watercourses, dist = watercourse_half_width))
-rast_watercourses = rasterize(vect(watercourses_buffered), template, field = 6, background = NA, touches=TRUE)
+rast_watercourses = rasterize(vect(watercourses_buffered), template, field = 7, background = NA, touches=TRUE)
 # mapview(rast_watercourses) + mapview(watercourses_buffered)
 rast_updated = cover(rast_watercourses, rast_updated)
 
@@ -219,7 +234,7 @@ waterbodies = waterbodies %>% st_crop(st_transform(study_area, st_crs(waterbodie
 # mapview(waterbodies, zcol = 'sl_wtrty_c')
 
 boundary_waterbodies = waterbodies %>% filter(sl_wtrty_c %in% c(1))
-rast_waterbodies = rasterize(vect(boundary_waterbodies), template, field = 6, background = NA, touches=TRUE)
+rast_waterbodies = rasterize(vect(boundary_waterbodies), template, field = 7, background = NA, touches=TRUE)
 # mapview(rast_waterbodies) + mapview(boundary_waterbodies)
 rast_updated = cover(rast_waterbodies, rast_updated)
 mapview(rast_updated)
@@ -325,7 +340,7 @@ if (overwrite_rast_cover_cache) {
     patch_cells = which(values(p) == small_patch_id)
     
     # Find adjacent cells to the patch
-    adj_cells = adjacent(rast_stage_class, cells = patch_cells, directions = 4, pairs = TRUE)
+    adj_cells = adjacent(rast_stratum, cells = patch_cells, directions = 4, pairs = TRUE)
     
     # Remove pairs where neighbor is also part of the same patch
     neighbor_cells = adj_cells[, 2]
@@ -348,7 +363,7 @@ if (overwrite_rast_cover_cache) {
     
     i = i + 1
   }
-  
+  rast_cover_clean[is.nan(rast_cover_clean)] = NA
   mapview(rast_cover_clean) + mapview(patch_stack[['cover_class']])
 
   message('Saving raster cover data cache ', path_rast_cover_clean_out)
@@ -363,7 +378,7 @@ rast_cover_clean = as.factor(rast_cover_clean)
 
 mapview(rast_cover_clean,
         alpha.regions = 1.0,
-        col.regions = c('#90c6bd', '#3c8273', '#d8c18a', '#9b652b', 'darkgray', '#6495ED'))
+        col.regions = c('#90c6bd', '#3c8273', '#d8c18a', '#9b652b', '#b2675e', 'darkgray', '#6495ed'))
 
 ##############################################################################
 # Local plot scale covariates
@@ -384,14 +399,6 @@ if (overwrite_data_plot_scale_cache) {
   ) %>%
     reduce(full_join, by = c("station", "strata")) %>% rename(site = station, stratum = strata) %>%
     mutate(tag = str_extract(site, "_.*$") %>% str_remove("^_"), site = str_remove(site, "_.*$"))
-  
-  # Coalesce duplicate site entries
-  # TODO: Double check this makes sense -- are there any "moved" sites?
-  data_plot = data_plot %>% group_by(site) %>% summarise(across(everything(), ~ coalesce(.[!is.na(.)][1], NA)))
-  
-  # Remove sites with missing data
-  # TODO: Re-add these sites when data are available
-  data_plot = data_plot %>% filter(!site %in% c("Bz217i", "Bz219i"))
   
   # Mark sites that were surveyed for habitat data in-person
   intersect(data_plot_scale$site, data_plot$site)
