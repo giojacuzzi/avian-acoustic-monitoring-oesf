@@ -5,11 +5,11 @@
 # "rs" refers to data derived via remote-sensing imagery.
 ##############################################################################
 
-# TODO: Ensure that aru site locations are correctly poisitioned within patches (i.e. not near edges so as to get incorrect covariate estimates)
+# TODO: Ensure that aru site locations are correctly positioned within patches (i.e. not near edges so as to get incorrect covariate estimates)
 
-overwrite_rast_cover_cache = FALSE
+overwrite_rast_cover_cache = TRUE
 overwrite_data_plot_scale_cache = TRUE
-overwrite_data_homerange_scale_cache = TRUE
+overwrite_data_homerange_scale_cache = FALSE
 path_rast_cover_clean_out = "data/cache/occurrence_covariates/rast_cover_clean.tif"
 path_data_plot_scale_out = "data/cache/occurrence_covariates/data_plot_scale.rds"
 path_data_homerange_scale_out = "data/cache/occurrence_covariates/data_homerange_scale.rds"
@@ -159,6 +159,21 @@ poly_thinning_treatment = st_read('data/environment/GIS Data/Forest Development 
   st_transform(crs_m) %>% select(TECHNIQUE_, FMA_DT, FMA_STATUS) %>% janitor::clean_names() %>%
   mutate(technique = technique %>% str_to_lower(), fma_status = fma_status %>% str_to_lower()) %>%
   rename(thinning_treatment = technique, thinning_status = fma_status, thinning_date = fma_dt)
+sum(poly_thinning_treatment$thinning_status == "completed") == nrow(poly_thinning_treatment) # check that all treatments are completed
+commrcl_thin = poly_thinning_treatment %>% filter(thinning_treatment == 'commrcl_thin') %>% st_union()
+variabl_thin = poly_thinning_treatment %>% filter(thinning_treatment == 'variabl_thin') %>% st_union()
+commrcl_sf = st_sf(
+  thinning_status = TRUE,
+  thinning_treatment = "commerical_thin",
+  geometry = poly_thinning_treatment %>% filter(thinning_treatment == 'commrcl_thin') %>% st_union()
+)
+variabl_sf = st_sf(
+  thinning_status = TRUE,
+  thinning_treatment = "variable_thin",
+  geometry = poly_thinning_treatment %>% filter(thinning_treatment == 'variabl_thin') %>% st_union()
+)
+poly_thinning_treatment = bind_rows(commrcl_sf, variabl_sf)
+
 data_plot_scale = st_join(data_plot_scale, poly_thinning_treatment)
 table(data_plot_scale$thinning_treatment, useNA = 'ifany')
 
