@@ -211,6 +211,28 @@ model_file = tempfile()
 writeLines("
 model{
 
+  ## Community level hyperpriors
+
+  # Baseline occurrence (intercept)
+  mu.u ~ dnorm(0, 0.01) # TODO: reasoning?
+  sd.u ~ dunif(0, 5)    # TODO: choose bounds of uniform by trial and error?
+  tau.u <- pow(sd.u,-2)
+  
+  # Covariate effects on occurrence
+  mu.canopy ~ dnorm(0, 0.001)
+  sd.canopy ~ dunif(0, 5)
+  tau.canopy <- pow(sd.canopy,-2)
+  
+  # Baseline detection (intercept)
+  mu.v ~ dnorm(0, 0.001)   # community mean of species-specific intercepts on the logit scale (mean baseline detect prob across all species)
+  sd.v ~ dunif(0, 5)       # community standard deviation of species-specific intercepts (how much detectability varies between species)
+  tau.v <- pow(sd.v,-2)
+
+  # Covariate effects on detection
+  mu.yday ~ dnorm(0, 0.001) # community mean of the species-specific slopes on the logit scale describing how detection changes with x_yday
+  sd.yday ~ dunif(0, 5)     # community standard deviation
+  tau.yday <- pow(sd.yday,-2)
+
   for(i in 1:I) { # for each species
     for (j in 1:J) { # for each site
       
@@ -227,36 +249,16 @@ model{
       }
     }
     
-    # Priors for occupancy coefficients (species level)
-    u[i] ~ dnorm(mu.u, tau.u)           # baseline occupancy of species i when the x_canopy variable is zero
+    # Species level priors for occupancy coefficients
+    u[i] ~ dnorm(mu.u, tau.u)                 # baseline occupancy of species i under 'average' conditions
     acanopy[i] ~ dnorm(mu.canopy, tau.canopy) # species-specific effect of canopy on occupancy
 
-    # Priors for detection coefficients (species level)
-    v[i] ~ dnorm(mu.v, tau.v)           # baseline detectability of species i when the x_yday variable is zero
+    # Species level priors for detection coefficients
+    v[i] ~ dnorm(mu.v, tau.v)              # baseline detectability of species i under 'average' conditions
     byday[i] ~ dnorm(mu.yday, tau.yday)    # species-specific effect of yday on detection
   }
   
-  # Hyperpriors for occupancy intercept (community level)
-  mu.u ~ dnorm(0, 0.01) # TODO: reasoning?
-  sd.u ~ dunif(0, 5)    # TODO: choose bounds of uniform by trial and error?
-  tau.u <- pow(sd.u,-2)
-  
-  # Hyperpriors for canopy covariate effect (community level)
-  mu.canopy ~ dnorm(0, 0.001)
-  sd.canopy ~ dunif(0, 5)
-  tau.canopy <- pow(sd.canopy,-2)
-  
-  # Hyperpriors for detection intercept (community level)
-  mu.v ~ dnorm(0, 0.001)   # community mean of species-specific intercepts on the logit scale (mean baseline detect prob across all species)
-  sd.v ~ dunif(0, 5)       # community standard deviation of species-specific intercepts (how much detectability varies between species)
-  tau.v <- pow(sd.v,-2)
-
-  # Hyperpriors for yday covariate effect (community level)
-  mu.yday ~ dnorm(0, 0.001) # community mean of the species-specific slopes on the logit scale describing how detection changes with x_yday
-  sd.yday ~ dunif(0, 5)     # community standard deviation
-  tau.yday <- pow(sd.yday,-2)
-  
-  # Derived quantities
+  ## Derived quantities
   for (i in 1:I) {
     Nocc[i]  <- sum(z[ ,i]) # estimated number of occupied sites per species (among the sampled population of sites)
   }
@@ -304,7 +306,7 @@ MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type
 # - Increase iterations
 # - Use more informative priors
 # - Reparametrize the model
-msom_summary = summary(msom) %>% as.data.frame() %>% mutate(parameter = row.names(.)) %>%
+msom_summary = summary(msom) %>% as.data.frame() %>% mutate(parameter = row.names(.), overlap0 = as.factor(overlap0)) %>%
   mutate(prob = plogis(mean), prob_lower95 = plogis(`2.5%`), prob_upper95 = plogis(`97.5%`))
 
 # Visualize estimated number of species per site
@@ -326,7 +328,7 @@ mean_occurrence_prob = msom_summary %>% filter(parameter == "mu.u")
 message("Mean species occurrence probability: ", round(mean_occurrence_prob$prob,2), " (95% BCI ", round(mean_occurrence_prob$prob_lower95,2), "–", round(mean_occurrence_prob$prob_upper95,2), ")")
 message("Species occurrence probability range: ", round(min(occurrence_prob$prob),2), "–", round(max(occurrence_prob$prob),2), " (", occurrence_prob %>% slice_min(prob, n=1) %>% pull(species_name), ", ", occurrence_prob %>% slice_max(prob, n=1) %>% pull(species_name), ")")
 ggplot(occurrence_prob, aes(x = as.factor(plot_order), y = prob)) +
-  geom_hline(yintercept = mean_occurrence_prob$prob, linetype = "solid", color = "blue") +
+  geom_hline(yintercept = mean_occurrence_prob$prob,         linetype = "solid", color = "blue") +
   geom_hline(yintercept = mean_occurrence_prob$prob_lower95, linetype = "dashed", color = "blue") +
   geom_hline(yintercept = mean_occurrence_prob$prob_upper95, linetype = "dashed", color = "blue") +
   geom_point() + geom_errorbar(aes(ymin = `prob_lower95`, ymax = `prob_upper95`), width = 0) +
@@ -342,7 +344,7 @@ mean_detection_prob = msom_summary %>% filter(parameter == "mu.v")
 message("Mean species detection probability: ", round(mean_detection_prob$prob,2), " (95% BCI ", round(mean_detection_prob$prob_lower95,2), "–", round(mean_detection_prob$prob_upper95,2), ")")
 message("Species detection probability range: ", round(min(detection_prob$prob),2), "–", round(max(detection_prob$prob),2), " (", detection_prob %>% slice_min(prob, n=1) %>% pull(species_name), ", ", detection_prob %>% slice_max(prob, n=1) %>% pull(species_name), ")")
 ggplot(detection_prob, aes(x = as.factor(plot_order), y = prob)) +
-  geom_hline(yintercept = mean_detection_prob$prob, linetype = "solid", color = "blue") +
+  geom_hline(yintercept = mean_detection_prob$prob,         linetype = "solid", color = "blue") +
   geom_hline(yintercept = mean_detection_prob$prob_lower95, linetype = "dashed", color = "blue") +
   geom_hline(yintercept = mean_detection_prob$prob_upper95, linetype = "dashed", color = "blue") +
   geom_point() + geom_errorbar(aes(ymin = `prob_lower95`, ymax = `prob_upper95`), width = 0) +
@@ -358,43 +360,145 @@ msom_summary %>% filter(parameter %in% c(
   'mu.canopy', 'sd.canopy'
 )) %>% select(mean, sd, `2.5%`, `97.5%`) %>% round(2)
 
-# TODO: The coefficient acanopy is the effect of canopy cover on occupancy of species i.
+# The coefficient acanopy is the effect of canopy cover on occurrence of species i
+canopy_coef = msom_summary %>% filter(stringr::str_starts(parameter, "acanopy")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(str_extract(parameter, "\\d+"))) %>% mutate(species_name = species[species_idx])
+mu_canopy_summary = msom_summary %>% filter(parameter == "mu.canopy") %>% select(mean, `2.5%`, `97.5%`)
+ggplot(canopy_coef, aes(x = as.factor(plot_order), y = mean)) +
+  geom_hline(yintercept = 0, color = "gray") +
+  geom_point(aes(color = overlap0)) +
+  geom_errorbar(aes(ymin = `25%`,  ymax = `75%`,   color = overlap0), width = 0, size = 1) +
+  geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`, color = overlap0), width = 0) +
+  geom_hline(yintercept = mu_canopy_summary$mean,    linetype = "solid",  color = "blue") +
+  geom_hline(yintercept = mu_canopy_summary$`2.5%`,  linetype = "dashed", color = "blue") +
+  geom_hline(yintercept = mu_canopy_summary$`97.5%`, linetype = "dashed", color = "blue") +
+  labs(title = "Effect of canopy cover on occurrence", x = "Species", y = "Canopy coefficient estimate") +
+  scale_x_discrete(labels = canopy_coef$species_name) +
+  scale_color_manual(values = c("black", "gray")) +
+  coord_flip() +
+  theme(legend.position = "none")
 
-# canopy_coefficients = summary(msom) %>% as.data.frame() %>% mutate(parameter = row.names(.)) %>%
-#   filter(stringr::str_starts(parameter, "acanopy")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-#   mutate(species_idx = as.integer(str_extract(parameter, "\\d+"))) %>% mutate(species_name = species[species_idx]) %>%
-#   mutate(bci_includes_zero = `2.5%` < 0.0 & `97.5%` > 0.0)
-# 
-# mu_canopy_summary = summary(msom) %>% 
-#   as.data.frame() %>%
-#   mutate(parameter = row.names(.)) %>%
-#   filter(parameter == "mu.canopy") %>%
-#   select(mean, `2.5%`, `97.5%`)
-# 
-# ggplot(canopy_coefficients, aes(x = as.factor(plot_order), y = mean)) +
-#   geom_hline(yintercept = 0, color = "gray") +
-#   geom_point(aes(color = bci_includes_zero)) +
-#   geom_errorbar(aes(ymin = `25%`, ymax = `75%`, color = bci_includes_zero), width = 0, size = 1) +
-#   geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`, color = bci_includes_zero), width = 0) +
-#   geom_hline(yintercept = mu_canopy_summary$mean, linetype = "solid", color = "blue") +
-#   geom_hline(yintercept = mu_canopy_summary$`2.5%`, linetype = "dashed", color = "blue") +
-#   geom_hline(yintercept = mu_canopy_summary$`97.5%`, linetype = "dashed", color = "blue") +
-#   labs(x = "Species", y = "Canopy coefficient estimate on occupancy") +
-#   scale_x_discrete(labels = canopy_coefficients$species_name) + 
-#   # scale_y_continuous(limits = c(-0.25, 1.15), breaks = c(-0.25, 0, 0.25, 0.5, 1.0)) +
-#   scale_color_manual(values = c("FALSE" = "black", "TRUE" = "gray")) +
-#   coord_flip() +
-#   theme(legend.position = "none") +
-#   theme_classic()
-# 
-# 
-# 
-# 
-# 
-# 
-# 
-# 
-# 
+# Mean marginal probabilities of occurence for the metacommunity (and individual species) in relation to canopy cover
+
+mean_canopy = attributes(x_canopy_scaled)$`scaled:center` # to transform between z-scale and original scale
+sd_canopy   = attributes(x_canopy_scaled)$`scaled:scale`
+
+original_canopy = seq(0, 100, by = 1) # range of possible canopy cover values
+standardized_canopy = (original_canopy - mean_canopy) / sd_canopy
+
+intercepts = msom_summary %>% # species-specific intercepts u[i]
+  filter(str_starts(parameter, "u")) %>%
+  mutate(species_idx = as.integer(str_extract(parameter, "\\d+")), species_name = species[species_idx]) %>%
+  select(species_name, u_i = mean)
+
+intercepts_and_coeffs = canopy_coef %>% # species-specific canopy coefficients
+  rename(acanopy_i = mean) %>%
+  select(species_name, acanopy_i) %>%
+  left_join(intercepts, by = "species_name")
+
+canopy_preds = intercepts_and_coeffs %>% # predict species-specific occurrence probabilities
+  rowwise() %>% do({
+    i <- .
+    tibble(
+      species_name = i$species_name,
+      canopy = original_canopy,
+      psi = plogis(i$u_i + i$acanopy_i * standardized_canopy)
+    )
+  }) %>% bind_rows()
+
+mu_u_samples      = as.matrix(msom$sims.list$mu.u) # predict meta-community occurrence probabilities (across posterior samples to calculate BCI)
+mu_canopy_samples = as.matrix(msom$sims.list$mu.canopy)
+meta_preds = map_dfr(1:nrow(mu_u_samples), function(i) {
+  tibble(
+    canopy = original_canopy,
+    psi = plogis(mu_u_samples[i, 1] + mu_canopy_samples[i, 1] * standardized_canopy),
+    draw = i
+  )
+})
+meta_summary = meta_preds %>% # calculate means and 95% BCIs
+  group_by(canopy) %>% summarise(
+    psi_mean = mean(psi),
+    psi_lower = quantile(psi, 0.025),
+    psi_upper = quantile(psi, 0.975)
+  )
+
+ggplot(canopy_preds, aes(x = canopy, y = psi, group = species_name)) +
+  geom_line(aes(color = species_name), alpha = 0.4) +
+  geom_ribbon(data = meta_summary, aes(x = canopy, ymin = psi_lower, ymax = psi_upper), fill = "blue", alpha = 0.2, inherit.aes = FALSE) +
+  geom_line(data = meta_summary, aes(x = canopy, y = psi_mean), color = "blue", size = 1.2, inherit.aes = FALSE) +
+  scale_x_continuous(limits = c(0, 100), breaks = c(0, 25, 50, 75, 100)) +
+  scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
+  labs(title = "Metacommunity occurrence probability in relation to canopy cover", x = "Canopy cover (%)", y = "Occurrence probability") +
+  theme(legend.position = "none")
+
+##########################################################################
+
+species_of_interest <- c("Orange-crowned Warbler", "Brown Creeper", "Pacific Wren")
+
+canopy_preds_filtered <- canopy_preds %>%
+  filter(species_name %in% species_of_interest)
+
+# Indices of species of interest in your species vector
+#species_idx <-
+which(species %in% species_of_interest)
+species_idx = match(species_of_interest, species)
+
+# Extract posterior samples for intercepts and canopy slopes of these species
+u_samples <- as.matrix(msom$sims.list$u)[, species_idx]
+acanopy_samples <- as.matrix(msom$sims.list$acanopy)[, species_idx]
+
+# Number of posterior draws and canopy values
+n_draws <- nrow(u_samples)
+n_canopy <- length(original_canopy)
+
+# Create a data frame of standardized canopy values replicated per draw
+canopy_df <- tibble(canopy = original_canopy, standardized_canopy = standardized_canopy)
+
+# For each species, generate posterior predicted psi across draws and canopy
+posterior_preds <- map2_df(
+  .x = seq_along(species_idx),
+  .y = species_of_interest,
+  ~ {
+    sp_i <- .x
+    sp_name <- .y
+    
+    map_dfr(1:n_draws, function(draw_i) {
+      logit_psi <- u_samples[draw_i, sp_i] + acanopy_samples[draw_i, sp_i] * standardized_canopy
+      psi <- plogis(logit_psi)
+      tibble(
+        species_name = sp_name,
+        canopy = original_canopy,
+        psi = psi,
+        draw = draw_i
+      )
+    })
+  }
+)
+
+posterior_summary <- posterior_preds %>%
+  group_by(species_name, canopy) %>%
+  summarise(
+    psi_mean = mean(psi),
+    psi_lower = quantile(psi, 0.025),
+    psi_upper = quantile(psi, 0.975),
+    .groups = "drop"
+  )
+ggplot(posterior_summary, aes(x = canopy, y = psi_mean, color = species_name, fill = species_name)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = psi_lower, ymax = psi_upper), alpha = 0.2, color = NA) +
+  scale_x_continuous(limits = c(0, 100), breaks = c(0, 25, 50, 75, 100)) +
+  scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
+  labs(
+    title = "Occurrence Probability vs Canopy Cover",
+    x = "Canopy cover (%)",
+    y = "Occurrence probability",
+    color = "Species",
+    fill = "Species"
+  )
+
+
+
+
 # ## Predict mean occupancy probabilities across the categories of forest strata
 # 
 # # For each species, calculate parameter posterior means (and 95% credible intervals) of occupancy probability
