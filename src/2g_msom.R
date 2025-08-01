@@ -1,5 +1,5 @@
 ####################################################################################
-# A multi-species static occupancy model with occupancy and detection covariates
+# A multi-species static occupancy model with multiple occupancy and detection covariates
 #
 # INPUT:
 path_community_survey_data = "data/cache/1_derive_community_array/community_survey_data.rds"
@@ -18,6 +18,7 @@ local_plot_data = local_plot_data %>% sf::st_drop_geometry() %>% arrange(site) %
 
 # Season `t`
 t = "2020"
+year = as.numeric(t)
 threshold = 0.95 # naive conversion from continuous score prediction to binary detection-nondetection
 
 message("Loading community survey data")
@@ -32,7 +33,7 @@ ylist   = setNames(vector("list", length(species)), species)
 xlist_yday = setNames(vector("list", length(species)), species)
 for (sp in species) {
   species_data = community_survey_data[, , sp]
-
+  
   # Putative observation matrix (detection-nondetection via thresholded confidence scores)
   mat_obs = matrix(
     unlist(lapply(species_data, function(x) if (!is.null(x)) as.integer(any(x$confidence >= threshold, na.rm = TRUE)) else NA)),
@@ -52,12 +53,23 @@ for (sp in species) {
   xlist_yday[[sp]] = mat_yday
 }
 
+newxlist_yday = matrix(
+  unlist(lapply(community_survey_data[, , 1], function(x) if (!is.null(x)) yday(x$survey_date) else NA)),
+  nrow = dim(community_survey_data)[1],
+  ncol = dim(community_survey_data)[2],
+  dimnames = dimnames(community_survey_data)[1:2]
+)
+
+
+
 # Discard sites with no environmental data
 sites_missing_environmental_data = setdiff(dimnames(community_survey_data)$unit, local_plot_data$site)
 if (length(sites_missing_environmental_data) > 0) {
   message("Discarding ", length(sites_missing_environmental_data), " sites with missing environmental data")
   ylist = lapply(ylist, function(mat) { mat[!(rownames(mat) %in% sites_missing_environmental_data), , drop = FALSE] })
   xlist_yday = lapply(xlist_yday, function(mat) { mat[!(rownames(mat) %in% sites_missing_environmental_data), , drop = FALSE] })
+  
+  newxlist_yday = newxlist_yday[!rownames(newxlist_yday) %in% sites_missing_environmental_data, ]
 }
 # Discard sites with no observations
 sites_with_environmental_data_missing_observations = setdiff(local_plot_data$site, dimnames(community_survey_data)$unit)
@@ -65,6 +77,8 @@ if (length(sites_with_environmental_data_missing_observations) > 0) {
   message("Discarding ", length(sites_with_environmental_data_missing_observations), " sites with missing observations")
   ylist = lapply(ylist, function(mat) { mat[!(rownames(mat) %in% sites_with_environmental_data_missing_observations), , drop = FALSE] })
   xlist_yday = lapply(xlist_yday, function(mat) { mat[!(rownames(mat) %in% sites_with_environmental_data_missing_observations), , drop = FALSE] })
+  
+  newxlist_yday = newxlist_yday[!rownames(newxlist_yday) %in% sites_with_environmental_data_missing_observations, ]
 }
 
 # Discard sites with no survey observations and surveys with no site observations
@@ -75,6 +89,8 @@ if (length(sites_not_surveyed) > 0) {
   message("Discarding ", length(sites_not_surveyed), " sites with no survey observations")
   ylist = lapply(ylist, function(mat) { mat[!(rownames(mat) %in% sites_not_surveyed), , drop = FALSE] })
   xlist_yday = lapply(xlist_yday, function(mat) { mat[!(rownames(mat) %in% sites_not_surveyed), , drop = FALSE] })
+  
+  newxlist_yday = newxlist_yday[!rownames(newxlist_yday) %in% sites_not_surveyed, ]
 }
 survey_site_counts = lapply(ylist, function(x) { colSums(!is.na(x))})
 sites_per_survey = as.data.frame(t(do.call(rbind, survey_site_counts)))
@@ -83,6 +99,8 @@ if (length(surveys_not_conducted) > 0) {
   message("Discarding ", length(surveys_not_conducted), " surveys with no site observations")
   ylist = lapply(ylist, function(mat) { mat[, !(colnames(mat) %in% surveys_not_conducted), drop = FALSE] })
   xlist_yday = lapply(xlist_yday, function(mat) { mat[, !(colnames(mat) %in% surveys_not_conducted), drop = FALSE] })
+  
+  newxlist_yday = newxlist_yday[, !colnames(newxlist_yday) %in% surveys_not_conducted]
 }
 
 sites   = rownames(surveys_per_site)[rowSums(surveys_per_site) != 0]
@@ -92,6 +110,7 @@ surveys = rownames(sites_per_survey)[rowSums(sites_per_survey) != 0]
 message("Total number of sites: ", length(sites))
 lapply(ylist, head)
 lapply(xlist_yday, head)
+head(newxlist_yday)
 
 n_surveys_per_site = apply(!is.na(ylist[[1]]), 1, sum)
 message(sum(n_surveys_per_site), " total sampling periods (surveys) conducted across ", length(sites), " sampling units (sites)")
@@ -154,6 +173,11 @@ for (sp in seq_along(xlist_yday)) {
   x_yday[, , sp] = as.matrix(xlist_yday[[sp]])
 }
 
+# newx_yday = array(NA, dim = c(length(sites), length(surveys)),
+                  # dimnames = list(site = sites, survey = surveys))
+# newx_yday = as.matrix(newxlist_yday)
+newx_yday = newxlist_yday
+
 # Left-align data (moving any missing NA surveys to the right) to allow for direct indexing by number of surveys per site
 y_unaligned = y
 x_yday_unaligned = x_yday
@@ -174,8 +198,43 @@ for (sp in dimnames(y)[[3]]) {
 }
 n_surveys_per_site = apply(!is.na(y[, , 1]), 1, sum)
 
-# Get scaled detection covariate data
-x_yday_scaled = scale(as.vector(x_yday)) # TODO: check for NA!
+newx_yday_unaligned = newx_yday
+newx_yday = t(apply(newx_yday_unaligned, 1, left_align_row))
+dimnames(newx_yday) = dimnames(newx_yday_unaligned)
+
+# Get detection covariate data
+detection_data = readRDS("data/cache/detection_covariates/data_detection.rds")
+#############################################
+# # Initialize empty array of same shape
+# x_prcp = x_yday  # same dimensions and dimnames
+# x_prcp[] = NA    # replace values with NA first
+# for (i in seq_len(dim(x_yday)[1])) {        # sites
+#   for (j in seq_len(dim(x_yday)[2])) {      # surveys
+#     for (k in seq_len(dim(x_yday)[3])) {    # species
+#       # message('site ', i,' survey ', j, ' species ', k)
+#       # message('yday', x_yday[i, j, k])
+#       site_i = dimnames(x_yday)$site[i]
+#       yday_j = x_yday[i, j, k]
+#       data = detection_data %>% filter(year == t, site == site_i, yday == yday_j)
+# 
+#       prcp = data %>% pull(tmax_deg_c)
+#       
+#       message('site ', site_i,' survey ', j, ' species ', k, ' yday ', yday_j, ' prcp ', prcp)
+#       
+#       x_prcp[i, j, k] = prcp
+#       
+#       # if (!is.null(val)) {
+#       #   x_prcp[i, j, k] <- val
+#       # }
+#     }
+#   }
+# }
+
+#############################################
+
+# Standardize detection covariate data to z-scale (mean 0, standard deviation 1)
+x_yday_scaled = scale(as.vector(x_yday))
+newx_yday_scaled = scale(as.vector(newx_yday))
 
 # Get scaled observational covariate data
 local_plot_data = local_plot_data %>% filter(site %in% dimnames(y)$site) # discard data for irrelevant sites
@@ -199,7 +258,7 @@ msom_data = list(
   # Occupancy covariates
   x_canopy = x_canopy_scaled[,1],                    # canopy cover covariate site vector
   # Detection covariates
-  x_yday = array(x_yday_scaled, dim = dim(x_yday)) # day of year detection covariate site-survey matrix
+  x_yday = array(newx_yday_scaled, dim = dim(newx_yday)) # day of year detection covariate site-survey matrix
 )
 str(msom_data)
 
@@ -243,7 +302,7 @@ model{
       for (k in 1:sampling_periods[j]) { # for each sampling period (survey) at site j
 
         # Observation model for observed data y
-        logit(p[j,k,i]) <- v[i] + byday[i]*x_yday[j,k,i] # logit of detection prob depends on survey-specific covariate
+        logit(p[j,k,i]) <- v[i] + byday[i]*x_yday[j,k] # logit of detection prob depends on survey-specific covariate
         
         y[j,k,i] ~ dbern(p[j,k,i] * z[j,i])
       }
@@ -276,7 +335,7 @@ msom = jags(data = msom_data,
               "u", "mu.u", "sd.u",
               "v", "mu.v", "sd.v",
               "acanopy", "mu.canopy", "sd.canopy",
-              "byday", "mu.yday", "sd.canopy",
+              "byday", "mu.yday", "sd.yday",
               "Nsite", "Nocc"
             ),
             model.file = model_file,
@@ -289,11 +348,12 @@ message("Finished running JAGS (", round(as.numeric(difftime(Sys.time(), time_st
 # https://m-clark.github.io/bayesian-basics/diagnostics.html#monitoring-convergence
 
 # Gelman-Rubin statistic (Potential Scale Reduction Factor) Rhat values as a convergence diagnostic (Gelman and Rubin 1992). This is a test statistic for testing if the variance within chains is different than the variance between chains, and is meant to test if each chain was sampling from similar distributions -- if all the chains are “the same”, then the between chain variation should be close to zero. Rhat values substantially above 1.0 indicate lack of convergence; 1.2 is sometimes used as a guideline for “approximate convergence” (Brooks and Gelman 1998), but in practice a more stringent rule of Rhat < 1.1 is often used to declare convergence. If the chains have not converged, Bayesian credible intervals based on the t-distribution are too wide, and have the potential to shrink by this factor if the MCMC run is continued.
-(msom_summary = summary(msom))
-mcmc_summary = MCMCsummary(msom)
-mcmc_summary %>% arrange(desc(Rhat))
+msom_summary = summary(msom)
+msom_summary = msom_summary %>% as_tibble() %>%
+  mutate(param = rownames(msom_summary), overlap0 = as.factor(overlap0)) %>% relocate(param, .before = 1) %>%
+  mutate(prob = plogis(mean), prob_lower95 = plogis(`2.5%`), prob_upper95 = plogis(`97.5%`))
 message("The following parameters may not have converged:")
-mcmc_summary %>% filter(Rhat > 1.0)
+msom_summary %>% filter(Rhat >= 1.1)
 
 # Examine trace plots for good mixing and convergence among chains. Each chain is displayed in a different colour. This means random paths exploring a lot of the parameter space on the y-axis without a clear pattern and each chain converging on the same value.
 MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'trace', Rhat = TRUE, n.eff = TRUE)
@@ -306,12 +366,10 @@ MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type
 # - Increase iterations
 # - Use more informative priors
 # - Reparametrize the model
-msom_summary = summary(msom) %>% as.data.frame() %>% mutate(parameter = row.names(.), overlap0 = as.factor(overlap0)) %>%
-  mutate(prob = plogis(mean), prob_lower95 = plogis(`2.5%`), prob_upper95 = plogis(`97.5%`))
 
 # Visualize estimated number of species per site
-Nsite_posterior = msom_summary %>% filter(stringr::str_starts(parameter, "Nsite")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(site_idx = as.integer(str_extract(parameter, "\\d+"))) %>% mutate(site = sites[site_idx])
+Nsite_posterior = msom_summary %>% filter(stringr::str_starts(param, "Nsite")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(site_idx = as.integer(str_extract(param, "\\d+"))) %>% mutate(site = sites[site_idx])
 Nsite_mean = mean(Nsite_posterior$mean)
 message("Mean estimated species richness across all sites: ", round(Nsite_mean,1), " (range ", round(min(Nsite_posterior$mean),1), "–", round(max(Nsite_posterior$mean),1), ")")
 ggplot(Nsite_posterior, aes(x = as.factor(plot_order), y = mean)) +
@@ -326,9 +384,10 @@ ggplot(Nsite_posterior, aes(x = mean)) +
   labs(title = "Estimated species richness per site", x = "Number of species estimated", y = "Number of sites")
 
 # As covariates on occupancy were standardized, the inverse-logit (`plogis()`) of u[i] is the baseline occurrence probability for species i at a site with ‘average’ habitat characteristics.
-occurrence_prob = msom_summary %>% filter(stringr::str_starts(parameter, "u")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(species_idx = as.integer(str_extract(parameter, "\\d+"))) %>% mutate(species_name = species[species_idx])
-mean_occurrence_prob = msom_summary %>% filter(parameter == "mu.u")
+
+occurrence_prob = msom_summary %>% filter(stringr::str_starts(param, "u")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(str_extract(param, "\\d+"))) %>% mutate(species_name = species[species_idx])
+mean_occurrence_prob = msom_summary %>% filter(param == "mu.u")
 message("Mean species occurrence probability: ", round(mean_occurrence_prob$prob,2), " (95% BCI ", round(mean_occurrence_prob$prob_lower95,2), "–", round(mean_occurrence_prob$prob_upper95,2), ")")
 message("Species occurrence probability range: ", round(min(occurrence_prob$prob),2), "–", round(max(occurrence_prob$prob),2), " (", occurrence_prob %>% slice_min(prob, n=1) %>% pull(species_name), ", ", occurrence_prob %>% slice_max(prob, n=1) %>% pull(species_name), ")")
 ggplot(occurrence_prob, aes(x = as.factor(plot_order), y = prob)) +
@@ -342,9 +401,9 @@ ggplot(occurrence_prob, aes(x = as.factor(plot_order), y = prob)) +
   coord_flip()
 
 # Similarly, the inverse-logit of v[i] is the detection probability for species i under 'average' detection conditions.
-detection_prob = msom_summary %>% filter(stringr::str_starts(parameter, "v")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(species_idx = as.integer(str_extract(parameter, "\\d+"))) %>% mutate(species_name = species[species_idx])
-mean_detection_prob = msom_summary %>% filter(parameter == "mu.v")
+detection_prob = msom_summary %>% filter(stringr::str_starts(param, "v")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(str_extract(param, "\\d+"))) %>% mutate(species_name = species[species_idx])
+mean_detection_prob = msom_summary %>% filter(param == "mu.v")
 message("Mean species detection probability: ", round(mean_detection_prob$prob,2), " (95% BCI ", round(mean_detection_prob$prob_lower95,2), "–", round(mean_detection_prob$prob_upper95,2), ")")
 message("Species detection probability range: ", round(min(detection_prob$prob),2), "–", round(max(detection_prob$prob),2), " (", detection_prob %>% slice_min(prob, n=1) %>% pull(species_name), ", ", detection_prob %>% slice_max(prob, n=1) %>% pull(species_name), ")")
 ggplot(detection_prob, aes(x = as.factor(plot_order), y = prob)) +
@@ -360,14 +419,14 @@ ggplot(detection_prob, aes(x = as.factor(plot_order), y = prob)) +
 # Community-level summaries of the hyper-parameters for the detection and occupancy covariates
 # mu is the community response (mean across species) to a given covariate and sd is the standard deviation (among species). Thus, the hyper-parameters are simply the mean and variance for each covariate as measured across species (Kéry & Royle 2009)
 message("Community-level summaries of hyper-parameters for occurrence and detection covariates:")
-msom_summary %>% filter(parameter %in% c(
+msom_summary %>% filter(param %in% c(
   'mu.canopy', 'sd.canopy'
-)) %>% select(mean, sd, `2.5%`, `97.5%`) %>% round(2)
+)) %>% select(param, mean, sd, `2.5%`, `97.5%`)
 
 # The coefficient acanopy is the effect of canopy cover on occurrence of species i
-canopy_coef = msom_summary %>% filter(stringr::str_starts(parameter, "acanopy")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(species_idx = as.integer(str_extract(parameter, "\\d+"))) %>% mutate(species_name = species[species_idx])
-mu_canopy_summary = msom_summary %>% filter(parameter == "mu.canopy") %>% select(mean, `2.5%`, `97.5%`)
+canopy_coef = msom_summary %>% filter(stringr::str_starts(param, "acanopy")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(str_extract(param, "\\d+"))) %>% mutate(species_name = species[species_idx])
+mu_canopy_summary = msom_summary %>% filter(param == "mu.canopy") %>% select(mean, `2.5%`, `97.5%`)
 ggplot(canopy_coef, aes(x = as.factor(plot_order), y = mean)) +
   geom_hline(yintercept = 0, color = "gray") +
   geom_point(aes(color = overlap0)) +
@@ -388,8 +447,8 @@ sd_canopy   = attributes(x_canopy_scaled)$`scaled:scale`
 original_canopy = seq(0, 100, by = 1) # range of possible canopy cover values
 standardized_canopy = (original_canopy - mean_canopy) / sd_canopy
 intercepts = msom_summary %>% # species-specific occurrence intercepts u[i]
-  filter(str_starts(parameter, "u")) %>%
-  mutate(species_idx = as.integer(str_extract(parameter, "\\d+")), species_name = species[species_idx]) %>%
+  filter(str_starts(param, "u")) %>%
+  mutate(species_idx = as.integer(str_extract(param, "\\d+")), species_name = species[species_idx]) %>%
   select(species_name, u_i = mean)
 intercepts_and_coeffs = canopy_coef %>% # species-specific canopy coefficients
   rename(acanopy_i = mean) %>%
@@ -463,12 +522,12 @@ ggplot(posterior_summary, aes(x = canopy, y = psi_mean, color = species_name, fi
   geom_ribbon(aes(ymin = psi_lower, ymax = psi_upper), alpha = 0.2, color = NA) +
   scale_x_continuous(limits = c(0, 100), breaks = c(0, 25, 50, 75, 100)) +
   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
-  labs(title = "Occurrence Probability vs Canopy Cover", x = "Canopy cover (%)", y = "Occurrence probability", color = "Species", fill = "Species")
+  labs(title = "Occurrence probability in relation to canopy cover", x = "Canopy cover (%)", y = "Occurrence probability", color = "Species", fill = "Species")
 
 # The coefficient byday is the effect of day of year on detection of species i
-yday_coef = msom_summary %>% filter(stringr::str_starts(parameter, "byday")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(species_idx = as.integer(str_extract(parameter, "\\d+"))) %>% mutate(species_name = species[species_idx])
-mu_yday_summary = msom_summary %>% filter(parameter == "mu.yday") %>% select(mean, `2.5%`, `97.5%`)
+yday_coef = msom_summary %>% filter(stringr::str_starts(param, "byday")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(str_extract(param, "\\d+"))) %>% mutate(species_name = species[species_idx])
+mu_yday_summary = msom_summary %>% filter(param == "mu.yday") %>% select(mean, `2.5%`, `97.5%`)
 ggplot(yday_coef, aes(x = as.factor(plot_order), y = mean)) +
   geom_hline(yintercept = 0, color = "gray") +
   geom_point(aes(color = overlap0)) +
@@ -489,8 +548,8 @@ sd_yday   = attributes(x_yday_scaled)$`scaled:scale`
 original_yday = seq(min(x_yday, na.rm = TRUE), max(x_yday, na.rm = TRUE), by = 1) # range of observed yday values
 standardized_yday = (original_yday - mean_yday) / sd_yday
 intercepts = msom_summary %>% # species-specific detection intercepts v[i]
-  filter(str_starts(parameter, "v")) %>%
-  mutate(species_idx = as.integer(str_extract(parameter, "\\d+")), species_name = species[species_idx]) %>%
+  filter(str_starts(param, "v")) %>%
+  mutate(species_idx = as.integer(str_extract(param, "\\d+")), species_name = species[species_idx]) %>%
   select(species_name, v_i = mean)
 intercepts_and_coeffs = yday_coef %>% # species-specific yday coefficients
   rename(byday_i = mean) %>%

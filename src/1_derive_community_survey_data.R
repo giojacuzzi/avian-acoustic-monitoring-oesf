@@ -32,8 +32,13 @@ prediction_data = arrow::read_feather(path_prediction_data) %>% mutate(survey_da
 
 ## Clean data
 message("Cleaning data")
-prediction_data_filtered = prediction_data
-survey_file_counts_filtered = survey_file_counts
+prediction_data_filtered = prediction_data %>% mutate(
+  unit = as.factor(tolower(as.character(unit))),
+  unit_agg = as.factor(tolower(as.character(unit_agg)))
+)
+survey_file_counts_filtered = survey_file_counts %>% mutate(
+  unit = as.factor(tolower(as.character(unit)))
+)
 
 ## Manually exclude specific survey(s)
 # Incomplete and redone in a later deployment
