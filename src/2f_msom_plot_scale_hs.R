@@ -175,7 +175,7 @@ for (sp in dimnames(y)[[3]]) {
 n_surveys_per_site = apply(!is.na(y[, , 1]), 1, sum)
 
 # Get scaled detection covariate data
-x_yday_scaled = scale(as.vector(x_yday))
+x_yday_scaled = scale(as.vector(x_yday)) # TODO: check for NA!
 
 # Get scaled observational covariate data
 local_plot_data = local_plot_data %>% filter(site %in% dimnames(y)$site) # discard data for irrelevant sites
@@ -320,6 +320,10 @@ ggplot(Nsite_posterior, aes(x = as.factor(plot_order), y = mean)) +
   scale_x_discrete(labels = Nsite_posterior$site) + 
   labs(title = "Estimated species richness per site", x = "Site", y = "Estimated species richness") +
   coord_flip()
+ggplot(Nsite_posterior, aes(x = mean)) +
+  geom_histogram(binwidth = 1) +
+  geom_vline(xintercept = Nsite_mean, color = "blue") +
+  labs(title = "Estimated species richness per site", x = "Number of species estimated", y = "Number of sites")
 
 # As covariates on occupancy were standardized, the inverse-logit (`plogis()`) of u[i] is the baseline occurrence probability for species i at a site with ‘average’ habitat characteristics.
 occurrence_prob = msom_summary %>% filter(stringr::str_starts(parameter, "u")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
@@ -378,24 +382,19 @@ ggplot(canopy_coef, aes(x = as.factor(plot_order), y = mean)) +
   coord_flip() +
   theme(legend.position = "none")
 
-# Mean marginal probabilities of occurence for the metacommunity (and individual species) in relation to canopy cover
-
+# Mean marginal probabilities of occurrence for the metacommunity in relation to canopy cover
 mean_canopy = attributes(x_canopy_scaled)$`scaled:center` # to transform between z-scale and original scale
 sd_canopy   = attributes(x_canopy_scaled)$`scaled:scale`
-
 original_canopy = seq(0, 100, by = 1) # range of possible canopy cover values
 standardized_canopy = (original_canopy - mean_canopy) / sd_canopy
-
-intercepts = msom_summary %>% # species-specific intercepts u[i]
+intercepts = msom_summary %>% # species-specific occurrence intercepts u[i]
   filter(str_starts(parameter, "u")) %>%
   mutate(species_idx = as.integer(str_extract(parameter, "\\d+")), species_name = species[species_idx]) %>%
   select(species_name, u_i = mean)
-
 intercepts_and_coeffs = canopy_coef %>% # species-specific canopy coefficients
   rename(acanopy_i = mean) %>%
   select(species_name, acanopy_i) %>%
   left_join(intercepts, by = "species_name")
-
 canopy_preds = intercepts_and_coeffs %>% # predict species-specific occurrence probabilities
   rowwise() %>% do({
     i <- .
@@ -405,7 +404,6 @@ canopy_preds = intercepts_and_coeffs %>% # predict species-specific occurrence p
       psi = plogis(i$u_i + i$acanopy_i * standardized_canopy)
     )
   }) %>% bind_rows()
-
 mu_u_samples      = as.matrix(msom$sims.list$mu.u) # predict meta-community occurrence probabilities (across posterior samples to calculate BCI)
 mu_canopy_samples = as.matrix(msom$sims.list$mu.canopy)
 meta_preds = map_dfr(1:nrow(mu_u_samples), function(i) {
@@ -421,7 +419,6 @@ meta_summary = meta_preds %>% # calculate means and 95% BCIs
     psi_lower = quantile(psi, 0.025),
     psi_upper = quantile(psi, 0.975)
   )
-
 ggplot(canopy_preds, aes(x = canopy, y = psi, group = species_name)) +
   geom_line(aes(color = species_name), alpha = 0.4) +
   geom_ribbon(data = meta_summary, aes(x = canopy, ymin = psi_lower, ymax = psi_upper), fill = "blue", alpha = 0.2, inherit.aes = FALSE) +
@@ -431,53 +428,31 @@ ggplot(canopy_preds, aes(x = canopy, y = psi, group = species_name)) +
   labs(title = "Metacommunity occurrence probability in relation to canopy cover", x = "Canopy cover (%)", y = "Occurrence probability") +
   theme(legend.position = "none")
 
-##########################################################################
-
-species_of_interest <- c("Orange-crowned Warbler", "Brown Creeper", "Pacific Wren")
-
-canopy_preds_filtered <- canopy_preds %>%
-  filter(species_name %in% species_of_interest)
-
-# Indices of species of interest in your species vector
-#species_idx <-
-which(species %in% species_of_interest)
+# Mean marginal probabilities of occurrence for specific species in relation to canopy cover
+species_of_interest = c("Orange-crowned Warbler", "Brown Creeper", "Pacific Wren")
+canopy_preds_filtered = canopy_preds %>% filter(species_name %in% species_of_interest)
 species_idx = match(species_of_interest, species)
-
-# Extract posterior samples for intercepts and canopy slopes of these species
-u_samples <- as.matrix(msom$sims.list$u)[, species_idx]
-acanopy_samples <- as.matrix(msom$sims.list$acanopy)[, species_idx]
-
-# Number of posterior draws and canopy values
-n_draws <- nrow(u_samples)
-n_canopy <- length(original_canopy)
-
-# Create a data frame of standardized canopy values replicated per draw
-canopy_df <- tibble(canopy = original_canopy, standardized_canopy = standardized_canopy)
-
-# For each species, generate posterior predicted psi across draws and canopy
-posterior_preds <- map2_df(
-  .x = seq_along(species_idx),
-  .y = species_of_interest,
+u_samples = as.matrix(msom$sims.list$u)[, species_idx] # posterior samples for intercept and covariate slopes for each species
+acanopy_samples = as.matrix(msom$sims.list$acanopy)[, species_idx]
+n_draws = nrow(u_samples) # posterior draws
+n_canopy = length(original_canopy)
+posterior_preds = map2_df( # Predict posterior occurrence across draws for each species
+  .x = seq_along(species_idx), .y = species_of_interest,
   ~ {
-    sp_i <- .x
-    sp_name <- .y
-    
-    map_dfr(1:n_draws, function(draw_i) {
-      logit_psi <- u_samples[draw_i, sp_i] + acanopy_samples[draw_i, sp_i] * standardized_canopy
-      psi <- plogis(logit_psi)
+    i <- .x
+    name <- .y
+    map_dfr(1:n_draws, function(draw) {
       tibble(
-        species_name = sp_name,
+        species_name = name,
         canopy = original_canopy,
-        psi = psi,
-        draw = draw_i
+        psi = plogis(u_samples[draw, i] + acanopy_samples[draw, i] * standardized_canopy),
+        draw = draw
       )
     })
   }
 )
-
-posterior_summary <- posterior_preds %>%
-  group_by(species_name, canopy) %>%
-  summarise(
+posterior_summary = posterior_preds %>%
+  group_by(species_name, canopy) %>% summarise(
     psi_mean = mean(psi),
     psi_lower = quantile(psi, 0.025),
     psi_upper = quantile(psi, 0.975),
@@ -488,129 +463,68 @@ ggplot(posterior_summary, aes(x = canopy, y = psi_mean, color = species_name, fi
   geom_ribbon(aes(ymin = psi_lower, ymax = psi_upper), alpha = 0.2, color = NA) +
   scale_x_continuous(limits = c(0, 100), breaks = c(0, 25, 50, 75, 100)) +
   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
-  labs(
-    title = "Occurrence Probability vs Canopy Cover",
-    x = "Canopy cover (%)",
-    y = "Occurrence probability",
-    color = "Species",
-    fill = "Species"
+  labs(title = "Occurrence Probability vs Canopy Cover", x = "Canopy cover (%)", y = "Occurrence probability", color = "Species", fill = "Species")
+
+# The coefficient byday is the effect of day of year on detection of species i
+yday_coef = msom_summary %>% filter(stringr::str_starts(parameter, "byday")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(str_extract(parameter, "\\d+"))) %>% mutate(species_name = species[species_idx])
+mu_yday_summary = msom_summary %>% filter(parameter == "mu.yday") %>% select(mean, `2.5%`, `97.5%`)
+ggplot(yday_coef, aes(x = as.factor(plot_order), y = mean)) +
+  geom_hline(yintercept = 0, color = "gray") +
+  geom_point(aes(color = overlap0)) +
+  geom_errorbar(aes(ymin = `25%`,  ymax = `75%`,   color = overlap0), width = 0, size = 1) +
+  geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`, color = overlap0), width = 0) +
+  geom_hline(yintercept = mu_yday_summary$mean,    linetype = "solid",  color = "blue") +
+  geom_hline(yintercept = mu_yday_summary$`2.5%`,  linetype = "dashed", color = "blue") +
+  geom_hline(yintercept = mu_yday_summary$`97.5%`, linetype = "dashed", color = "blue") +
+  labs(title = "Effect of day of year on detection", x = "Species", y = "Day of year coefficient estimate") +
+  scale_x_discrete(labels = yday_coef$species_name) +
+  scale_color_manual(values = c("black", "gray")) +
+  coord_flip() +
+  theme(legend.position = "none")
+
+# Mean marginal probabilities of detection for the metacommunity in relation to day of year
+mean_yday = attributes(x_yday_scaled)$`scaled:center` # to transform between z-scale and original scale
+sd_yday   = attributes(x_yday_scaled)$`scaled:scale`
+original_yday = seq(min(x_yday, na.rm = TRUE), max(x_yday, na.rm = TRUE), by = 1) # range of observed yday values
+standardized_yday = (original_yday - mean_yday) / sd_yday
+intercepts = msom_summary %>% # species-specific detection intercepts v[i]
+  filter(str_starts(parameter, "v")) %>%
+  mutate(species_idx = as.integer(str_extract(parameter, "\\d+")), species_name = species[species_idx]) %>%
+  select(species_name, v_i = mean)
+intercepts_and_coeffs = yday_coef %>% # species-specific yday coefficients
+  rename(byday_i = mean) %>%
+  select(species_name, byday_i) %>%
+  left_join(intercepts, by = "species_name")
+yday_preds = intercepts_and_coeffs %>% # predict species-specific occurrence probabilities
+  rowwise() %>% do({
+    i <- .
+    tibble(
+      species_name = i$species_name,
+      yday = original_yday,
+      psi = plogis(i$v_i + i$byday_i * standardized_yday)
+    )
+  }) %>% bind_rows()
+mu_v_samples      = as.matrix(msom$sims.list$mu.v) # predict meta-community occurrence probabilities (across posterior samples to calculate BCI)
+mu_yday_samples = as.matrix(msom$sims.list$mu.yday)
+meta_preds = map_dfr(1:nrow(mu_v_samples), function(i) {
+  tibble(
+    yday = original_yday,
+    psi = plogis(mu_v_samples[i, 1] + mu_yday_samples[i, 1] * standardized_yday),
+    draw = i
   )
-
-
-
-
-# ## Predict mean occupancy probabilities across the categories of forest strata
-# 
-# # For each species, calculate parameter posterior means (and 95% credible intervals) of occupancy probability
-# # by transforming each MCMC sample from log-odds to probability
-# b0_samples      = msom$sims.list$b0
-# bcanopy_samples = msom$sims.list$bcanopy
-# species_posterior = data.frame()
-# for (k in 1:ncol(b0_samples)) {
-#     probs = plogis(b0_samples[, k] + bcanopy_samples[, k])
-#     probs_mean_ci = apply(probs, 2, function(x) {
-#       c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
-#     })
-#     species_posterior = rbind(species_posterior, data.frame(mean = probs_mean_ci["mean", ], lower = probs_mean_ci["lower", ], upper = probs_mean_ci["upper", ], sp = species[k]
-#     ))
-# }
-# species_posterior = species_posterior %>% arrange(mean) %>% mutate(sp = factor(sp, levels = species))
-# 
-# # For the community, calculate hyperparameter posterior mean (and 95% CRI) of detection probability
-# b0_mean_samples       = msom$sims.list$mu.b0
-# stratum_mean_samples  = msom$sims.list$mu.stratum
-# community_stratum_posterior = data.frame()
-# for (l in 1:length(strata)) {
-#   probs = sapply(l, function(x) {
-#     plogis(b0_mean_samples + stratum_mean_samples[, l])
-#   })
-#   probs_mean_ci = apply(probs, 2, function(x) {
-#     c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
-#   })
-#   community_stratum_posterior = rbind(community_stratum_posterior, data.frame(
-#     stratum = l, mean = probs_mean_ci["mean", ], lower = probs_mean_ci["lower", ], upper = probs_mean_ci["upper", ], sp = "Community mean"
-#   ))
-# }
-# 
-# # Visualize relationship between stratum and occupancy probability for the community
-# for (stratum_name in strata) {
-#   stratum_idx  = which(strata == stratum_name)
-#   p = ggplot() +
-#     geom_point(data = species_stratum_posterior %>% filter(stratum == stratum_idx) %>% arrange(mean) %>% mutate(sp = factor(sp, levels = unique(sp))),
-#                aes(x = mean, y = sp)) +
-#     geom_errorbar(data = species_stratum_posterior %>% filter(stratum == stratum_idx) %>% arrange(mean) %>% mutate(sp = factor(sp, levels = unique(sp))),
-#                   aes(x = mean, y = sp, xmin = lower, xmax = upper), width = 0.2, alpha = 0.2) +
-#     geom_vline(xintercept = community_stratum_posterior %>% filter(stratum == stratum_idx) %>% pull(mean), color = "blue") +
-#     geom_vline(xintercept = community_stratum_posterior %>% filter(stratum == stratum_idx) %>% pull(lower), color = "blue", linetype = "dashed") +
-#     geom_vline(xintercept = community_stratum_posterior %>% filter(stratum == stratum_idx) %>% pull(upper), color = "blue", linetype = "dashed") +
-#     xlim(0.0, 1.0) +
-#     labs(title = stratum_name, x = "Occupancy probability", y = "") +
-#     theme_classic(); print(p)
-# }
-# 
-# # Visualize relationship between stratum and occupancy probability for a specific species
-# species_name = "Brown Creeper"
-# species_idx = which(species == species_name)
-# p = ggplot(species_stratum_posterior %>% filter(sp == species_name) %>% mutate(stratum = factor(strata[stratum], levels = strata)),
-#            aes(x = stratum, y = mean)) +
-#   geom_point(size = 3) +
-#   geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
-#   ylim(0.0, 1.0) +
-#   labs(title = paste0(species_name, " (", species_idx,")"), x = "Stratum", y = "Occupancy probability") +
-#   theme_classic(); print(p)
-# 
-# ## Predict mean detection probabilities across the observed range of yday values
-# yday_seq = seq(min(x_yday, na.rm = TRUE), max(x_yday, na.rm = TRUE), by = 1)
-# 
-# # For each species, calculate parameter posterior mean (and 95% credible interval) of detection probability
-# # by transforming each MCMC sample from log-odds to probability and averaging over the samples
-# a0_samples = msom$sims.list$a0
-# byday_samples  = msom$sims.list$byday
-# species_yday_posterior = data.frame()
-# for (k in 1:ncol(a0_samples)) {
-#   probs = sapply(yday_seq, function(x) {
-#     plogis(a0_samples[, k] + byday_samples[, k] * x)
-#   })
-#   probs_mean_ci = apply(probs, 2, function(x) {
-#     c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
-#   })
-#   species_yday_posterior = rbind(species_yday_posterior, data.frame(yday = yday_seq, mean = probs_mean_ci["mean", ], lower = probs_mean_ci["lower", ], upper = probs_mean_ci["upper", ], species = as.character(k)
-#   ))
-# }
-# 
-# # For the community, calculate hyperparameter posterior mean (and 95% CRI) of detection probability
-# a0_mean_samples    = msom$sims.list$mu.a0
-# yday_mean_samples  = msom$sims.list$mu.yday
-# probs = sapply(yday_seq, function(x) {
-#   plogis(a0_mean_samples + yday_mean_samples * x)
-# })
-# probs_mean_ci = apply(probs, 2, function(x) {
-#   c(mean = mean(x), lower = quantile(x, 0.025, names = FALSE), upper = quantile(x, 0.975, names = FALSE))
-# })
-# community_yday_posterior = data.frame(yday = yday_seq, mean = probs_mean_ci["mean", ], lower = probs_mean_ci["lower", ], upper = probs_mean_ci["upper", ], species = "Community mean")
-# 
-# # Visualize relationship between yday and detection probability for the community
-# p = ggplot() +
-#   geom_line(data = species_yday_posterior, aes(x = yday, y = mean, group = species), alpha = 0.2) +
-#   geom_line(data = community_yday_posterior, aes(x = yday, y = mean), color = "blue", linewidth = 1.5) +
-#   geom_ribbon(data = community_yday_posterior, aes(x = yday, y = mean, ymin = lower, ymax = upper), fill = NA, color = "blue", linetype = "dashed") +
-#   labs(x = "Day of year", y = "Detection probability", title = "Detected community") +
-#   theme_classic(); print(p)
-# 
-# # Visualize relationship between yday and detection probability for a specific species
-# species_name = "Orange-crowned Warbler"
-# species_idx = as.character(which(species == species_name))
-# p = ggplot(data = species_yday_posterior %>% filter(species == species_idx), aes(x = yday, y = mean)) +
-#   geom_line() +
-#   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
-#   lims(y = c(0.0, 1.0)) +
-#   labs(x = "Day of year", y = "Detection probability", title = paste0(species_name, " (", species_idx,")")) +
-#   theme_classic(); print(p)
-# 
-# # Visualize estimated number of species per site
-# Nsite_posterior = as.data.frame(msom_summary[grepl("^Nsite", rownames(msom_summary)), ])
-# Nsite_posterior$site = rownames(Nsite_posterior)
-# ggplot(Nsite_posterior, aes(x = site, y = mean)) +
-#   geom_pointrange(aes(ymin = `2.5%`, ymax = `97.5%`)) +
-#   labs(x = "Site", y = "Estimated richness", title = "Estimated number of species per site") +
-#   theme_classic()
+})
+meta_summary = meta_preds %>% # calculate means and 95% BCIs
+  group_by(yday) %>% summarise(
+    psi_mean = mean(psi),
+    psi_lower = quantile(psi, 0.025),
+    psi_upper = quantile(psi, 0.975)
+  )
+ggplot(yday_preds, aes(x = yday, y = psi, group = species_name)) +
+  geom_line(aes(color = species_name), alpha = 0.4) +
+  geom_ribbon(data = meta_summary, aes(x = yday, ymin = psi_lower, ymax = psi_upper), fill = "blue", alpha = 0.2, inherit.aes = FALSE) +
+  geom_line(data = meta_summary, aes(x = yday, y = psi_mean), color = "blue", size = 1.2, inherit.aes = FALSE) +
+  scale_x_continuous(limits = c(min(original_yday), max(original_yday))) +
+  scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
+  labs(title = "Metacommunity detection probability in relation to day of year", x = "Day of year", y = "Detection probability") +
+  theme(legend.position = "none")

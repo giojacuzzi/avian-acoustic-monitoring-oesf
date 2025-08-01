@@ -22,9 +22,7 @@
 *.rds
 
 # Model and training files
-/data/training/*
-/data/validation/*
-/data/models/*
+/data/*
 
 # (Exceptions)
 !/data/species/*
