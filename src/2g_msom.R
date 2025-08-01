@@ -33,7 +33,7 @@ ylist   = setNames(vector("list", length(species)), species)
 xlist_yday = setNames(vector("list", length(species)), species)
 for (sp in species) {
   species_data = community_survey_data[, , sp]
-  
+
   # Putative observation matrix (detection-nondetection via thresholded confidence scores)
   mat_obs = matrix(
     unlist(lapply(species_data, function(x) if (!is.null(x)) as.integer(any(x$confidence >= threshold, na.rm = TRUE)) else NA)),
@@ -42,43 +42,31 @@ for (sp in species) {
     dimnames = dimnames(community_survey_data)[1:2]
   )
   ylist[[sp]] = mat_obs
-  
-  # Survey date matrix (day of year)
-  mat_yday = matrix(
-    unlist(lapply(species_data, function(x) if (!is.null(x)) yday(x$survey_date) else NA)),
-    nrow = dim(community_survey_data)[1],
-    ncol = dim(community_survey_data)[2],
-    dimnames = dimnames(community_survey_data)[1:2]
-  )
-  xlist_yday[[sp]] = mat_yday
 }
 
-newxlist_yday = matrix(
+# Survey date matrix (day of year)
+x_yday = matrix(
   unlist(lapply(community_survey_data[, , 1], function(x) if (!is.null(x)) yday(x$survey_date) else NA)),
   nrow = dim(community_survey_data)[1],
   ncol = dim(community_survey_data)[2],
   dimnames = dimnames(community_survey_data)[1:2]
 )
 
-
-
 # Discard sites with no environmental data
 sites_missing_environmental_data = setdiff(dimnames(community_survey_data)$unit, local_plot_data$site)
 if (length(sites_missing_environmental_data) > 0) {
   message("Discarding ", length(sites_missing_environmental_data), " sites with missing environmental data")
   ylist = lapply(ylist, function(mat) { mat[!(rownames(mat) %in% sites_missing_environmental_data), , drop = FALSE] })
-  xlist_yday = lapply(xlist_yday, function(mat) { mat[!(rownames(mat) %in% sites_missing_environmental_data), , drop = FALSE] })
-  
-  newxlist_yday = newxlist_yday[!rownames(newxlist_yday) %in% sites_missing_environmental_data, ]
+
+  x_yday = x_yday[!rownames(x_yday) %in% sites_missing_environmental_data, ]
 }
 # Discard sites with no observations
 sites_with_environmental_data_missing_observations = setdiff(local_plot_data$site, dimnames(community_survey_data)$unit)
 if (length(sites_with_environmental_data_missing_observations) > 0) {
   message("Discarding ", length(sites_with_environmental_data_missing_observations), " sites with missing observations")
   ylist = lapply(ylist, function(mat) { mat[!(rownames(mat) %in% sites_with_environmental_data_missing_observations), , drop = FALSE] })
-  xlist_yday = lapply(xlist_yday, function(mat) { mat[!(rownames(mat) %in% sites_with_environmental_data_missing_observations), , drop = FALSE] })
-  
-  newxlist_yday = newxlist_yday[!rownames(newxlist_yday) %in% sites_with_environmental_data_missing_observations, ]
+
+  x_yday = x_yday[!rownames(x_yday) %in% sites_with_environmental_data_missing_observations, ]
 }
 
 # Discard sites with no survey observations and surveys with no site observations
@@ -88,9 +76,8 @@ sites_not_surveyed = rownames(surveys_per_site)[rowSums(surveys_per_site) == 0]
 if (length(sites_not_surveyed) > 0) {
   message("Discarding ", length(sites_not_surveyed), " sites with no survey observations")
   ylist = lapply(ylist, function(mat) { mat[!(rownames(mat) %in% sites_not_surveyed), , drop = FALSE] })
-  xlist_yday = lapply(xlist_yday, function(mat) { mat[!(rownames(mat) %in% sites_not_surveyed), , drop = FALSE] })
-  
-  newxlist_yday = newxlist_yday[!rownames(newxlist_yday) %in% sites_not_surveyed, ]
+
+  x_yday = x_yday[!rownames(x_yday) %in% sites_not_surveyed, ]
 }
 survey_site_counts = lapply(ylist, function(x) { colSums(!is.na(x))})
 sites_per_survey = as.data.frame(t(do.call(rbind, survey_site_counts)))
@@ -98,9 +85,8 @@ surveys_not_conducted = rownames(sites_per_survey)[rowSums(sites_per_survey) == 
 if (length(surveys_not_conducted) > 0) {
   message("Discarding ", length(surveys_not_conducted), " surveys with no site observations")
   ylist = lapply(ylist, function(mat) { mat[, !(colnames(mat) %in% surveys_not_conducted), drop = FALSE] })
-  xlist_yday = lapply(xlist_yday, function(mat) { mat[, !(colnames(mat) %in% surveys_not_conducted), drop = FALSE] })
-  
-  newxlist_yday = newxlist_yday[, !colnames(newxlist_yday) %in% surveys_not_conducted]
+
+  x_yday = x_yday[, !colnames(x_yday) %in% surveys_not_conducted]
 }
 
 sites   = rownames(surveys_per_site)[rowSums(surveys_per_site) != 0]
@@ -109,8 +95,7 @@ surveys = rownames(sites_per_survey)[rowSums(sites_per_survey) != 0]
 # Inspect the detection history and covariate data
 message("Total number of sites: ", length(sites))
 lapply(ylist, head)
-lapply(xlist_yday, head)
-head(newxlist_yday)
+head(x_yday)
 
 n_surveys_per_site = apply(!is.na(ylist[[1]]), 1, sum)
 message(sum(n_surveys_per_site), " total sampling periods (surveys) conducted across ", length(sites), " sampling units (sites)")
@@ -154,7 +139,6 @@ species_to_remove = naive_occurrence %>% filter(nsites < min_sites_detected) %>%
 species_to_remove = c(species_to_remove, "Great Horned Owl", "Hermit Warbler", "Pine Grosbeak", "Townsend's Solitaire") # TODO: incorporate these additional species determined to be absent via manual review above into the naive statistics
 cat(species_to_remove)
 ylist[species_to_remove]      = NULL
-xlist_yday[species_to_remove] = NULL
 species = names(ylist)
 
 # Format observation detection-nondetection and covariate data for modeling as 3D arrays (site × survey × species)
@@ -166,21 +150,8 @@ for (sp in seq_along(ylist)) {
   y[, , sp] = as.matrix(ylist[[sp]])
 }
 
-# Detection covariate data
-x_yday = array(NA, dim = c(length(sites), length(surveys), length(species)),
-               dimnames = list(site = sites, survey = surveys, species = species))
-for (sp in seq_along(xlist_yday)) {
-  x_yday[, , sp] = as.matrix(xlist_yday[[sp]])
-}
-
-# newx_yday = array(NA, dim = c(length(sites), length(surveys)),
-                  # dimnames = list(site = sites, survey = surveys))
-# newx_yday = as.matrix(newxlist_yday)
-newx_yday = newxlist_yday
-
 # Left-align data (moving any missing NA surveys to the right) to allow for direct indexing by number of surveys per site
 y_unaligned = y
-x_yday_unaligned = x_yday
 left_align_row = function(x) {
   non_na = x[!is.na(x)]
   c(non_na, rep(NA, length(x) - length(non_na)))
@@ -190,56 +161,55 @@ for (sp in dimnames(y)[[3]]) {
   sp_y_aligned = t(apply(sp_y_mat, 1, left_align_row))
   dimnames(sp_y_aligned) = dimnames(sp_y_mat)
   y[, , sp] = sp_y_aligned
-  
-  sp_x_yday_mat = x_yday[, , sp]
-  sp_x_yday_aligned = t(apply(sp_x_yday_mat, 1, left_align_row))
-  dimnames(sp_x_yday_aligned) = dimnames(sp_x_yday_mat)
-  x_yday[, , sp] = sp_x_yday_aligned
 }
 n_surveys_per_site = apply(!is.na(y[, , 1]), 1, sum)
 
-newx_yday_unaligned = newx_yday
-newx_yday = t(apply(newx_yday_unaligned, 1, left_align_row))
-dimnames(newx_yday) = dimnames(newx_yday_unaligned)
+x_yday_unaligned = x_yday
+x_yday = t(apply(x_yday_unaligned, 1, left_align_row))
+dimnames(x_yday) = dimnames(x_yday_unaligned)
 
-# Get detection covariate data
-detection_data = readRDS("data/cache/detection_covariates/data_detection.rds")
-#############################################
-# # Initialize empty array of same shape
-# x_prcp = x_yday  # same dimensions and dimnames
-# x_prcp[] = NA    # replace values with NA first
-# for (i in seq_len(dim(x_yday)[1])) {        # sites
-#   for (j in seq_len(dim(x_yday)[2])) {      # surveys
-#     for (k in seq_len(dim(x_yday)[3])) {    # species
-#       # message('site ', i,' survey ', j, ' species ', k)
-#       # message('yday', x_yday[i, j, k])
-#       site_i = dimnames(x_yday)$site[i]
-#       yday_j = x_yday[i, j, k]
-#       data = detection_data %>% filter(year == t, site == site_i, yday == yday_j)
-# 
-#       prcp = data %>% pull(tmax_deg_c)
-#       
-#       message('site ', site_i,' survey ', j, ' species ', k, ' yday ', yday_j, ' prcp ', prcp)
-#       
-#       x_prcp[i, j, k] = prcp
-#       
-#       # if (!is.null(val)) {
-#       #   x_prcp[i, j, k] <- val
-#       # }
-#     }
-#   }
-# }
-
-#############################################
-
-# Standardize detection covariate data to z-scale (mean 0, standard deviation 1)
-x_yday_scaled = scale(as.vector(x_yday))
-newx_yday_scaled = scale(as.vector(newx_yday))
-
-# Get scaled observational covariate data
+# Get occurrence and detection covariate data
 local_plot_data = local_plot_data %>% filter(site %in% dimnames(y)$site) # discard data for irrelevant sites
 all(dimnames(y)$site == local_plot_data$site) # check that covariate data are aligned with observation matrix by site
-x_canopy_scaled = scale(local_plot_data$plot_canopy_cover_rs)
+detection_data = readRDS("data/cache/detection_covariates/data_detection.rds") %>% filter(year == t)
+#############################################
+
+x_yday_df = as.data.frame(x_yday)
+x_yday_df$site = rownames(x_yday_df)
+x_yday_long = tidyr::pivot_longer(
+  x_yday_df,
+  cols = -site,
+  names_to = "survey",
+  values_to = "yday"
+)
+
+get_var_matrix = function(variable) {
+  detection_data_long = x_yday_long %>%
+    left_join(detection_data, by = c("site", "yday")) %>%
+    select(site, survey, !!sym(variable))
+  x = tidyr::pivot_wider(
+    detection_data_long,
+    names_from = survey,
+    values_from = !!sym(variable)
+  )
+  x = as.data.frame(x)
+  rownames(x) = x$site
+  x$site = NULL
+  return(as.matrix(x))
+}
+
+x_tmax = get_var_matrix("tmax_deg_c")
+x_prcp = get_var_matrix("prcp_mm_day")
+
+# Standardize detection covariate data to z-scale (mean 0, standard deviation 1)
+x_tmax_scaled = scale(as.vector(x_tmax))
+x_prcp_scaled = scale(as.vector(x_prcp))
+x_yday_scaled = scale(as.vector(x_yday))
+
+# Standardize occurrence covariate data
+x_canopy_scaled  = scale(local_plot_data$plot_canopy_cover_rs)
+x_downvol_scaled = scale(local_plot_data$plot_downvol_hs)
+x_htcv_scaled    = scale(local_plot_data$plot_ht_cv_hs)
 
 # Initialize latent occupancy state z[i] as 1 if a detection occurred at unit i, and 0 otherwise
 z = matrix(data = NA, nrow = length(sites), ncol = length(species), dimnames = list(sites, species))
@@ -256,9 +226,13 @@ msom_data = list(
   J = length(sites),                                 # number of sites sampled
   sampling_periods  = as.vector(n_surveys_per_site), # number of sampling periods (surveys) per site
   # Occupancy covariates
-  x_canopy = x_canopy_scaled[,1],                    # canopy cover covariate site vector
+  x_canopy  = x_canopy_scaled[,1],                    # canopy cover covariate site vector
+  x_downvol = x_downvol_scaled[,1],
+  x_htcv    = x_htcv_scaled[,1],
   # Detection covariates
-  x_yday = array(newx_yday_scaled, dim = dim(newx_yday)) # day of year detection covariate site-survey matrix
+  # x_tmax = array(x_tmax_scaled, dim = dim(x_tmax)), # TODO: shared among species?
+  # x_prcp = array(x_prcp_scaled, dim = dim(x_prcp)), # TODO: shared among species?
+  x_yday = array(x_yday_scaled, dim = dim(x_yday)) # day of year detection covariate site-survey matrix
 )
 str(msom_data)
 
@@ -281,6 +255,12 @@ model{
   mu.canopy ~ dnorm(0, 0.001)
   sd.canopy ~ dunif(0, 5)
   tau.canopy <- pow(sd.canopy,-2)
+  mu.downvol ~ dnorm(0, 0.001)
+  sd.downvol ~ dunif(0, 5)
+  tau.downvol <- pow(sd.downvol,-2)
+  mu.htcv ~ dnorm(0, 0.001)
+  sd.htcv ~ dunif(0, 5)
+  tau.htcv <- pow(sd.htcv,-2)
   
   # Baseline detection (intercept)
   mu.v ~ dnorm(0, 0.001)   # community mean of species-specific intercepts on the logit scale (mean baseline detect prob across all species)
@@ -296,7 +276,7 @@ model{
     for (j in 1:J) { # for each site
       
       # Ecological process model for latent occurrence z
-      logit(psi[j, i]) <- u[i] + acanopy[i]*x_canopy[j]
+      logit(psi[j, i]) <- u[i] + acanopy[i]*x_canopy[j] + adownvol[i]*x_downvol[j] + ahtcv[i]*x_htcv[j]
       z[j,i] ~ dbern(psi[j, i])
       
       for (k in 1:sampling_periods[j]) { # for each sampling period (survey) at site j
@@ -310,7 +290,9 @@ model{
     
     # Species level priors for occupancy coefficients
     u[i] ~ dnorm(mu.u, tau.u)                 # baseline occupancy of species i under 'average' conditions
-    acanopy[i] ~ dnorm(mu.canopy, tau.canopy) # species-specific effect of canopy on occupancy
+    acanopy[i]  ~ dnorm(mu.canopy, tau.canopy) # species-specific effect of canopy on occupancy
+    adownvol[i] ~ dnorm(mu.downvol, tau.downvol)
+    ahtcv[i]    ~ dnorm(mu.htcv, tau.htcv)
 
     # Species level priors for detection coefficients
     v[i] ~ dnorm(mu.v, tau.v)              # baseline detectability of species i under 'average' conditions
@@ -335,6 +317,8 @@ msom = jags(data = msom_data,
               "u", "mu.u", "sd.u",
               "v", "mu.v", "sd.v",
               "acanopy", "mu.canopy", "sd.canopy",
+              "adownvol", "mu.downvol", "sd.downvol",
+              "ahtcv", "mu.htcv", "sd.htcv",
               "byday", "mu.yday", "sd.yday",
               "Nsite", "Nocc"
             ),
@@ -356,10 +340,10 @@ message("The following parameters may not have converged:")
 msom_summary %>% filter(Rhat >= 1.1)
 
 # Examine trace plots for good mixing and convergence among chains. Each chain is displayed in a different colour. This means random paths exploring a lot of the parameter space on the y-axis without a clear pattern and each chain converging on the same value.
-MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'trace', Rhat = TRUE, n.eff = TRUE)
+MCMCtrace(msom$samples, excl = c('Nsite', 'Nocc'), post_zm = TRUE, type = 'trace', Rhat = TRUE, n.eff = TRUE, pdf = F)
 
 # Examine density plots for not super-wide or with irregular peaks. The more parameter space the density plots include, the higher the uncertainty in a parameter estimate. The density curves don’t have to be normal but shouldn’t have multiple peaks and each chain colour should have approximately the same peak.
-MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'density', Rhat = TRUE, n.eff = TRUE, ind = TRUE)
+MCMCtrace(msom$samples, excl = c('Nsite', 'Nocc'), post_zm = TRUE, type = 'density', Rhat = TRUE, n.eff = TRUE, ind = TRUE, pdf = F)
 
 # If the model indicates convergence issues, we may need to:
 # - Increase the burn-in period
@@ -419,9 +403,23 @@ ggplot(detection_prob, aes(x = as.factor(plot_order), y = prob)) +
 # Community-level summaries of the hyper-parameters for the detection and occupancy covariates
 # mu is the community response (mean across species) to a given covariate and sd is the standard deviation (among species). Thus, the hyper-parameters are simply the mean and variance for each covariate as measured across species (Kéry & Royle 2009)
 message("Community-level summaries of hyper-parameters for occurrence and detection covariates:")
-msom_summary %>% filter(param %in% c(
-  'mu.canopy', 'sd.canopy'
-)) %>% select(param, mean, sd, `2.5%`, `97.5%`)
+(occurrence_coeff_summary = msom_summary %>% filter(param %in% c(
+  'mu.canopy', 'sd.canopy',
+  'mu.downvol', 'sd.downvol',
+  'mu.htcv', 'sd.htcv'
+)) %>% select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0))
+(detection_coeff_summary = msom_summary %>% filter(param %in% c(
+  'mu.yday', 'sd.yday'
+)) %>% select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0))
+
+# Compare community level effect sizes for occurrence coefficients
+ggplot(occurrence_coeff_summary %>% filter(str_starts(param, "mu")), aes(x = mean, y = as.factor(param))) +
+  geom_vline(xintercept = 0, color = "gray") +
+  geom_point(aes(color = overlap0)) +
+  geom_errorbar(aes(xmin = `25%`,  xmax = `75%`,   color = overlap0), width = 0, size = 1) +
+  geom_errorbar(aes(xmin = `2.5%`, xmax = `97.5%`, color = overlap0), width = 0) +
+  scale_color_manual(values = c("black", "gray")) +
+  labs(title = "Community level effect sizes for occurrence covariates", x = "Coefficient estimate", y = "Parameter")
 
 # The coefficient acanopy is the effect of canopy cover on occurrence of species i
 canopy_coef = msom_summary %>% filter(stringr::str_starts(param, "acanopy")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
