@@ -1,0 +1,134 @@
+The below code is adapted from: Applied Hierarchical Modeling in Ecology: Analysis of distribution, abundance and species richness in R and BUGS: Volume 1: Prelude and Static Models. Kéry and Royle 2016.
+
+10.3 SIMULATION AND ANALYSIS OF THE SIMPLEST POSSIBLE SITE-OCCUPANCY MODEL
+
+We illustrate and explain the simplest possible site-occupancy model using data simulation and analysis in unmarked and BUGS. We simulate a data set with constant occupancy (which we assume to be 0.8) and constant detection (assumed to be 0.5), collected at 100 sites with two presence/absence measurements each.
+
+```{r}
+# Choose sample sizes and prepare observed data array y
+set.seed(24)                  # So we all get same data set
+M <- 100                      # Number of sites
+J <- 2                        # Number of presence/absence measurements
+y <- matrix(NA, nrow = M, ncol = J) # to contain the obs. data
+
+# Parameter values
+psi <- 0.8                    # Probability of occupancy or presence
+p <- 0.5                      # Probability of detection
+
+# Generate presence/absence data (the truth)
+z <- rbinom(n = M, size = 1, prob = psi)  # R has no Bernoulli
+
+# Generate detection/nondetection data (i.e. presence/absence measurements)
+for(j in 1:J){
+  y[,j] <- rbinom(n = M, size = 1, prob = z*p)
+}
+
+# Look at data
+sum(z)                        # True number of occupied sites
+sum(apply(y, 1, max))         # Observed number of occupied sites
+```
+
+Thus, in our simulation the species occurs at 86 sites and is detected at 61. The overall measurement error for the apparent number of occupied sites is thus (86-61)/86=29%. Under our binomial model we'd expect a combined detection probability (over J surveys) of 1-(1-p)\^J=75%, i.e., a total measurement error of 25%. This difference between 29% and 25% is of course due to the sampling error inherent in the stochastic detection process. Now we inspect our data set:
+
+```{r}
+head(cbind(z=z, y))           # Truth and measurements for first 6 sites
+```
+
+Sites 1-5 are presence sites, while site 6 is unoccupied. Since we exclude false-positives, we will never observe the species at an absence site, but we may fail to detect it at a presence site. The first five sites illustrate three of the four possible detection histories at an occupied site: {1,1} for sites 1, 2 and 5, {0,1} at site 4, and {0,0} at site 3. You can look at the entire simulated, observed data y to see the fourth possible history, {1,0}, first occurring at sites 25-27.
+
+We now analyze the data with `unmarked` using function `occu`, where the linear model for detection is specified before that for occupancy:
+
+```{r}
+library(unmarked)
+umf <- unmarkedFrameOccu(y = y) # Create unmarked data frame
+summary(umf)                    # Summarize data frame
+(fm1 <- occu(~1 ~1, data = umf)) # Fit model
+
+backTransform(fm1, "state") # Get estimates on probability scale
+backTransform(fm1, "det")
+```
+
+We observed the species at 61% of the sites, but we estimate that it really occurs at 74%, because detection probability is estimated at 58% for a single survey. Next, we conduct a Bayesian analysis of the model with `nimble`.
+
+```{r}
+# Bundle data and summarize data bundle
+str( win.data <- list(y = y, M = nrow(y), J = ncol(y)) )
+
+library(nimble)
+# Specify model in BUGS language
+# "model.txt" in book code.
+Section10p3_code <- nimbleCode({
+   # Priors
+   psi ~ dunif(0, 1)
+   p ~ dunif(0, 1)
+   # Likelihood
+   for (i in 1:M) {             # Loop over sites
+      z[i] ~ dbern(psi)         # State model
+      for (j in 1:J) {          # Loop over replicate surveys
+         y[i,j] ~ dbern(z[i]*p) # Observation model 
+      }
+   }
+})
+
+# Initial values
+zst <- apply(y, 1, max) # Avoid data/model/inits conflict
+inits <- function(){list(z = zst)}
+
+# Parameters monitored
+params <- c("psi", "p")
+
+# MCMC settings
+ni <- 5000   ;   nt <- 1   ;   nb <- 1000   ;   nc <- 3
+
+# Call nimble and summarize posteriors
+library(nimble)
+fm2 <- nimbleMCMC(
+  code = Section10p3_code,
+  constants = win.data,
+  inits = inits,
+  monitors = params,
+  nburnin = nb,
+  niter = ni,
+  samplesAsCodaMCMC = TRUE
+)
+
+library(mcmcplots)
+colnames(fm2)
+mcmcplot(fm2)
+
+library(MCMCvis)
+MCMCsummary(fm2, digits=3)
+
+MCMCtrace(fm2, exact = TRUE, pdf = FALSE)
+
+MCMCplot(fm2, params = c('psi','p'), ci=c(50,95))
+
+# Convert to data frame for plotting
+mcmc_df <- as.data.frame(MCMCsummary(fm2, digits=3))
+mcmc_df$Parameter <- rownames(mcmc_df)
+
+# Plot
+library(ggplot2)
+ggplot(mcmc_df, aes(x = Parameter, y = mean, ymin = `2.5%`, ymax = `97.5%`)) +
+  geom_point() +
+  scale_y_continuous(limits = c(0, 1)) +
+  geom_errorbar(width = 0.2) +
+  theme_minimal() +
+  labs(title = "Mean posterior estimates for psi and p",
+       y = "Estimate",
+       x = "Parameter")
+
+# Plot
+# mcmc_df = as.data.frame(MCMCsummary(ssom, digits=3))
+# mcmc_df$Parameter = rownames(mcmc_df)
+# ggplot(mcmc_df, aes(x = Parameter, y = mean, ymin = `2.5%`, ymax = `97.5%`)) +
+#   geom_point() +
+#   scale_y_continuous(limits = c(0, 1)) +
+#   geom_errorbar(width = 0.2) +
+#   theme_minimal() +
+#   labs(title = "Mean posterior estimates for psi and rho",
+#        y = "Estimate",
+#        x = "Parameter")
+```
+
+As usual, we get Bayesian estimates that are very similar to those using MLE (and we would get more similar ones still with a larger data set).

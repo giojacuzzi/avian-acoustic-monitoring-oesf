@@ -7,8 +7,15 @@
 /build/
 /dist/
 
-# Binary files
+# Data files
 *.xlsx
+*.tif
+*.dbf
+*.prj
+*.shp
+*.shx
+*.xml
+*.zip
 
 # Output files
 *.pdf

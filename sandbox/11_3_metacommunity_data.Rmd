@@ -1,0 +1,76 @@
+To illustrate HMs for communities we use data collected in the Swiss breeding bird survey MHB (Monitoring Haufige Brutvogel; Schmid et al., 2004).
+
+First, we load the data and check for the correct expected dimensions.
+
+```{r}
+# Load data
+library(AHMbook)
+data(MHB2014)
+?MHB2014
+str(MHB2014)
+
+# Check the detection data in 3D array MHB2014$count: site x rep x species
+( nsite <- nrow(MHB2014$sites) )    # number of sites in Swiss MHB
+nrep <- 3                           # maximum number of replicate surveys per season
+( nspec <- nrow(MHB2014$species) )  # 158 species occur in the 2014 data
+dim(MHB2014$count) == c(nsite, nrep, nspec) # check
+```
+
+We then grab the three counts in an array and convert them into simple replicated presence/absence measurements or detection/nondetection data.
+
+```{r}
+# Create the detection/nondetection (1/0) array
+y <- MHB2014$count ; y[y > 1] <- 1  ## 'Y' replaced with 'y'
+str(y)
+
+# Check data for one species, here chaffinch, and pull them out from 3D array
+(tmp <- y[, , "Common Chaffinch"])
+
+# Frequency distribution of number of surveys actually carried out per site in 2014
+# NB MHB2014$sites$nsurvey gives the number of surveys *planned*.
+table(nsurveys <- apply(!is.na(y[,,1]), 1, sum))
+
+# Which site has all NA data in 2014 ?
+(NAsites <- which(nsurveys == 0) )
+```
+
+Hence, 219 sites were surveyed three times, 47 twice, and one site was not surveyed in 2014. We next look at the observed number of occupied sites among the 266 with nonmissing values in 2014.
+
+```{r}
+# Observed number of occupied sites
+tmp <- apply(y, c(1,3), max, na.rm = TRUE)
+# For the 'all NA' site, max returns -Inf with a warning
+tmp[tmp == -Inf] <- NA         # Change -Inf to NA
+sort(obs.occ <- apply(tmp, 2, sum, na.rm = TRUE))
+
+# Plot species 'occurrence frequency' distribution
+plot(sort(obs.occ), xlab = "Species number", ylab = "Number of quads with detections")
+
+# Drop data from species that were not observed in 2014
+toss.out <- which(obs.occ == 0)
+y <- y[,,-toss.out]
+obs.occ <- obs.occ[-toss.out]
+
+# Redefine nspec as the number of species observed in 2014: 145
+( nspec <- dim(y)[3] )
+```
+
+We are now left with binary detection/nondetection data from 267 sites (of which one has missing data) and two to three replicate surveys for 145 species observed during the 2014 surveys. We could toss out the data from site 30 with the missing data, but we keep the site to illustrate the ability of some models to estimate things for "new" or unsurveyed sites.
+
+```{r}
+str(y)
+```
+
+We continue our descriptive overview of the data and compute the observed number of species per quadrat ("observed species richness").
+
+```{r}
+# Get observed number of species per site
+tmp <- apply(y, c(1,3), max, na.rm = TRUE)
+tmp[tmp == "-Inf"] <- NA
+sort(C <- apply(tmp, 1, sum))     # Compute and print sorted species counts
+
+plot(table(C), xlim = c(0, 60), xlab = "Observed number of species", ylab = "Number of quadrats", frame = FALSE)
+abline(v = mean(C, na.rm = TRUE), col = "blue", lwd = 3)
+```
+
+In the following set of models in our progression toward a powerful and satisfactory community modeling framework, we adopt a totally different approach and model the specific response to covariates of each member of the community. From now on, our community model will be a collection of component models for the presence and absence of individual species. This will allow us to get much deeper insights into the metacommunity as well as into the local communities, and the ways in which they respond to environmental and other covariates as a function of individual species' responses. The species-specific approach to modeling the metacommunity will permit us to look at the average response of both the (meta)community and every one of its members.
