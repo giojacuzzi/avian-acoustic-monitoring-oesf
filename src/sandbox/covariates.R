@@ -27,7 +27,9 @@ mapview(aru_sites, label = aru_sites$name)
 # site_data = st_transform(st_as_sf(site_data, coords = c('longitude', 'latitude'), crs = crs_data), crs = crs_projected)
 
 # Study area bounding buffer
-study_area = st_buffer(st_as_sfc(st_bbox(aru_sites)), dist = 100)
+study_area = st_transform(st_buffer(st_as_sfc(st_bbox(aru_sites)), dist = 100), crs = 4326)
+
+st_transform(study_area, crs = 4326)
 
 # Strata and forest inventory units
 
@@ -385,9 +387,9 @@ plot_data = plot_data %>% group_by(site) %>% summarise(across(everything(), ~ co
     core_edge_buffer = 100 # meters inward from patch edge
     core_areas = st_buffer(patches, dist = -core_edge_buffer)
     patches$core_area = st_area(core_areas)
-    patches$core_area_index = as.numeric(patches$core_area) / as.numeric(patches$patch_area) * 100
+    patches$core_area_index = as.numeric(patches$core_area) / as.numeric(patches$area_m2) * 100
     
-    mapview(core_areas) + mapview(patches, zcol = 'patch_area')
+    mapview(core_areas) + mapview(patches, zcol = 'area_m2')
   
   # Edge contrast index (%)
   id = 1741 # mature surrounded by stemex
@@ -664,7 +666,7 @@ correlation_threshold(cor_matrix_reduced, 0.7)
 
 
 
-######## DEBUG
+######## DEBUG: landscapemetrics
 
 grain = c(20.10835, 20.10835) # 0.1 acre spatial grain (~404.35 m²)
 grain = 3 # 2 meter spatial grain
@@ -673,6 +675,7 @@ grain = 3 # 2 meter spatial grain
 rast_seral_class = rasterize(vect(patches), rast(vect(patches), resolution = grain), field = 'class_seral')
 check_landscape(rast_seral_class)
 lsm_l_np(rast_seral_class) # number of patches
+nrow(patches)
 lsm_c_np(rast_seral_class) # number of patches per class
 
 rast_patches = get_patches(rast_seral_class)

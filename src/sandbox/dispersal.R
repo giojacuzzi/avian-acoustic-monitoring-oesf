@@ -112,6 +112,25 @@ ggplot(predicted_home_range_by_hwi, aes(x = hand_wing_index, y = predicted)) +
 
 ###################################################################################
 
+# Fit a generalized linear model relating natural log of body mass and natural log of hand-wing index to home range radius
+glm_combined = glm(home_range_radius_m ~ log(mass) + log(hand_wing_index), data = trait_data, family = Gamma(link = "log"))
+glm_combined_pseudoR2 = round(1 - (glm_combined$deviance / glm_combined$null.deviance), 2)
+
+summary(glm_combined)
+
+###################################################################################
+
+# Model selection
+AIC(glm_mass, glm_hwi, glm_combined)
+summary(glm_mass)$deviance
+summary(glm_hwi)$deviance
+summary(glm_combined)$deviance
+glm_mass_pseudoR2
+glm_hwi_pseudoR2
+glm_combined_pseudoR2
+
+###################################################################################
+
 home_range_sizes = full_join(predicted_home_range_by_mass %>% mutate(home_range_radius_m = predicted), trait_data %>% filter(!is.na(home_range_radius_m)) %>% select(common_name, home_range_radius_m, mass)) %>% arrange(home_range_radius_m)
 
 home_range_sizes$range_bin <- cut(home_range_sizes$home_range_radius_m,

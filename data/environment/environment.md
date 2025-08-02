@@ -5,3 +5,5 @@
 | Hydrography watercourses | https://data-wadnr.opendata.arcgis.com/datasets/wadnr::dnr-hydrography-watercourses-forest-practices-regulation/about | https://data-wadnr.opendata.arcgis.com/datasets/wadnr::dnr-hydrography-watercourses-forest-practices-regulation/about |
 | Hydrography water bodies | https://data-wadnr.opendata.arcgis.com/datasets/wadnr::dnr-hydrography-water-bodies-forest-practices-regulation/about | https://data-wadnr.opendata.arcgis.com/datasets/wadnr::dnr-hydrography-water-bodies-forest-practices-regulation/about |
 | Topography               | https://gis-dev.dnr.wa.gov/site2/rest/services/Public_Forest_Mgmt/WADNR_PUBLIC_Topography/MapServer | ?                                                            |
+| Roads (1/2)              | https://apps.nationalmap.gov/downloader/                     | https://www.sciencebase.gov/catalog/item/5a61c941e4b06e28e9c3bdd2 |
+| Roads (2/2)              | https://geo.wa.gov/datasets/a12a43c5b10b498ca6612454616bc7fa_1/explore?location=47.759832%2C-124.168090%2C12.17 |                                                              |
