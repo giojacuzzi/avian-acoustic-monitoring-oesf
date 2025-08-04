@@ -210,9 +210,9 @@ x_prcp_scaled = scale(as.vector(x_prcp))
 x_yday_scaled = scale(as.vector(x_yday))
 
 # Standardize occurrence covariate data
-x_canopy_scaled  = scale(local_plot_data$plot_canopy_cover_rs)
-x_downvol_scaled = scale(local_plot_data$plot_downvol_hs)
-x_htcv_scaled    = scale(local_plot_data$plot_ht_cv_hs)
+x_alpha1_scaled = scale(local_plot_data$plot_canopy_cover_rs)
+x_alpha2_scaled = scale(local_plot_data$plot_downvol_hs)
+x_alpha3_scaled = scale(local_plot_data$plot_ht_cv_hs)
 
 # Initialize latent occupancy state z[i] as 1 if a detection occurred at unit i, and 0 otherwise
 z = matrix(data = NA, nrow = length(sites), ncol = length(species), dimnames = list(sites, species))
@@ -229,13 +229,13 @@ msom_data = list(
   J = length(sites),                                 # number of sites sampled
   K  = as.vector(n_surveys_per_site),                # number of sampling periods (surveys) per site
   # Occupancy covariates
-  x_canopy  = x_canopy_scaled[,1],                   # canopy cover covariate site vector
-  x_downvol = x_downvol_scaled[,1],
-  x_htcv    = x_htcv_scaled[,1],
+  x_alpha1  = x_alpha1_scaled[,1],                   # alpha1 cover covariate site vector
+  x_alpha2  = x_alpha2_scaled[,1],
+  x_alpha3  = x_alpha3_scaled[,1],
   # Detection covariates
   # x_tmax = array(x_tmax_scaled, dim = dim(x_tmax)), # TODO: shared among species?
   # x_prcp = array(x_prcp_scaled, dim = dim(x_prcp)), # TODO: shared among species?
-  x_yday = array(x_yday_scaled, dim = dim(x_yday)) # day of year detection covariate site-survey matrix
+  x_beta1 = array(x_yday_scaled, dim = dim(x_yday)) # day of year detection covariate site-survey matrix
 )
 str(msom_data)
 
@@ -251,61 +251,74 @@ model{
   ## Community level hyperpriors
 
   # Baseline occurrence (intercept)
-  mu.u ~ dnorm(0, 0.01) # TODO: reasoning?
-  sd.u ~ dunif(0, 5)    # TODO: choose bounds of uniform by trial and error?
-  tau.u <- pow(sd.u,-2)
+  psi.mean ~ dunif(0,1)
+  mu.u <- log(psi.mean) - log(1-psi.mean) # `a`
+  tau.u ~ dgamma(0.1,0.1) # `tau1`
+  sigma.u <- 1/sqrt(tau.u)
   
   # Covariate effects on occurrence
-  mu.canopy ~ dnorm(0, 0.001)
-  sd.canopy ~ dunif(0, 5)
-  tau.canopy <- pow(sd.canopy,-2)
-  mu.downvol ~ dnorm(0, 0.001)
-  sd.downvol ~ dunif(0, 5)
-  tau.downvol <- pow(sd.downvol,-2)
-  mu.htcv ~ dnorm(0, 0.001)
-  sd.htcv ~ dunif(0, 5)
-  tau.htcv <- pow(sd.htcv,-2)
+  mu.alpha1 ~ dnorm(0, 0.001)
+  mu.alpha2 ~ dnorm(0, 0.001)
+  mu.alpha3 ~ dnorm(0, 0.001)
+  tau.alpha1 ~ dgamma(0.1,0.1)
+  tau.alpha2 ~ dgamma(0.1,0.1)
+  tau.alpha3 ~ dgamma(0.1,0.1)
   
   # Baseline detection (intercept)
-  mu.v ~ dnorm(0, 0.001)   # community mean of species-specific intercepts on the logit scale (mean baseline detect prob across all species)
-  sd.v ~ dunif(0, 5)       # community standard deviation of species-specific intercepts (how much detectability varies between species)
-  tau.v <- pow(sd.v,-2)
+  theta.mean ~ dunif(0,1)
+  b <- log(theta.mean) - log(1-theta.mean) # `b` # community mean of species-specific intercepts on the logit scale (mean baseline detect prob across all species)
+  tau.v ~ dgamma(0.1,0.1) # `tau2`
+  rho ~ dunif(-1,1) # Because high abundance species are likely to be both easier to detect and more prevalent across the landscape, we modelled a correlation `rho` between occurrence and detection in the model
+  var.v <- tau.v/(1.-pow(rho,2))
+  sigma.v <- 1/sqrt(tau.v)
 
   # Covariate effects on detection
-  mu.yday ~ dnorm(0, 0.001) # community mean of the species-specific slopes on the logit scale describing how detection changes with x_yday
-  sd.yday ~ dunif(0, 5)     # community standard deviation
-  tau.yday <- pow(sd.yday,-2)
+  mu.beta1  ~ dnorm(0, 0.001) # community mean of the species-specific slopes on the logit scale describing how detection changes with x_yday
+  tau.beta1 ~ dgamma(0.1,0.1)
 
   for (i in 1:I) { # for each species
   
       # Species level priors for occupancy coefficients
-      u[i] ~ dnorm(mu.u, tau.u)                 # baseline occupancy of species i under 'average' conditions
-      acanopy[i]  ~ dnorm(mu.canopy, tau.canopy) # species-specific effect of canopy on occupancy
-      adownvol[i] ~ dnorm(mu.downvol, tau.downvol)
-      ahtcv[i]    ~ dnorm(mu.htcv, tau.htcv)
+      u[i] ~ dnorm(mu.u, tau.u)                # baseline occupancy of species i under 'average' conditions
+      alpha1[i] ~ dnorm(mu.alpha1, tau.alpha1) # species-specific effect of alpha1 on occupancy
+      alpha2[i] ~ dnorm(mu.alpha2, tau.alpha2)
+      alpha3[i] ~ dnorm(mu.alpha3, tau.alpha3)
   
       # Species level priors for detection coefficients
-      v[i] ~ dnorm(mu.v, tau.v)              # baseline detectability of species i under 'average' conditions
-      byday[i] ~ dnorm(mu.yday, tau.yday)    # species-specific effect of yday on detection
+      mu.v[i] <- b + (rho*sigma.v/sigma.u)*(u[i]-mu.u)
+      v[i] ~ dnorm(mu.v[i], var.v)              # baseline detectability of species i under 'average' conditions
+      beta1[i] ~ dnorm(mu.beta1, tau.beta1)  # species-specific effect of yday on detection
   
       for (j in 1:J) { # for each site
         
           # Ecological process model for latent occurrence z
-          logit(psi[j, i]) <- u[i] + acanopy[i]*x_canopy[j] + adownvol[i]*x_downvol[j] + ahtcv[i]*x_htcv[j]
+          logit(psi[j, i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j]
           z[j,i] ~ dbern(psi[j, i])
           
           for (k in 1:K[j]) { # for each sampling period (survey) at site j
       
               # Observation model for observed data y
-              logit(p[j,k,i]) <- v[i] + byday[i]*x_yday[j,k] # logit of detection prob depends on survey-specific covariate
-              y[j,k,i] ~ dbern(p[j,k,i] * z[j,i])
+              logit(theta[j,k,i]) <- v[i] + beta1[i]*x_beta1[j,k] # logit of detection prob depends on survey-specific covariate
+              mu.theta[j,k,i] <- theta[j,k,i]*z[j,i]
+              y[j,k,i]    ~ dbern(mu.theta[j,k,i])
+              ynew[j,k,i] ~ dbern(mu.theta[j,k,i])
+              
+              # Create simulated dataset to calculate the Bayesian p-value
+              d[j,k,i] <- abs(y[j,k,i] - mu.theta[j,k,i]) 
+              dnew[j,k,i] <- abs(ynew[j,k,i] - mu.theta[j,k,i]) 
+              d2[j,k,i] <- pow(d[j,k,i],2)  
+              dnew2[j,k,i] <- pow(dnew[j,k,i],2)
           }
+          dsum[j,i] <- sum(d2[j,1:K[j],i]) 
+          dnewsum[j,i] <- sum(dnew2[j,1:K[j],i])
       }
   }
   
   ## Derived quantities
+  p.fit <- sum(dsum[1:J,1:I]) # discrepancy measure, then defined as the mean(p.fit > p.fitnew)
+  p.fitnew <- sum(dnewsum[1:J,1:I])
   for (i in 1:I) {
-    Nocc[i]  <- sum(z[ ,i]) # estimated number of occupied sites per species (among the sampled population of sites)
+    Nocc[i] <- sum(z[ ,i]) # estimated number of occupied sites per species (among the sampled population of sites)
   }
   for (j in 1:J) {
     Nsite[j] <- sum(z[j, ]) # estimated number of species occuring per site (among the species that were detected anywhere)
@@ -318,13 +331,13 @@ message("Running JAGS (current time ", time_start <- Sys.time(), ")")
 msom = jags(data = msom_data,
             inits = function() { list(z = z) }, # initial values to avoid data/model conflicts
             parameters.to.save = c( # monitored parameters
-              "u", "mu.u", "sd.u",
-              "v", "mu.v", "sd.v",
-              "acanopy", "mu.canopy", "sd.canopy",
-              "adownvol", "mu.downvol", "sd.downvol",
-              "ahtcv", "mu.htcv", "sd.htcv",
-              "byday", "mu.yday", "sd.yday",
-              "Nsite", "Nocc"
+              "u", "mu.u", "tau.u",
+              "v", "b", "tau.v",
+              "alpha1", "mu.alpha1", "tau.alpha1",
+              "alpha2", "mu.alpha2", "tau.alpha2",
+              "alpha3", "mu.alpha3", "tau.alpha3",
+              "beta1", "mu.beta1", "tau.beta1",
+              "p.fit", "p.fitnew", "Nsite", "Nocc"
             ),
             model.file = model_file,
             n.chains = 3, n.adapt = 100, n.iter = 10000, n.burnin = 5000, n.thin = 2,
@@ -335,7 +348,7 @@ message("Finished running JAGS (", round(as.numeric(difftime(Sys.time(), time_st
 ## Diagnostics, checking chains for mixing and convergence with trace and density plots
 # https://m-clark.github.io/bayesian-basics/diagnostics.html#monitoring-convergence
 
-# Gelman-Rubin statistic (Potential Scale Reduction Factor) Rhat values as a convergence diagnostic (Gelman and Rubin 1992). This is a test statistic for testing if the variance within chains is different than the variance between chains, and is meant to test if each chain was sampling from similar distributions -- if all the chains are “the same”, then the between chain variation should be close to zero. Rhat values substantially above 1.0 indicate lack of convergence; 1.2 is sometimes used as a guideline for “approximate convergence” (Brooks and Gelman 1998), but in practice a more stringent rule of Rhat < 1.1 is often used to declare convergence. If the chains have not converged, Bayesian credible intervals based on the t-distribution are too wide, and have the potential to shrink by this factor if the MCMC run is continued.
+# Gelman-Rubin statistic (i.e. "potential scale reduction factor") Rhat values serve as a convergence diagnostic (Gelman and Rubin 1992). This is a test statistic for testing if the variance within chains is different than the variance between chains, and is meant to test if each chain was sampling from similar distributions -- if all the chains are “the same”, then the between chain variation should be close to zero. Rhat values substantially above 1.0 indicate lack of convergence; 1.2 is sometimes used as a guideline for “approximate convergence” (Brooks and Gelman 1998), but in practice a more stringent rule of Rhat < 1.1 is often used to declare convergence. If the chains have not converged, Bayesian credible intervals based on the t-distribution are too wide, and have the potential to shrink by this factor if the MCMC run is continued.
 msom_summary = summary(msom)
 msom_summary = msom_summary %>% as_tibble() %>%
   mutate(param = rownames(msom_summary), overlap0 = as.factor(overlap0)) %>% relocate(param, .before = 1) %>%
@@ -355,9 +368,15 @@ MCMCtrace(msom$samples, excl = c('Nsite', 'Nocc'), post_zm = TRUE, type = 'densi
 # - Use more informative priors
 # - Reparametrize the model
 
+# "We assessed the adequacy of the model using the approach suggested by Gelman et al. (1996) referred to as a Bayesian p-value. We defined a discrepancy measure for the observations yi and their expected values pi under the model. This discrepancy statistic is computed at each iteration of the MCMC algorithm. A reference distribution is computed by simulating data sets from the posterior distribution and computing the discrepancy measure, Dsim, for the simulated data set. The Bayesian p-value is defined as the probability: Pr(D > Dsim). Extreme values (e.g. less than 0.05 or greater than 0.95) indicate that the model is inadequate." (Zipkin et al. 2009) A value of 0.5 indicates good fit, while a value of 0.25 or 0.75 indicates moderate fit.
+p_fit    = msom$sims.list$p.fit
+p_fitnew = msom$sims.list$p.fitnew
+p_value  = mean(p_fit > p_fitnew) # proportion of samples for which the model fits the observed data worse than the simulated data
+message("Bayesian p-value: ", round(p_value, 3))
+
 # Visualize estimated number of species per site
 Nsite_posterior = msom_summary %>% filter(stringr::str_starts(param, "Nsite")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(site_idx = as.integer(str_extract(param, "\\d+"))) %>% mutate(site = sites[site_idx])
+  mutate(site_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(site = sites[site_idx])
 Nsite_mean = mean(Nsite_posterior$mean)
 message("Mean estimated species richness across all sites: ", round(Nsite_mean,1), " (range ", round(min(Nsite_posterior$mean),1), "–", round(max(Nsite_posterior$mean),1), ")")
 ggplot(Nsite_posterior, aes(x = as.factor(plot_order), y = mean)) +
@@ -374,7 +393,7 @@ ggplot(Nsite_posterior, aes(x = mean)) +
 # As covariates on occupancy were standardized, the inverse-logit (`plogis()`) of u[i] is the baseline occurrence probability for species i at a site with ‘average’ habitat characteristics.
 
 occurrence_prob = msom_summary %>% filter(stringr::str_starts(param, "u")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(species_idx = as.integer(str_extract(param, "\\d+"))) %>% mutate(species_name = species[species_idx])
+  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
 mean_occurrence_prob = msom_summary %>% filter(param == "mu.u")
 message("Mean species occurrence probability: ", round(mean_occurrence_prob$prob,2), " (95% BCI ", round(mean_occurrence_prob$prob_lower95,2), "–", round(mean_occurrence_prob$prob_upper95,2), ")")
 message("Species occurrence probability range: ", round(min(occurrence_prob$prob),2), "–", round(max(occurrence_prob$prob),2), " (", occurrence_prob %>% slice_min(prob, n=1) %>% pull(species_name), ", ", occurrence_prob %>% slice_max(prob, n=1) %>% pull(species_name), ")")
@@ -390,8 +409,8 @@ ggplot(occurrence_prob, aes(x = as.factor(plot_order), y = prob)) +
 
 # Similarly, the inverse-logit of v[i] is the detection probability for species i under 'average' detection conditions.
 detection_prob = msom_summary %>% filter(stringr::str_starts(param, "v")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(species_idx = as.integer(str_extract(param, "\\d+"))) %>% mutate(species_name = species[species_idx])
-mean_detection_prob = msom_summary %>% filter(param == "mu.v")
+  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
+mean_detection_prob = msom_summary %>% filter(param == "b")
 message("Mean species detection probability: ", round(mean_detection_prob$prob,2), " (95% BCI ", round(mean_detection_prob$prob_lower95,2), "–", round(mean_detection_prob$prob_upper95,2), ")")
 message("Species detection probability range: ", round(min(detection_prob$prob),2), "–", round(max(detection_prob$prob),2), " (", detection_prob %>% slice_min(prob, n=1) %>% pull(species_name), ", ", detection_prob %>% slice_max(prob, n=1) %>% pull(species_name), ")")
 ggplot(detection_prob, aes(x = as.factor(plot_order), y = prob)) +
@@ -408,95 +427,95 @@ ggplot(detection_prob, aes(x = as.factor(plot_order), y = prob)) +
 # mu is the community response (mean across species) to a given covariate and sd is the standard deviation (among species). Thus, the hyper-parameters are simply the mean and variance for each covariate as measured across species (Kéry & Royle 2009)
 message("Community-level summaries of hyper-parameters for occurrence and detection covariates:")
 (occurrence_coeff_summary = msom_summary %>% filter(param %in% c(
-  'mu.canopy', 'sd.canopy',
-  'mu.downvol', 'sd.downvol',
-  'mu.htcv', 'sd.htcv'
+  'mu.alpha1', 'tau.alpha1',
+  'mu.alpha2', 'tau.alpha2',
+  'mu.alpha3', 'tau.alpha3'
 )) %>% select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0))
 (detection_coeff_summary = msom_summary %>% filter(param %in% c(
-  'mu.yday', 'sd.yday'
+  'mu.beta1', 'tau.beta1'
 )) %>% select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0))
 
 # Compare community level effect sizes for occurrence coefficients
 ggplot(occurrence_coeff_summary %>% filter(str_starts(param, "mu")), aes(x = mean, y = as.factor(param))) +
   geom_vline(xintercept = 0, color = "gray") +
   geom_point(aes(color = overlap0)) +
-  geom_errorbar(aes(xmin = `25%`,  xmax = `75%`,   color = overlap0), width = 0, size = 1) +
+  geom_errorbar(aes(xmin = `25%`,  xmax = `75%`,   color = overlap0), width = 0, linewidth = 1) +
   geom_errorbar(aes(xmin = `2.5%`, xmax = `97.5%`, color = overlap0), width = 0) +
   scale_color_manual(values = c("black", "gray")) +
   labs(title = "Community level effect sizes for occurrence covariates", x = "Coefficient estimate", y = "Parameter")
 
-# The coefficient acanopy is the effect of canopy cover on occurrence of species i
-canopy_coef = msom_summary %>% filter(stringr::str_starts(param, "acanopy")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(species_idx = as.integer(str_extract(param, "\\d+"))) %>% mutate(species_name = species[species_idx])
-mu_canopy_summary = msom_summary %>% filter(param == "mu.canopy") %>% select(mean, `2.5%`, `97.5%`)
-ggplot(canopy_coef, aes(x = as.factor(plot_order), y = mean)) +
+# The coefficient alpha1 is the effect of alpha1 cover on occurrence of species i
+alpha1_coef = msom_summary %>% filter(stringr::str_starts(param, "alpha1")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
+mu_alpha1_summary = msom_summary %>% filter(param == "mu.alpha1") %>% select(mean, `2.5%`, `97.5%`)
+ggplot(alpha1_coef, aes(x = as.factor(plot_order), y = mean)) +
   geom_hline(yintercept = 0, color = "gray") +
   geom_point(aes(color = overlap0)) +
-  geom_errorbar(aes(ymin = `25%`,  ymax = `75%`,   color = overlap0), width = 0, size = 1) +
+  geom_errorbar(aes(ymin = `25%`,  ymax = `75%`,   color = overlap0), width = 0, linewidth = 1) +
   geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`, color = overlap0), width = 0) +
-  geom_hline(yintercept = mu_canopy_summary$mean,    linetype = "solid",  color = "blue") +
-  geom_hline(yintercept = mu_canopy_summary$`2.5%`,  linetype = "dashed", color = "blue") +
-  geom_hline(yintercept = mu_canopy_summary$`97.5%`, linetype = "dashed", color = "blue") +
-  labs(title = "Effect of canopy cover on occurrence", x = "Species", y = "Canopy coefficient estimate") +
-  scale_x_discrete(labels = canopy_coef$species_name) +
+  geom_hline(yintercept = mu_alpha1_summary$mean,    linetype = "solid",  color = "blue") +
+  geom_hline(yintercept = mu_alpha1_summary$`2.5%`,  linetype = "dashed", color = "blue") +
+  geom_hline(yintercept = mu_alpha1_summary$`97.5%`, linetype = "dashed", color = "blue") +
+  labs(title = "Effect of alpha1 on occurrence", x = "Species", y = "alpha1 coefficient estimate") +
+  scale_x_discrete(labels = alpha1_coef$species_name) +
   scale_color_manual(values = c("black", "gray")) +
   coord_flip() +
   theme(legend.position = "none")
 
-# Mean marginal probabilities of occurrence for the metacommunity in relation to canopy cover
-mean_canopy = attributes(x_canopy_scaled)$`scaled:center` # to transform between z-scale and original scale
-sd_canopy   = attributes(x_canopy_scaled)$`scaled:scale`
-original_canopy = seq(0, 100, by = 1) # range of possible canopy cover values
-standardized_canopy = (original_canopy - mean_canopy) / sd_canopy
+# Mean marginal probabilities of occurrence for the metacommunity in relation to alpha1 cover
+mean_alpha1 = attributes(x_alpha1_scaled)$`scaled:center` # to transform between z-scale and original scale
+sd_alpha1   = attributes(x_alpha1_scaled)$`scaled:scale`
+original_alpha1 = seq(0, 100, by = 1) # range of possible alpha1 cover values
+standardized_alpha1 = (original_alpha1 - mean_alpha1) / sd_alpha1
 intercepts = msom_summary %>% # species-specific occurrence intercepts u[i]
   filter(str_starts(param, "u")) %>%
   mutate(species_idx = as.integer(str_extract(param, "\\d+")), species_name = species[species_idx]) %>%
   select(species_name, u_i = mean)
-intercepts_and_coeffs = canopy_coef %>% # species-specific canopy coefficients
-  rename(acanopy_i = mean) %>%
-  select(species_name, acanopy_i) %>%
+intercepts_and_coeffs = alpha1_coef %>% # species-specific alpha1 coefficients
+  rename(alpha1_i = mean) %>%
+  select(species_name, alpha1_i) %>%
   left_join(intercepts, by = "species_name")
-canopy_preds = intercepts_and_coeffs %>% # predict species-specific occurrence probabilities
+alpha1_preds = intercepts_and_coeffs %>% # predict species-specific occurrence probabilities
   rowwise() %>% do({
     i <- .
     tibble(
       species_name = i$species_name,
-      canopy = original_canopy,
-      psi = plogis(i$u_i + i$acanopy_i * standardized_canopy)
+      alpha1 = original_alpha1,
+      psi = plogis(i$u_i + i$alpha1_i * standardized_alpha1)
     )
   }) %>% bind_rows()
 mu_u_samples      = as.matrix(msom$sims.list$mu.u) # predict meta-community occurrence probabilities (across posterior samples to calculate BCI)
-mu_canopy_samples = as.matrix(msom$sims.list$mu.canopy)
+mu_alpha1_samples = as.matrix(msom$sims.list$mu.alpha1)
 meta_preds = map_dfr(1:nrow(mu_u_samples), function(i) {
   tibble(
-    canopy = original_canopy,
-    psi = plogis(mu_u_samples[i, 1] + mu_canopy_samples[i, 1] * standardized_canopy),
+    alpha1 = original_alpha1,
+    psi = plogis(mu_u_samples[i, 1] + mu_alpha1_samples[i, 1] * standardized_alpha1),
     draw = i
   )
 })
 meta_summary = meta_preds %>% # calculate means and 95% BCIs
-  group_by(canopy) %>% summarise(
+  group_by(alpha1) %>% summarise(
     psi_mean = mean(psi),
     psi_lower = quantile(psi, 0.025),
     psi_upper = quantile(psi, 0.975)
   )
-ggplot(canopy_preds, aes(x = canopy, y = psi, group = species_name)) +
+ggplot(alpha1_preds, aes(x = alpha1, y = psi, group = species_name)) +
   geom_line(aes(color = species_name), alpha = 0.4) +
-  geom_ribbon(data = meta_summary, aes(x = canopy, ymin = psi_lower, ymax = psi_upper), fill = "blue", alpha = 0.2, inherit.aes = FALSE) +
-  geom_line(data = meta_summary, aes(x = canopy, y = psi_mean), color = "blue", size = 1.2, inherit.aes = FALSE) +
+  geom_ribbon(data = meta_summary, aes(x = alpha1, ymin = psi_lower, ymax = psi_upper), fill = "blue", alpha = 0.2, inherit.aes = FALSE) +
+  geom_line(data = meta_summary, aes(x = alpha1, y = psi_mean), color = "blue", size = 1.2, inherit.aes = FALSE) +
   scale_x_continuous(limits = c(0, 100), breaks = c(0, 25, 50, 75, 100)) +
   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
-  labs(title = "Metacommunity occurrence probability in relation to canopy cover", x = "Canopy cover (%)", y = "Occurrence probability") +
+  labs(title = "Metacommunity occurrence probability in relation to alpha1 cover", x = "alpha1 cover (%)", y = "Occurrence probability") +
   theme(legend.position = "none")
 
-# Mean marginal probabilities of occurrence for specific species in relation to canopy cover
+# Mean marginal probabilities of occurrence for specific species in relation to alpha1 cover
 species_of_interest = c("Orange-crowned Warbler", "Brown Creeper", "Pacific Wren")
-canopy_preds_filtered = canopy_preds %>% filter(species_name %in% species_of_interest)
+alpha1_preds_filtered = alpha1_preds %>% filter(species_name %in% species_of_interest)
 species_idx = match(species_of_interest, species)
 u_samples = as.matrix(msom$sims.list$u)[, species_idx] # posterior samples for intercept and covariate slopes for each species
-acanopy_samples = as.matrix(msom$sims.list$acanopy)[, species_idx]
+alpha1_samples = as.matrix(msom$sims.list$alpha1)[, species_idx]
 n_draws = nrow(u_samples) # posterior draws
-n_canopy = length(original_canopy)
+n_alpha1 = length(original_alpha1)
 posterior_preds = map2_df( # Predict posterior occurrence across draws for each species
   .x = seq_along(species_idx), .y = species_of_interest,
   ~ {
@@ -505,31 +524,31 @@ posterior_preds = map2_df( # Predict posterior occurrence across draws for each 
     map_dfr(1:n_draws, function(draw) {
       tibble(
         species_name = name,
-        canopy = original_canopy,
-        psi = plogis(u_samples[draw, i] + acanopy_samples[draw, i] * standardized_canopy),
+        alpha1 = original_alpha1,
+        psi = plogis(u_samples[draw, i] + alpha1_samples[draw, i] * standardized_alpha1),
         draw = draw
       )
     })
   }
 )
 posterior_summary = posterior_preds %>%
-  group_by(species_name, canopy) %>% summarise(
+  group_by(species_name, alpha1) %>% summarise(
     psi_mean = mean(psi),
     psi_lower = quantile(psi, 0.025),
     psi_upper = quantile(psi, 0.975),
     .groups = "drop"
   )
-ggplot(posterior_summary, aes(x = canopy, y = psi_mean, color = species_name, fill = species_name)) +
+ggplot(posterior_summary, aes(x = alpha1, y = psi_mean, color = species_name, fill = species_name)) +
   geom_line(size = 1) +
   geom_ribbon(aes(ymin = psi_lower, ymax = psi_upper), alpha = 0.2, color = NA) +
   scale_x_continuous(limits = c(0, 100), breaks = c(0, 25, 50, 75, 100)) +
   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
-  labs(title = "Occurrence probability in relation to canopy cover", x = "Canopy cover (%)", y = "Occurrence probability", color = "Species", fill = "Species")
+  labs(title = "Occurrence probability in relation to alpha1 cover", x = "alpha1 cover (%)", y = "Occurrence probability", color = "Species", fill = "Species")
 
-# The coefficient byday is the effect of day of year on detection of species i
-yday_coef = msom_summary %>% filter(stringr::str_starts(param, "byday")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(species_idx = as.integer(str_extract(param, "\\d+"))) %>% mutate(species_name = species[species_idx])
-mu_yday_summary = msom_summary %>% filter(param == "mu.yday") %>% select(mean, `2.5%`, `97.5%`)
+# The coefficient beta1 is the effect of day of year on detection of species i
+yday_coef = msom_summary %>% filter(stringr::str_starts(param, "beta1")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
+mu_yday_summary = msom_summary %>% filter(param == "mu.beta1") %>% select(mean, `2.5%`, `97.5%`)
 ggplot(yday_coef, aes(x = as.factor(plot_order), y = mean)) +
   geom_hline(yintercept = 0, color = "gray") +
   geom_point(aes(color = overlap0)) +
@@ -551,11 +570,11 @@ original_yday = seq(min(x_yday, na.rm = TRUE), max(x_yday, na.rm = TRUE), by = 1
 standardized_yday = (original_yday - mean_yday) / sd_yday
 intercepts = msom_summary %>% # species-specific detection intercepts v[i]
   filter(str_starts(param, "v")) %>%
-  mutate(species_idx = as.integer(str_extract(param, "\\d+")), species_name = species[species_idx]) %>%
+  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param)), species_name = species[species_idx]) %>%
   select(species_name, v_i = mean)
 intercepts_and_coeffs = yday_coef %>% # species-specific yday coefficients
-  rename(byday_i = mean) %>%
-  select(species_name, byday_i) %>%
+  rename(beta1_i = mean) %>%
+  select(species_name, beta1_i) %>%
   left_join(intercepts, by = "species_name")
 yday_preds = intercepts_and_coeffs %>% # predict species-specific occurrence probabilities
   rowwise() %>% do({
@@ -563,11 +582,11 @@ yday_preds = intercepts_and_coeffs %>% # predict species-specific occurrence pro
     tibble(
       species_name = i$species_name,
       yday = original_yday,
-      psi = plogis(i$v_i + i$byday_i * standardized_yday)
+      psi = plogis(i$v_i + i$beta1_i * standardized_yday)
     )
   }) %>% bind_rows()
-mu_v_samples      = as.matrix(msom$sims.list$mu.v) # predict meta-community occurrence probabilities (across posterior samples to calculate BCI)
-mu_yday_samples = as.matrix(msom$sims.list$mu.yday)
+mu_v_samples      = as.matrix(msom$sims.list$b) # predict meta-community occurrence probabilities (across posterior samples to calculate BCI)
+mu_yday_samples = as.matrix(msom$sims.list$mu.beta1)
 meta_preds = map_dfr(1:nrow(mu_v_samples), function(i) {
   tibble(
     yday = original_yday,
