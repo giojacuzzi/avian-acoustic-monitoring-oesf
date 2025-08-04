@@ -331,8 +331,8 @@ message("Running JAGS (current time ", time_start <- Sys.time(), ")")
 msom = jags(data = msom_data,
             inits = function() { list(z = z) }, # initial values to avoid data/model conflicts
             parameters.to.save = c( # monitored parameters
-              "u", "mu.u", "tau.u",
-              "v", "b", "tau.v",
+              "u", "mu.u", "tau.u", # TODO: also calculate sigma (standard deviation) directly?
+              "v", "b", "tau.v", # TODO: rename `b` to mu.v, and rename the species-specific `mu.v[i]` to another name
               "alpha1", "mu.alpha1", "tau.alpha1",
               "alpha2", "mu.alpha2", "tau.alpha2",
               "alpha3", "mu.alpha3", "tau.alpha3",
