@@ -6,6 +6,8 @@ library(ggplot2)
 library(ggrepel)
 theme_set(theme_minimal())
 
+path_out = "data/cache/species_traits/species_traits.csv"
+
 # Load species metdata - https://app.box.com/integrations/officeonline/openOfficeOnline?fileId=1728867025786&sharedAccessCode=
 metadata = read.csv('data/traits/species_metadata(included).csv', nrows = 107) %>% select(common_name, scientific_name, home_range_radius_m, residency)
 
@@ -150,6 +152,10 @@ trait_data$range_bin = cut(trait_data$home_range_radius_m,
                     breaks = quantile(trait_data$home_range_radius_m, probs = seq(0, 1, length.out = 5), na.rm = TRUE),
                     include.lowest = TRUE,
                     labels = c("Very Small", "Small", "Medium", "Large"))
+
+if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
+write.csv(trait_data, path_out)
+message("Cached trait data: ", path_out)
 
 median_hr = round(median(trait_data$home_range_radius_m), 0)
 mean_hr = round(mean(trait_data$home_range_radius_m), 0)
