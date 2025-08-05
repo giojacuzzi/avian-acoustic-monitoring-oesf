@@ -105,13 +105,11 @@ message(sum(n_surveys_per_site), " total sampling periods (surveys) conducted ac
 message("Sampling periods (surveys) conducted per site: median ", median(n_surveys_per_site), ", range ", min(n_surveys_per_site), "–", max(n_surveys_per_site))
 print(table(n_surveys_per_site))
 
-# Naive species occurrence
+# Naive species detections
 naive_occurrence = sapply(ylist, function(mat) { sum(apply(mat, 1, function(x) any(x == 1, na.rm = TRUE))) })
 naive_occurrence = data.frame(species = names(naive_occurrence), nsites = naive_occurrence) %>%
   arrange(desc(nsites)) %>% mutate(species = factor(species, levels = rev(species))) %>% mutate(prob = nsites / length(sites))
 message(naive_occurrence %>% filter(nsites > 0) %>% nrow(), " species detected")
-message("Naive occurrence rate: mean ", round(mean(naive_occurrence$prob),2),
-        ", min ", round(min(naive_occurrence$prob),2), ", max ", round(max(naive_occurrence$prob),2))
 message("Most commonly detected species:")
 cat(naive_occurrence %>% slice_max(prob, n=1) %>% pull(species) %>% as.character(), '\n')
 message("Least commonly detected species:")
@@ -141,8 +139,17 @@ min_sites_detected = 5
 species_to_remove = naive_occurrence %>% filter(nsites < min_sites_detected) %>% pull(species) %>% as.character() %>% sort()
 species_to_remove = c(species_to_remove, "Great Horned Owl", "Hermit Warbler", "Pine Grosbeak", "Townsend's Solitaire") # TODO: incorporate these additional species determined to be absent via manual review above into the naive statistics
 cat(species_to_remove)
-ylist[species_to_remove]      = NULL
+ylist[species_to_remove] = NULL
 species = names(ylist)
+
+# Naive species occurrence
+naive_occurrence = naive_occurrence %>% filter(species %in% names(ylist))
+message("Naive occurrence rate: mean ", round(mean(naive_occurrence$prob),2),
+        ", min ", round(min(naive_occurrence$prob),2), ", max ", round(max(naive_occurrence$prob),2))
+p = ggplot(naive_occurrence, aes(x = prob, y = species)) +
+  geom_point(stat = "identity") +
+  geom_vline(xintercept = mean(naive_occurrence$prob), color = "blue") +
+  labs(title = "Naive species occurrence", x = "Proportion of sites detected as occurrence", y = ""); print(p)
 
 # Format observation detection-nondetection and covariate data for modeling as 3D arrays (site × survey × species)
 
