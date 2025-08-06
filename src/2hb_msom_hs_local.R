@@ -25,7 +25,7 @@ local_plot_data = local_plot_data %>% sf::st_drop_geometry() %>% arrange(site) %
 # Season `t`
 t = "2020"
 year = as.numeric(t)
-threshold = 0.95 # naive conversion from continuous score prediction to binary detection-nondetection
+threshold = 0.75 # naive conversion from continuous score prediction to binary detection-nondetection
 
 message("Loading community survey data")
 community_survey_data = readRDS(path_community_survey_data)
@@ -140,8 +140,8 @@ p = ggplot(species_per_site, aes(x = species_detected)) +
 message("The following species are excluded from the model:")
 min_sites_detected = 5
 species_to_remove = naive_occurrence %>% filter(nsites < min_sites_detected) %>% pull(species) %>% as.character() %>% sort()
-species_to_remove = c(species_to_remove, "Great Horned Owl", "Hermit Warbler", "Pine Grosbeak", "Townsend's Solitaire") # TODO: incorporate these additional species determined to be absent via manual review above into the naive statistics
-cat(species_to_remove)
+species_to_remove = c(species_to_remove, "Great Horned Owl", "Hermit Warbler", "Pine Grosbeak", "Townsend's Solitaire", "Cooper's Hawk", "Bald Eagle", "Merlin", "Cassin's Vireo", "Sharp-shinned Hawk", "Clark's Nutcracker", "Fox Sparrow", "Spotted Owl", "American Crow", "Osprey", "Black-capped Chickadee", "House Finch", "American Dipper", "Anna's Hummingbird", "Common Merganser", "Northern Rough-winged Swallow", "Barn Swallow", "American Kestrel", "Chipping Sparrow", "Tree Swallow", "Lincoln's Sparrow", "Willow Flycatcher", "White-throated Sparrow", "Western Bluebird", "Bewick's Wren", "Horned Lark", "Common Yellowthroat", "Savannah Sparrow", "Barn Owl", "Peregrine Falcon", "Eurasian Collared-Dove") # TODO: incorporate these additional species determined to be absent via manual review above into the naive statistics
+cat(species_to_remove, "\n")
 ylist[species_to_remove] = NULL
 species = names(ylist)
 
@@ -228,37 +228,37 @@ x_prcp = get_var_matrix("prcp_mm_day")
 # "dist_nearest_edge"
 params_alpha_names = data.frame()
 x_alpha1_scaled = scale(local_plot_data$plot_elev_rs)
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha1", name = "plot_elev_rs"))
 x_alpha2_scaled = scale(local_plot_data$plot_treeden_gt10cmDbh_hs)
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha2", name = "plot_treeden_gt10cmDbh_hs"))
 x_alpha3_scaled = scale(local_plot_data$plot_treeden_lt10cmDbh_hs)
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha3", name = "plot_treeden_lt10cmDbh_hs"))
 x_alpha4_scaled = scale(local_plot_data$plot_qmd_all_hs)
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha4", name = "plot_qmd_all_hs"))
 x_alpha5_scaled = scale(local_plot_data$plot_ht_cv_hs)
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha5", name = "plot_ht_cv_hs"))
 x_alpha6_scaled = scale(local_plot_data$plot_canopy_cover_rs)
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha6", name = "plot_canopy_cover_rs"))
 x_alpha7_scaled = scale(local_plot_data$plot_snagden_hs)
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha7", name = "plot_snagden_hs"))
 x_alpha8_scaled = scale(local_plot_data$plot_downvol_hs)
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha8", name = "plot_downvol_hs"))
 x_alpha9_scaled = scale(local_plot_data$plot_understory_vol)
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha9", name = "plot_understory_vol"))
 x_alpha10_scaled = scale(local_plot_data$tree_all_diversity)
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha10", name = "tree_all_diversity"))
 x_alpha11_scaled = scale(local_plot_data$dist_watercourses_major)
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha11", name = "dist_watercourses_major"))
 x_alpha12_scaled = scale(local_plot_data$dist_nearest_edge)
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha1", name = "plot_elev_rs"))
+# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha2", name = "plot_treeden_gt10cmDbh_hs"))
+# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha3", name = "plot_treeden_lt10cmDbh_hs"))
+# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha4", name = "plot_qmd_all_hs"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha5", name = "plot_ht_cv_hs"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha6", name = "plot_canopy_cover_rs"))
+# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha7", name = "plot_snagden_hs"))
+# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha8", name = "plot_downvol_hs"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha9", name = "plot_understory_vol"))
+# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha10", name = "tree_all_diversity"))
+# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha11", name = "dist_watercourses_major"))
 params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha12", name = "dist_nearest_edge"))
 
 # Standardize detection covariate data to z-scale (mean 0, standard deviation 1)
 params_beta_names = data.frame()
 x_beta1_scaled = scale(as.vector(x_yday))
-params_beta_names = rbind(params_beta_names, data.frame(param = "beta1", name = "yday"))
 x_beta2_scaled = scale(as.vector(x_prcp))
-params_beta_names = rbind(params_beta_names, data.frame(param = "beta2", name = "prcp_mm_day"))
 x_beta3_scaled = scale(as.vector(x_tmax))
+params_beta_names = rbind(params_beta_names, data.frame(param = "beta1", name = "yday"))
+params_beta_names = rbind(params_beta_names, data.frame(param = "beta2", name = "prcp_mm_day"))
 params_beta_names = rbind(params_beta_names, data.frame(param = "beta3", name = "tmax_deg_c"))
 
 # Initialize latent occupancy state z[i] as 1 if a detection occurred at unit i, and 0 otherwise
@@ -277,16 +277,16 @@ msom_data = list(
   K = as.vector(n_surveys_per_site),                 # number of sampling periods (surveys) per site
   # Occupancy covariates
   x_alpha1   = x_alpha1_scaled[,1],
-  x_alpha2   = x_alpha2_scaled[,1],
-  x_alpha3   = x_alpha3_scaled[,1],
-  x_alpha4   = x_alpha4_scaled[,1],
+  # x_alpha2   = x_alpha2_scaled[,1],
+  # x_alpha3   = x_alpha3_scaled[,1],
+  # x_alpha4   = x_alpha4_scaled[,1],
   x_alpha5   = x_alpha5_scaled[,1],
   x_alpha6   = x_alpha6_scaled[,1],
-  x_alpha7   = x_alpha7_scaled[,1],
-  x_alpha8   = x_alpha8_scaled[,1],
+  # x_alpha7   = x_alpha7_scaled[,1],
+  # x_alpha8   = x_alpha8_scaled[,1],
   x_alpha9   = x_alpha9_scaled[,1],
-  x_alpha10  = x_alpha10_scaled[,1],
-  x_alpha11  = x_alpha11_scaled[,1],
+  # x_alpha10  = x_alpha10_scaled[,1],
+  # x_alpha11  = x_alpha11_scaled[,1],
   x_alpha12  = x_alpha12_scaled[,1],
   # Detection covariates
   x_beta1 = array(x_beta1_scaled, dim = dim(x_yday)), # TODO: shared among species?
@@ -313,41 +313,41 @@ model{
   tau.u <- pow(sigma.v,-2)                # precision
   
   # Covariate effects on occurrence
-  mu.alpha1  ~ dnorm(0,0.001)
-  mu.alpha2  ~ dnorm(0,0.001)
-  mu.alpha3  ~ dnorm(0,0.001)
-  mu.alpha4  ~ dnorm(0,0.001)
-  mu.alpha5  ~ dnorm(0,0.001)
-  mu.alpha6  ~ dnorm(0,0.001)
-  mu.alpha7  ~ dnorm(0,0.001)
-  mu.alpha8  ~ dnorm(0,0.001)
-  mu.alpha9  ~ dnorm(0,0.001)
-  mu.alpha10 ~ dnorm(0,0.001)
-  mu.alpha11 ~ dnorm(0,0.001)
-  mu.alpha12 ~ dnorm(0,0.001)
+  mu.alpha1  ~ dnorm(0,0.01)
+  # mu.alpha2  ~ dnorm(0,0.01)
+  # mu.alpha3  ~ dnorm(0,0.01)
+  # mu.alpha4  ~ dnorm(0,0.01)
+  mu.alpha5  ~ dnorm(0,0.01)
+  mu.alpha6  ~ dnorm(0,0.01)
+  # mu.alpha7  ~ dnorm(0,0.01)
+  # mu.alpha8  ~ dnorm(0,0.01)
+  mu.alpha9  ~ dnorm(0,0.01)
+  # mu.alpha10 ~ dnorm(0,0.01)
+  # mu.alpha11 ~ dnorm(0,0.01)
+  mu.alpha12 ~ dnorm(0,0.01)
   sigma.alpha1  ~ dunif(0,5)
-  sigma.alpha2  ~ dunif(0,5)
-  sigma.alpha3  ~ dunif(0,5)
-  sigma.alpha4  ~ dunif(0,5)
+  # sigma.alpha2  ~ dunif(0,5)
+  # sigma.alpha3  ~ dunif(0,5)
+  # sigma.alpha4  ~ dunif(0,5)
   sigma.alpha5  ~ dunif(0,5)
   sigma.alpha6  ~ dunif(0,5)
-  sigma.alpha7  ~ dunif(0,5)
-  sigma.alpha8  ~ dunif(0,5)
+  # sigma.alpha7  ~ dunif(0,5)
+  # sigma.alpha8  ~ dunif(0,5)
   sigma.alpha9  ~ dunif(0,5)
-  sigma.alpha10 ~ dunif(0,5)
-  sigma.alpha11 ~ dunif(0,5)
+  # sigma.alpha10 ~ dunif(0,5)
+  # sigma.alpha11 ~ dunif(0,5)
   sigma.alpha12 ~ dunif(0,5)
   tau.alpha1  <- pow(sigma.alpha1,-2)
-  tau.alpha2  <- pow(sigma.alpha2,-2)
-  tau.alpha3  <- pow(sigma.alpha3,-2)
-  tau.alpha4  <- pow(sigma.alpha4,-2)
+  # tau.alpha2  <- pow(sigma.alpha2,-2)
+  # tau.alpha3  <- pow(sigma.alpha3,-2)
+  # tau.alpha4  <- pow(sigma.alpha4,-2)
   tau.alpha5  <- pow(sigma.alpha5,-2)
   tau.alpha6  <- pow(sigma.alpha6,-2)
-  tau.alpha7  <- pow(sigma.alpha7,-2)
-  tau.alpha8  <- pow(sigma.alpha8,-2)
+  # tau.alpha7  <- pow(sigma.alpha7,-2)
+  # tau.alpha8  <- pow(sigma.alpha8,-2)
   tau.alpha9  <- pow(sigma.alpha9,-2)
-  tau.alpha10 <- pow(sigma.alpha10,-2)
-  tau.alpha11 <- pow(sigma.alpha11,-2)
+  # tau.alpha10 <- pow(sigma.alpha10,-2)
+  # tau.alpha11 <- pow(sigma.alpha11,-2)
   tau.alpha12 <- pow(sigma.alpha12,-2)
   
   # Community mean detection
@@ -357,9 +357,9 @@ model{
   tau.v <- pow(sigma.v,-2)            # precision
 
   # Covariate effects on detection
-  mu.beta1 ~ dnorm(0,0.001)
-  mu.beta2 ~ dnorm(0,0.001)
-  mu.beta3 ~ dnorm(0,0.001)
+  mu.beta1 ~ dnorm(0,0.01)
+  mu.beta2 ~ dnorm(0,0.01)
+  mu.beta3 ~ dnorm(0,0.01)
   sigma.beta1 ~ dunif(0,5)
   sigma.beta2 ~ dunif(0,5)
   sigma.beta3 ~ dunif(0,5)
@@ -372,16 +372,16 @@ model{
       # Species level priors for occupancy coefficients (note that dnorm in JAGS is parametrized with precision [tau], not sd [sigma])
       u[i] ~ dnorm(mu.u, tau.u)
       alpha1[i] ~ dnorm(mu.alpha1,tau.alpha1)
-      alpha2[i] ~ dnorm(mu.alpha2,tau.alpha2)
-      alpha3[i] ~ dnorm(mu.alpha3,tau.alpha3)
-      alpha4[i] ~ dnorm(mu.alpha4,tau.alpha4)
+      # alpha2[i] ~ dnorm(mu.alpha2,tau.alpha2)
+      # alpha3[i] ~ dnorm(mu.alpha3,tau.alpha3)
+      # alpha4[i] ~ dnorm(mu.alpha4,tau.alpha4)
       alpha5[i] ~ dnorm(mu.alpha5,tau.alpha5)
       alpha6[i] ~ dnorm(mu.alpha6,tau.alpha6)
-      alpha7[i] ~ dnorm(mu.alpha7,tau.alpha7)
-      alpha8[i] ~ dnorm(mu.alpha8,tau.alpha8)
+      # alpha7[i] ~ dnorm(mu.alpha7,tau.alpha7)
+      # alpha8[i] ~ dnorm(mu.alpha8,tau.alpha8)
       alpha9[i] ~ dnorm(mu.alpha9,tau.alpha9)
-      alpha10[i] ~ dnorm(mu.alpha10,tau.alpha10)
-      alpha11[i] ~ dnorm(mu.alpha11,tau.alpha11)
+      # alpha10[i] ~ dnorm(mu.alpha10,tau.alpha10)
+      # alpha11[i] ~ dnorm(mu.alpha11,tau.alpha11)
       alpha12[i] ~ dnorm(mu.alpha12,tau.alpha12)
   
       # Species level priors for detection coefficients
@@ -393,7 +393,7 @@ model{
       for (j in 1:J) { # for each site
         
           # Ecological process model for latent occurrence z
-          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + alpha5[i]*x_alpha5[j] + alpha6[i]*x_alpha6[j] + alpha7[i]*x_alpha7[j] + alpha8[i]*x_alpha8[j] + alpha9[i]*x_alpha9[j] + alpha10[i]*x_alpha10[j] + alpha11[i]*x_alpha11[j] + alpha12[i]*x_alpha12[j]
+          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha5[i]*x_alpha5[j] + alpha6[i]*x_alpha6[j] + alpha9[i]*x_alpha9[j] + alpha12[i]*x_alpha12[j]
           z[j,i] ~ dbern(psi[j,i])
           
           for (k in 1:K[j]) { # for each sampling period (survey) at site j
@@ -439,16 +439,16 @@ msom = jags(data = msom_data,
               "mu.u", "sigma.u", "u",
               "mu.v", "sigma.v", "v",
               "mu.alpha1", "sigma.alpha1", "alpha1",
-              "mu.alpha2", "sigma.alpha2", "alpha2",
-              "mu.alpha3", "sigma.alpha3", "alpha3",
-              "mu.alpha4", "sigma.alpha4", "alpha4",
+              # "mu.alpha2", "sigma.alpha2", "alpha2",
+              # "mu.alpha3", "sigma.alpha3", "alpha3",
+              # "mu.alpha4", "sigma.alpha4", "alpha4",
               "mu.alpha5", "sigma.alpha5", "alpha5",
               "mu.alpha6", "sigma.alpha6", "alpha6",
-              "mu.alpha7", "sigma.alpha7", "alpha7",
-              "mu.alpha8", "sigma.alpha8", "alpha8",
+              # "mu.alpha7", "sigma.alpha7", "alpha7",
+              # "mu.alpha8", "sigma.alpha8", "alpha8",
               "mu.alpha9", "sigma.alpha9", "alpha9",
-              "mu.alpha10", "sigma.alpha10", "alpha10",
-              "mu.alpha11", "sigma.alpha11", "alpha11",
+              # "mu.alpha10", "sigma.alpha10", "alpha10",
+              # "mu.alpha11", "sigma.alpha11", "alpha11",
               "mu.alpha12", "sigma.alpha12", "alpha12",
               "mu.beta1",  "sigma.beta1",  "beta1",
               "mu.beta2",  "sigma.beta2",  "beta2",
