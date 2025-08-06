@@ -7,9 +7,9 @@
 
 # TODO: Ensure that aru site locations are correctly positioned within patches (i.e. not near edges so as to get incorrect covariate estimates)
 
-overwrite_rast_cover_cache = TRUE
-overwrite_data_plot_scale_cache = TRUE
-overwrite_data_homerange_scale_cache = FALSE
+overwrite_rast_cover_cache = FALSE
+overwrite_data_plot_scale_cache = FALSE
+overwrite_data_homerange_scale_cache = TRUE
 path_rast_cover_clean_out = "data/cache/occurrence_covariates/rast_cover_clean.tif"
 path_data_plot_scale_out = "data/cache/occurrence_covariates/data_plot_scale.rds"
 path_data_homerange_scale_out = "data/cache/occurrence_covariates/data_homerange_scale.rds"
@@ -257,6 +257,8 @@ mapview(rast_updated)
 # Clean raster by generalizing minimum patch area and width
 if (overwrite_rast_cover_cache) {
   
+  message("Generating cover cache (current time ", time_start <- Sys.time(), ")")
+
   r = rast_updated
   cell_res <- res(r)[1] # cell resolution (in meters)
   min_area <- 0.785 * 1e4 # hectares to square meters
@@ -384,6 +386,7 @@ if (overwrite_rast_cover_cache) {
   message('Saving raster cover data cache ', path_rast_cover_clean_out)
   dir.create(dirname(path_rast_cover_clean_out), recursive = TRUE, showWarnings = FALSE)
   writeRaster(rast_cover_clean, path_rast_cover_clean_out, overwrite=TRUE)
+  message("Finished generating cover cache (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)")
   
 } else { # overwrite_rast_cover_cache is FALSE
   message('Loading raster cover data from cache ', path_rast_cover_clean_out)
@@ -399,6 +402,8 @@ mapview(rast_cover_clean,
 # Local plot scale covariates
 
 if (overwrite_data_plot_scale_cache) {
+  
+  message("Generating plot scale data cache (current time ", time_start <- Sys.time(), ")")
 
   # Plot-level spatial scale buffer
   plot_buffer = 100 # 100 meters
@@ -533,10 +538,9 @@ if (overwrite_data_plot_scale_cache) {
       mutate(plot_ht_cv_hs = replace_na(plot_ht_cv_hs, 0.0)),
     by = 'site')
   
-  rast_htmax = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_HTMAX.img')) # NOTE: feet
-  max_ht_m = max(values(rast_htmax), na.rm = TRUE) * conv_ft_m
-  data_plot_scale$plot_htmax_rs = as.numeric(compute_raster_buffer_value_func(rast_htmax, data_plot_scale, plot_buffer, mean)[,2]) * conv_ft_m
-  data_plot_scale$plot_htmax_cv_rs = as.numeric(compute_raster_buffer_value_func(rast_htmax, data_plot_scale, plot_buffer, compute_cv)[,2]) * conv_ft_m * 100
+  rast_htmax = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_HTMAX.img')) * conv_ft_m # convert from ft to m
+  data_plot_scale$plot_htmax_rs = as.numeric(compute_raster_buffer_value_func(rast_htmax, data_plot_scale, plot_buffer, mean)[,2])
+  data_plot_scale$plot_htmax_cv_rs = as.numeric(compute_raster_buffer_value_func(rast_htmax, data_plot_scale, plot_buffer, compute_cv)[,2])
   
   ggplot(data_plot_scale, aes(x = plot_ht_hs, y = plot_htmax_rs, label = site)) +
     geom_point() + geom_text_repel(size = 2) + geom_abline(slope = 1) +
@@ -729,6 +733,7 @@ if (overwrite_data_plot_scale_cache) {
   message('Saving plot scale data cache ', path_data_plot_scale_out)
   dir.create(dirname(path_data_plot_scale_out), recursive = TRUE, showWarnings = FALSE)
   saveRDS(data_plot_scale, path_data_plot_scale_out)
+  message("Finished generating plot scale data cache (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)")
 
 } else { # overwrite_data_plot_scale_cache is FALSE
   message('Loading plot scale data from cache ', path_data_plot_scale_out)
@@ -739,22 +744,25 @@ if (overwrite_data_plot_scale_cache) {
 # Focal patch scale and home range neighborhood scale covariates (limited to the extent of the species home range)
 
 if (overwrite_data_homerange_scale_cache) {
+  
+  message("Generating homerange scale data cache (current time ", time_start <- Sys.time(), ")")
 
   data_homerange_scale = list()
   
-  # For now, just calculate at a fixed radius plot scale (e.g. median predicted radius of 200 m)
-  # TODO: Calculate per species according to predicted home range size
+  homeranges = read.csv("data/cache/species_traits/species_traits.csv") %>% select(common_name, home_range_radius_m)
+  # DEBUG
+  # Overwrite homeranges with the median and mean range only for now
   homeranges = data.frame(
-    scale = c('Plot', 'Median', 'Mean', 'Nearmax'),
-    size    = c(100, # plot scale
-                204, # median
-                468, # mean
-                1000) # meters
+    common_name = c("min", "median", "mean"),
+    home_range_radius_m = c(100, 250, 600)
   )
+  # DEBUG
+  
+  # Calculate per species according to predicted home range size
   for (i in 1:nrow(homeranges)) {
-    scale = homeranges[i,'scale']
-    homerange_buffer_size = homeranges[i,'size']
-    message("Scale ", scale, ", home range buffer size ", homerange_buffer_size)
+    scale = homeranges[i,'common_name']
+    homerange_buffer_size = homeranges[i,'home_range_radius_m']
+    message("Scale '", scale, "', home range buffer size ", homerange_buffer_size)
     
     data_homerange_scale_species = data.frame()
   
@@ -765,13 +773,14 @@ if (overwrite_data_homerange_scale_cache) {
     sites = 1:nrow(data_plot_scale)
     for (j in sites) {
       site = data_plot_scale[j,]
-      message(site$site, ' (', j / length(sites), ')')
+      # message(site$site, ' (', round(j / length(sites),3), ')')
       cover_class = terra::extract(rast_cover_clean, vect(site))[,2]
       
       homerange_and_edge_buffer = st_buffer(site, homerange_buffer_size + core_area_buffer) # additional buffer to ensure that edges are retained in mask
       homerange_buffer = st_buffer(site, homerange_buffer_size)
       homerange_and_edge_crop = crop(rast_cover_clean, vect(homerange_and_edge_buffer))
       homerange_and_edge = mask(homerange_and_edge_crop, vect(homerange_and_edge_buffer))
+      # mapview(homerange_and_edge) + mapview(homerange_buffer)
       
       patch_ids = patches(homerange_and_edge, directions=8, values=TRUE)
       pid = terra::extract(patch_ids, vect(site))[,2]
@@ -803,8 +812,8 @@ if (overwrite_data_homerange_scale_cache) {
       homerange_crop = crop(rast_cover_clean, vect(homerange_buffer))
       homerange_cover = mask(homerange_crop, vect(homerange_buffer))
       homerange_cover_forest = homerange_cover
-      homerange_cover_forest[!(homerange_cover_forest[] %in% c(1, 2, 3, 4))] <- NA
-      # mapview(homerange_cover)
+      homerange_cover_forest[!(homerange_cover_forest[] %in% c(1, 2, 3, 4, 5))] <- NA
+      # mapview(homerange_cover) + mapview(homerange_cover_forest)
       ncells_homerange = sum(!is.na(values(homerange_cover)))
       
       # Focal patch percentage of home range [%]
@@ -816,7 +825,7 @@ if (overwrite_data_homerange_scale_cache) {
       # Focal patch euclidean nearest neighbor distance [m]
       # Quantifies habitat isolation
       # Approaches 0 as the distance to the nearest neighbor decreases. Minimum is constrained by the cell size.
-      focal_cover_class = as.numeric(site$stage)
+      focal_cover_class = site$stratum
       matching_cover = rast_cover_clean
       matching_cover[matching_cover != focal_cover_class] = NA
       focal_patch_extended = extend(focal_patch, matching_cover)
@@ -829,24 +838,24 @@ if (overwrite_data_homerange_scale_cache) {
       # Cover class richness [#]
       # Quantifies the number of cover types present in home range
       cover_freq = freq(homerange_cover) %>% select(value, count) %>% mutate(value = as.integer(value))
-      cover_freq = data.frame(value = 1:6) %>%
+      cover_freq = data.frame(value = 1:7) %>%
         left_join(cover_freq, by = "value") %>%
         mutate(count = ifelse(is.na(count), 0, count))
-      cover_forest_freq = cover_freq %>% filter(value %in% c(1,2,3,4))
+      cover_forest_freq = cover_freq %>% filter(value %in% c(1,2,3,4,5))
       (cover_richness = cover_freq %>% filter(count != 0) %>% nrow())
       (cover_forest_richness = cover_forest_freq %>% filter(count != 0) %>% nrow())
       
       # Cover class evenness (i.e. dominance) [#]
       # Quantifies the degree of evenness versus dominance in cover type distribution 
       # 0 when only one cover type is present, 1 when types are equally distributed
-      cover_evenness = lsm_l_shei(homerange_cover) %>% pull(value)
-      cover_forest_evenness = lsm_l_shei(homerange_cover_forest) %>% pull(value)
+      (cover_evenness = lsm_l_shei(homerange_cover) %>% pull(value))
+      (cover_forest_evenness = lsm_l_shei(homerange_cover_forest) %>% pull(value))
       
       # Cover class diversity (shannon) [#]
       # Quantifies both the richness and evenness of cover type distributions (inversely related to contagion)
       # 0 when only one cover type is present and increases as the number of classes increases while the proportions are equally distributed
-      cover_diversity = lsm_l_shdi(homerange_cover) %>% pull(value)
-      cover_forest_diversity = lsm_l_shdi(homerange_cover_forest) %>% pull(value)
+      (cover_diversity = lsm_l_shdi(homerange_cover) %>% pull(value))
+      (cover_forest_diversity = lsm_l_shdi(homerange_cover_forest) %>% pull(value))
       
       # Proportional abundance of each cover class [%]
       (prop_abund_1 = cover_freq %>% filter(value == 1) %>% pull(count) / ncells_homerange)
@@ -855,25 +864,28 @@ if (overwrite_data_homerange_scale_cache) {
       (prop_abund_4 = cover_freq %>% filter(value == 4) %>% pull(count) / ncells_homerange)
       (prop_abund_5 = cover_freq %>% filter(value == 5) %>% pull(count) / ncells_homerange)
       (prop_abund_6 = cover_freq %>% filter(value == 6) %>% pull(count) / ncells_homerange)
+      (prop_abund_7 = cover_freq %>% filter(value == 7) %>% pull(count) / ncells_homerange)
       
       # Aggregation index [#]
       # Quantifies degree of habitat contiguity versus fragmentation
       # Equals 0 when the patch types are maximally disaggregated (i.e., when there are no like adjacencies); AI increases as the landscape is increasingly aggregated and equals 100 when the landscape consists of a single patch.
-      aggregation_idx = lsm_l_ai(homerange_cover, directions = 8) %>% pull(value)
+      (aggregation_idx = lsm_l_ai(homerange_cover, directions = 8) %>% pull(value))
       
       # Shape index [#]
       # Quantifies patch shape complexity
       # Equals 1 if all patches are squares. Increases, without limit, as the shapes of patches become more complex.
-      shape_idx = lsm_l_shape_mn(homerange_cover, directions = 8) %>% pull(value)
+      (shape_idx = lsm_l_shape_mn(homerange_cover, directions = 8) %>% pull(value))
       
       # Contrast-weighted edge density [m/ha]
       # The density of patch edges weighted by their contrast
       # Equals 0 when there is no edge in the landscape (i.e. landscape consists of a single patch). Increases as the amount of edge in the landscape increases and/or as the contrast in edges increase (i.e. contrast weight approaches 1).
+      rast_htmax = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_HTMAX.img')) * conv_ft_m # convert from ft to m
+      max_ht_m = max(values(rast_htmax), na.rm = TRUE)
       homerange_height = mask(crop(rast_htmax, homerange_and_edge_buffer), homerange_and_edge_buffer)
       # mapview(patch_ids) + mapview(homerange_height)
       
-      height_aligned <- resample(homerange_height, patch_ids, method = "bilinear")
-      zonal_means <- zonal(height_aligned, patch_ids, fun = "median", na.rm = TRUE) # TODO: consider min instead
+      height_aligned = resample(homerange_height, patch_ids, method = "bilinear")
+      zonal_means = zonal(height_aligned, patch_ids, fun = "median", na.rm = TRUE) # TODO: consider min instead
       
       if (nrow(zonal_means) > 1) {
         # Equals the sum of the lengths (m) of each edge segment in the landscape multiplied by the
@@ -918,6 +930,7 @@ if (overwrite_data_homerange_scale_cache) {
       # mapview(homerange_streams_major) + mapview(homerange_streams) + mapview(homerange_buffer) + homerange_cover
       
       data_homerange_scale_species = rbind(data_homerange_scale_species, data.frame(
+        species = scale,
         site = site$site,
         buffer = homerange_buffer_size,
         focal_patch_pcnt,
@@ -963,109 +976,110 @@ if (overwrite_data_homerange_scale_cache) {
   message('Saving homerange data cache ', path_data_homerange_scale_out)
   dir.create(dirname(path_data_homerange_scale_out), recursive = TRUE, showWarnings = FALSE)
   saveRDS(data_homerange_scale, path_data_homerange_scale_out)
+  message("Finished generating homerange data cache (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)")
   
 } else { # overwrite_data_homerange_scale_cache is FALSE
   message('Loading homerange scale data from cache ', path_data_homerange_scale_out)
   data_homerange_scale = readRDS(path_data_homerange_scale_out)
 }
 
-#############################################################################################################
-# Data inspection
-
-### Plot scale candidate variables
-
-data_plot_scale_candidates = data_plot_scale %>% st_drop_geometry() %>% select(where(is.numeric))
-
-cor_matrix_plot_scale = cor(data_plot_scale_candidates, use = "pairwise.complete.obs", method = "pearson")
-cor_matrix_plot_scale[lower.tri(cor_matrix_plot_scale, diag = TRUE)] = NA
-collinearity_candidates = subset(as.data.frame(as.table(cor_matrix_plot_scale)), !is.na(Freq) & abs(Freq) >= 0.8)
-
-# Reduce list of candidate variables (highly correlated, less preferable, irrelevant, etc.)
-vars_to_drop = c(
-  # Highly correlated with age_mean, which is a better representation of stand age
-  'age_point',
-  # Highly correlated with plot_treeden_all_rs
-  'plot_treeden_lt4inDbh_rs',
-  # Individual tree species composition is better summarized with taxonomic diversity metrics
-  'tree_gte10cm_density_psme', 'tree_gte10cm_density_thpl', 'tree_gte10cm_density_abam', 'tree_gte10cm_density_tshe', 'tree_gte10cm_density_alru', 'tree_gte10cm_density_pisi',
-  'tree_all_density_thpl', 'tree_all_density_abam', 'tree_all_density_tshe', 'tree_all_density_alru', 'tree_all_density_pisi', 'tree_all_density_psme',
-  # TODO: Basal area (ba), height, qmd, and stand density are highly correlated.
-  # Josh and Teddy recommend independent variables for 1) tree density and 2) tree size (QMD).
-  # Dan, however, notes that integrative metrics that incorporate both tree density and (mean) tree size do the best job in these analyses.
-  # Drop SDI (which is highly correlated with qmd, ba, and ht) in favor of a raw density measurement.
- 'plot_sdi_rs',
- # Canopy cover and closure are highly correlated. Drop closure in favor of cover here because it is likely a more accurate measurement and is more widely used in landscape-scale analyses.
- 'plot_canopy_closure_rs'
-)
-data_plot_scale_candidates = data_plot_scale_candidates %>% select(-all_of(vars_to_drop))
-
-corrplot::corrplot(cor_matrix_plot_scale, method = "color", tl.cex = 0.8)
-
-
-
-
-
-
-ggplot(data_plot_scale, aes(x = `stage`, y = plot_qmd_all_hs)) +
-  geom_violin() +
-  stat_summary(fun = mean, geom = "point") +
-  ggtitle("Tree species richness across stages") + theme_minimal()
-
-df_long <- data_plot_scale %>% select(site, `stage`, plot_qmd_lt10cmDbh_hs, plot_qmd_gt10cmDbh_hs, plot_qmd_all_hs) %>%
-  pivot_longer(cols = starts_with("plot_qmd"), names_to = "metric", values_to = "qmd")
-ggplot(df_long, aes(x = stage, y = qmd, fill = metric)) +
-  geom_boxplot() + theme_minimal()
-
-ggplot(data_plot_scale %>% select(site, `stage`, plot_treeden_lt10cmDbh_hs, plot_treeden_gt10cmDbh_hs, plot_treeden_all_hs) %>%
-         pivot_longer(cols = starts_with("plot_treeden"), names_to = "variable", values_to = "value"),
-       aes(x = stage, y = value, fill = variable)) +
-  geom_boxplot() + coord_cartesian(ylim = c(0, 2500)) + theme_minimal() +
-  ggtitle('Tree density (habitat surveys)')
-
-ggplot(data_plot_scale %>% select(site, `stage`, plot_treeden_lt4inDbh_rs, plot_treeden_gt4inDbh_rs, plot_treeden_all_rs) %>%
-         pivot_longer(cols = starts_with("plot_treeden"), names_to = "variable", values_to = "value"),
-       aes(x = stage, y = value, fill = variable)) +
-  geom_boxplot() + theme_minimal() +
-  ggtitle('Tree density (remote sensing)')
-
-# psme - Douglas fir
-# thpl - Western redcedar
-# abam - Pacific silver fir
-# tshe - Western hemlock
-# alru - Red alder
-# pisi - Sitka spruce
-#
-# Stand initiation: small alru pioneers newly-disturbed habitat as an early-seral species, otherwise plantation psme and tshe are establishing
-# Stem exclusion: alru is outcompeted by psme and tshe and mostly disappears, tree size is more uniform
-# Understory reinit: tshe dominates, abam establishing, tree size less uniform
-# Old forest: tshe is climax species, abam established
-metric = "tree_all_density_" # "tree_all_density_", "tree_gte10cm_density_"
-df_long <- data_plot_scale %>% select(site, age_mean, `stage`, starts_with(metric)) %>%
-  pivot_longer(cols = starts_with(metric), names_to = "species", values_to = "density") %>%
-  mutate(species = gsub(metric, "", species))
-ggplot(df_long, aes(x = species, y = log(density), fill = species)) +
-  geom_boxplot() +
-  facet_wrap(~ stage, scales = "free_y") +
-  # coord_cartesian(ylim = c(0, 1250)) + 
-  labs(title = "Tree species density by stage") +
-  theme_minimal()
-
-ggplot(data_plot_scale, aes(x = `stage`, y = plot_elev_rs, fill = `stage`)) +
-  geom_boxplot()
-
-# Inspect specific variables by stage
-ggplot(data_plot_scale, aes(x = stage, y = canopy_layers_rs)) +
-  geom_boxplot() +
-  theme_minimal()
-
-
-
-
-
-
-
-### Homerange scales
-hist(data_homerange_scale[["Nearmax"]]$focal_patch_pcnt)
-hist(data_homerange_scale[["Nearmax"]]$cover_forest_richness)
-hist(data_homerange_scale[["Plot"]]$cw_edge_density)
+# #############################################################################################################
+# # Data inspection
+# 
+# ### Plot scale candidate variables
+# 
+# data_plot_scale_candidates = data_plot_scale %>% st_drop_geometry() %>% select(where(is.numeric))
+# 
+# cor_matrix_plot_scale = cor(data_plot_scale_candidates, use = "pairwise.complete.obs", method = "pearson")
+# cor_matrix_plot_scale[lower.tri(cor_matrix_plot_scale, diag = TRUE)] = NA
+# collinearity_candidates = subset(as.data.frame(as.table(cor_matrix_plot_scale)), !is.na(Freq) & abs(Freq) >= 0.8)
+# 
+# # Reduce list of candidate variables (highly correlated, less preferable, irrelevant, etc.)
+# vars_to_drop = c(
+#   # Highly correlated with age_mean, which is a better representation of stand age
+#   'age_point',
+#   # Highly correlated with plot_treeden_all_rs
+#   'plot_treeden_lt4inDbh_rs',
+#   # Individual tree species composition is better summarized with taxonomic diversity metrics
+#   'tree_gte10cm_density_psme', 'tree_gte10cm_density_thpl', 'tree_gte10cm_density_abam', 'tree_gte10cm_density_tshe', 'tree_gte10cm_density_alru', 'tree_gte10cm_density_pisi',
+#   'tree_all_density_thpl', 'tree_all_density_abam', 'tree_all_density_tshe', 'tree_all_density_alru', 'tree_all_density_pisi', 'tree_all_density_psme',
+#   # TODO: Basal area (ba), height, qmd, and stand density are highly correlated.
+#   # Josh and Teddy recommend independent variables for 1) tree density and 2) tree size (QMD).
+#   # Dan, however, notes that integrative metrics that incorporate both tree density and (mean) tree size do the best job in these analyses.
+#   # Drop SDI (which is highly correlated with qmd, ba, and ht) in favor of a raw density measurement.
+#  'plot_sdi_rs',
+#  # Canopy cover and closure are highly correlated. Drop closure in favor of cover here because it is likely a more accurate measurement and is more widely used in landscape-scale analyses.
+#  'plot_canopy_closure_rs'
+# )
+# data_plot_scale_candidates = data_plot_scale_candidates %>% select(-all_of(vars_to_drop))
+# 
+# corrplot::corrplot(cor_matrix_plot_scale, method = "color", tl.cex = 0.8)
+# 
+# 
+# 
+# 
+# 
+# 
+# ggplot(data_plot_scale, aes(x = `stage`, y = plot_qmd_all_hs)) +
+#   geom_violin() +
+#   stat_summary(fun = mean, geom = "point") +
+#   ggtitle("Tree species richness across stages") + theme_minimal()
+# 
+# df_long <- data_plot_scale %>% select(site, `stage`, plot_qmd_lt10cmDbh_hs, plot_qmd_gt10cmDbh_hs, plot_qmd_all_hs) %>%
+#   pivot_longer(cols = starts_with("plot_qmd"), names_to = "metric", values_to = "qmd")
+# ggplot(df_long, aes(x = stage, y = qmd, fill = metric)) +
+#   geom_boxplot() + theme_minimal()
+# 
+# ggplot(data_plot_scale %>% select(site, `stage`, plot_treeden_lt10cmDbh_hs, plot_treeden_gt10cmDbh_hs, plot_treeden_all_hs) %>%
+#          pivot_longer(cols = starts_with("plot_treeden"), names_to = "variable", values_to = "value"),
+#        aes(x = stage, y = value, fill = variable)) +
+#   geom_boxplot() + coord_cartesian(ylim = c(0, 2500)) + theme_minimal() +
+#   ggtitle('Tree density (habitat surveys)')
+# 
+# ggplot(data_plot_scale %>% select(site, `stage`, plot_treeden_lt4inDbh_rs, plot_treeden_gt4inDbh_rs, plot_treeden_all_rs) %>%
+#          pivot_longer(cols = starts_with("plot_treeden"), names_to = "variable", values_to = "value"),
+#        aes(x = stage, y = value, fill = variable)) +
+#   geom_boxplot() + theme_minimal() +
+#   ggtitle('Tree density (remote sensing)')
+# 
+# # psme - Douglas fir
+# # thpl - Western redcedar
+# # abam - Pacific silver fir
+# # tshe - Western hemlock
+# # alru - Red alder
+# # pisi - Sitka spruce
+# #
+# # Stand initiation: small alru pioneers newly-disturbed habitat as an early-seral species, otherwise plantation psme and tshe are establishing
+# # Stem exclusion: alru is outcompeted by psme and tshe and mostly disappears, tree size is more uniform
+# # Understory reinit: tshe dominates, abam establishing, tree size less uniform
+# # Old forest: tshe is climax species, abam established
+# metric = "tree_all_density_" # "tree_all_density_", "tree_gte10cm_density_"
+# df_long <- data_plot_scale %>% select(site, age_mean, `stage`, starts_with(metric)) %>%
+#   pivot_longer(cols = starts_with(metric), names_to = "species", values_to = "density") %>%
+#   mutate(species = gsub(metric, "", species))
+# ggplot(df_long, aes(x = species, y = log(density), fill = species)) +
+#   geom_boxplot() +
+#   facet_wrap(~ stage, scales = "free_y") +
+#   # coord_cartesian(ylim = c(0, 1250)) + 
+#   labs(title = "Tree species density by stage") +
+#   theme_minimal()
+# 
+# ggplot(data_plot_scale, aes(x = `stage`, y = plot_elev_rs, fill = `stage`)) +
+#   geom_boxplot()
+# 
+# # Inspect specific variables by stage
+# ggplot(data_plot_scale, aes(x = stage, y = canopy_layers_rs)) +
+#   geom_boxplot() +
+#   theme_minimal()
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# ### Homerange scales
+# hist(data_homerange_scale[["Nearmax"]]$focal_patch_pcnt)
+# hist(data_homerange_scale[["Nearmax"]]$cover_forest_richness)
+# hist(data_homerange_scale[["Plot"]]$cw_edge_density)
 
