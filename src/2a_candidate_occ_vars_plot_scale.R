@@ -6,6 +6,7 @@ library(mapview)
 library(terra)
 library(sf)
 library(dplyr)
+library(tidyr)
 library(ggrepel)
 theme_set(theme_minimal())
 
@@ -144,6 +145,12 @@ ggplot(data_plot_scale, aes(x = plot_ht_hs, y = plot_htmax_rs, label = site)) +
   ylim(0, max(data_plot_scale$plot_ht_hs, data_plot_scale$plot_htmax_rs, na.rm = TRUE)) +
   ggtitle('Tree height (mean) [m]')
 cor(data_plot_scale$plot_ht_hs, data_plot_scale$plot_htmax_rs, use = "pairwise.complete.obs")
+ggplot(data_plot_scale, aes(x = plot_ht_cv_hs, y = plot_htmax_cv_rs, label = site)) +
+  geom_point() + geom_text_repel(size = 2) + geom_abline(slope = 1) +
+  xlim(0, max(data_plot_scale$plot_ht_cv_hs, data_plot_scale$plot_htmax_cv_rs, na.rm = TRUE)) +
+  ylim(0, max(data_plot_scale$plot_ht_cv_hs, data_plot_scale$plot_htmax_cv_rs, na.rm = TRUE)) +
+  ggtitle('Tree height (cv) [m]')
+cor(data_plot_scale$plot_ht_cv_hs, data_plot_scale$plot_htmax_cv_rs, use = "pairwise.complete.obs")
 
 # Density of all snags [# snags/ha]
 ggplot(data_plot_scale, aes(x = plot_snagden_hs, y = plot_snagden_rs, label = site)) +
