@@ -1,5 +1,6 @@
 ####################################################################################
 # A multi-species static occupancy model with ALL LOCAL HABITAT SURVEY occupancy and detection covariates
+# and grouping by trait categories
 #
 # Formulated according to:
 # - https://besjournals.onlinelibrary.wiley.com/doi/10.1111/j.1365-2664.2009.01664.x#b14
@@ -21,6 +22,15 @@ theme_set(theme_classic())
 # Get local plot scale data
 local_plot_data = readRDS(path_plot_scale_data)
 local_plot_data = local_plot_data %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site)) %>% filter(hs == TRUE)
+
+# Species groupings:
+# 'none' no grouping (i.e. entire community)
+# 'habitat' (Forest, Woodland, Shrubland, Riverine, Marine, Human modified...)
+# 'habitat_density' (1 for , 2 for , 3 for )
+# 'primary_lifestyle' ()
+# 'trophic_niche' ()
+# TODO: 'nesting'
+grouping = 'primary_lifestyle' # e.g. none, habitat_density, habitat, primary_lifestyle, trophic_niche
 
 # Season `t`
 t = "2020"
@@ -238,19 +248,19 @@ x_alpha8_scaled = scale(local_plot_data$plot_downvol_hs)
 x_alpha9_scaled = scale(local_plot_data$plot_treeden_gt10cmDbh_hs)
 x_alpha10_scaled = scale(local_plot_data$tree_all_diversity)
 x_alpha11_scaled = scale(local_plot_data$dist_watercourses_major)
-x_alpha12_scaled = scale(local_plot_data$plot_understory_vol)
+x_alpha12_scaled = scale(local_plot_data$plot_qmd_all_hs)
 params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha1", name = "plot_elev_rs"))
-# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha2", name = "plot_treeden_gt10cmDbh_hs"))
-# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha3", name = "plot_treeden_lt10cmDbh_hs"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha2", name = "plot_treeden_gt10cmDbh_hs"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha3", name = "plot_treeden_lt10cmDbh_hs"))
 # params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha4", name = "plot_qmd_all_hs"))
 params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha5", name = "plot_ht_cv_hs"))
 params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha6", name = "plot_canopy_cover_rs"))
 # params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha7", name = "plot_snagden_hs"))
 # params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha8", name = "plot_downvol_hs"))
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha9", name = "tree_all_diversity"))
+# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha9", name = "tree_all_diversity"))
 # params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha10", name = "tree_all_diversity"))
 # params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha11", name = "dist_watercourses_major"))
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha12", name = "plot_understory_vol"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha12", name = "plot_qmd_all_hs"))
 
 # Standardize detection covariate data to z-scale (mean 0, standard deviation 1)
 params_beta_names = data.frame()
@@ -260,6 +270,22 @@ x_beta3_scaled = scale(as.vector(x_tmax))
 params_beta_names = rbind(params_beta_names, data.frame(param = "beta1", name = "yday"))
 params_beta_names = rbind(params_beta_names, data.frame(param = "beta2", name = "prcp_mm_day"))
 params_beta_names = rbind(params_beta_names, data.frame(param = "beta3", name = "tmax_deg_c"))
+
+# Re-name specific species
+species[species == "Pacific-slope Flycatcher"] = "Western Flycatcher"
+species[species == "Northern Goshawk"] = "American Goshawk"
+
+# Get groupings
+data_traits = read.csv("data/cache/species_traits/species_traits.csv") %>%
+  filter(common_name %in% species) %>% arrange(match(common_name, species)) %>% mutate(none = 1)
+groups = data.frame(
+  species     = data_traits$common_name,
+  group_idx   = as.integer(factor(data_traits[,grouping])),
+  group_label = factor(data_traits[,grouping])
+)
+G = length(unique(groups$group_idx))
+message("Species assigned to ", G, " group(s) by grouping '", grouping, "'")
+(table(groups$group_label))
 
 # Initialize latent occupancy state z[i] as 1 if a detection occurred at unit i, and 0 otherwise
 z = matrix(data = NA, nrow = length(sites), ncol = length(species), dimnames = list(sites, species))
@@ -272,19 +298,21 @@ z = (z > 0) * 1
 msom_data = list(
   # Observed data
   y = y,                                             # detection-nondetection matrix
+  group = as.vector(groups$group_idx),                   # species group membership
   I = length(species),                               # number of species observed
   J = length(sites),                                 # number of sites sampled
   K = as.vector(n_surveys_per_site),                 # number of sampling periods (surveys) per site
+  G = G,                                             # number of groups
   # Occupancy covariates
   x_alpha1   = x_alpha1_scaled[,1],
-  # x_alpha2   = x_alpha2_scaled[,1],
-  # x_alpha3   = x_alpha3_scaled[,1],
+  x_alpha2   = x_alpha2_scaled[,1],
+  x_alpha3   = x_alpha3_scaled[,1],
   # x_alpha4   = x_alpha4_scaled[,1],
   x_alpha5   = x_alpha5_scaled[,1],
   x_alpha6   = x_alpha6_scaled[,1],
   # x_alpha7   = x_alpha7_scaled[,1],
   # x_alpha8   = x_alpha8_scaled[,1],
-  x_alpha9   = x_alpha9_scaled[,1],
+  # x_alpha9   = x_alpha9_scaled[,1],
   # x_alpha10  = x_alpha10_scaled[,1],
   # x_alpha11  = x_alpha11_scaled[,1],
   x_alpha12  = x_alpha12_scaled[,1],
@@ -305,95 +333,96 @@ writeLines("
 model{
 
   ## Community level hyperpriors
-
-  # Community mean occurrence
-  psi.mean ~ dunif(0,1)                   # probability scale
-  mu.u <- log(psi.mean) - log(1-psi.mean) # logit scale
-  sigma.u ~ dunif(0,5)                    # standard deviation
-  tau.u <- pow(sigma.u,-2)                # precision
-  
-  # Covariate effects on occurrence
-  mu.alpha1  ~ dnorm(0,0.01)
-  # mu.alpha2  ~ dnorm(0,0.01)
-  # mu.alpha3  ~ dnorm(0,0.01)
-  # mu.alpha4  ~ dnorm(0,0.01)
-  mu.alpha5  ~ dnorm(0,0.01)
-  mu.alpha6  ~ dnorm(0,0.01)
-  # mu.alpha7  ~ dnorm(0,0.01)
-  # mu.alpha8  ~ dnorm(0,0.01)
-  mu.alpha9  ~ dnorm(0,0.01)
-  # mu.alpha10 ~ dnorm(0,0.01)
-  # mu.alpha11 ~ dnorm(0,0.01)
-  mu.alpha12 ~ dnorm(0,0.01)
-  sigma.alpha1  ~ dunif(0,5)
-  # sigma.alpha2  ~ dunif(0,5)
-  # sigma.alpha3  ~ dunif(0,5)
-  # sigma.alpha4  ~ dunif(0,5)
-  sigma.alpha5  ~ dunif(0,5)
-  sigma.alpha6  ~ dunif(0,5)
-  # sigma.alpha7  ~ dunif(0,5)
-  # sigma.alpha8  ~ dunif(0,5)
-  sigma.alpha9  ~ dunif(0,5)
-  # sigma.alpha10 ~ dunif(0,5)
-  # sigma.alpha11 ~ dunif(0,5)
-  sigma.alpha12 ~ dunif(0,5)
-  tau.alpha1  <- pow(sigma.alpha1,-2)
-  # tau.alpha2  <- pow(sigma.alpha2,-2)
-  # tau.alpha3  <- pow(sigma.alpha3,-2)
-  # tau.alpha4  <- pow(sigma.alpha4,-2)
-  tau.alpha5  <- pow(sigma.alpha5,-2)
-  tau.alpha6  <- pow(sigma.alpha6,-2)
-  # tau.alpha7  <- pow(sigma.alpha7,-2)
-  # tau.alpha8  <- pow(sigma.alpha8,-2)
-  tau.alpha9  <- pow(sigma.alpha9,-2)
-  # tau.alpha10 <- pow(sigma.alpha10,-2)
-  # tau.alpha11 <- pow(sigma.alpha11,-2)
-  tau.alpha12 <- pow(sigma.alpha12,-2)
-  
-  # Community mean detection
-  p.mean ~ dunif(0,1)                 # probability scale
-  mu.v <- log(p.mean) - log(1-p.mean) # logit scale
-  sigma.v ~ dunif(0,5)                # standard deviation
-  tau.v <- pow(sigma.v,-2)            # precision
-
-  # Covariate effects on detection
-  mu.beta1 ~ dnorm(0,0.01)
-  mu.beta2 ~ dnorm(0,0.01)
-  mu.beta3 ~ dnorm(0,0.01)
-  sigma.beta1 ~ dunif(0,5)
-  sigma.beta2 ~ dunif(0,5)
-  sigma.beta3 ~ dunif(0,5)
-  tau.beta1 <- pow(sigma.beta1,-2)
-  tau.beta2 <- pow(sigma.beta2,-2)
-  tau.beta3 <- pow(sigma.beta3,-2)
+  for (g in 1:G) {
+      # Group mean occurrence
+      psi.mean[g] ~ dunif(0,1)                   # probability scale
+      mu.u[g] <- log(psi.mean[g]) - log(1-psi.mean[g]) # logit scale
+      sigma.u[g] ~ dunif(0,5)                    # standard deviation
+      tau.u[g] <- pow(sigma.u[g],-2)                # precision
+      
+      # Covariate effects on occurrence
+      mu.alpha1[g]  ~ dnorm(0,0.01)
+      mu.alpha2[g]  ~ dnorm(0,0.01)
+      mu.alpha3[g]  ~ dnorm(0,0.01)
+      # mu.alpha4[g]  ~ dnorm(0,0.01)
+      mu.alpha5[g]  ~ dnorm(0,0.01)
+      mu.alpha6[g]  ~ dnorm(0,0.01)
+      # mu.alpha7[g]  ~ dnorm(0,0.01)
+      # mu.alpha8[g]  ~ dnorm(0,0.01)
+      # mu.alpha9[g]  ~ dnorm(0,0.01)
+      # mu.alpha10[g] ~ dnorm(0,0.01)
+      # mu.alpha11[g] ~ dnorm(0,0.01)
+      mu.alpha12[g] ~ dnorm(0,0.01)
+      sigma.alpha1[g]  ~ dunif(0,5)
+      sigma.alpha2[g]  ~ dunif(0,5)
+      sigma.alpha3[g]  ~ dunif(0,5)
+      # sigma.alpha4[g]  ~ dunif(0,5)
+      sigma.alpha5[g]  ~ dunif(0,5)
+      sigma.alpha6[g]  ~ dunif(0,5)
+      # sigma.alpha7[g]  ~ dunif(0,5)
+      # sigma.alpha8[g]  ~ dunif(0,5)
+      # sigma.alpha9[g]  ~ dunif(0,5)
+      # sigma.alpha10[g] ~ dunif(0,5)
+      # sigma.alpha11[g] ~ dunif(0,5)
+      sigma.alpha12[g] ~ dunif(0,5)
+      tau.alpha1[g]  <- pow(sigma.alpha1[g],-2)
+      tau.alpha2[g]  <- pow(sigma.alpha2[g],-2)
+      tau.alpha3[g]  <- pow(sigma.alpha3[g],-2)
+      # tau.alpha4[g]  <- pow(sigma.alpha4[g],-2)
+      tau.alpha5[g]  <- pow(sigma.alpha5[g],-2)
+      tau.alpha6[g]  <- pow(sigma.alpha6[g],-2)
+      # tau.alpha7[g]  <- pow(sigma.alpha7[g],-2)
+      # tau.alpha8[g]  <- pow(sigma.alpha8[g],-2)
+      # tau.alpha9[g]  <- pow(sigma.alpha9[g],-2)
+      # tau.alpha10[g] <- pow(sigma.alpha10[g],-2)
+      # tau.alpha11[g] <- pow(sigma.alpha11[g],-2)
+      tau.alpha12[g] <- pow(sigma.alpha12[g],-2)
+      
+      # Group mean detection
+      p.mean[g] ~ dunif(0,1)                 # probability scale
+      mu.v[g] <- log(p.mean[g]) - log(1-p.mean[g]) # logit scale
+      sigma.v[g] ~ dunif(0,5)                # standard deviation
+      tau.v[g] <- pow(sigma.v[g],-2)            # precision
+    
+      # Covariate effects on detection
+      mu.beta1[g] ~ dnorm(0,0.01)
+      mu.beta2[g] ~ dnorm(0,0.01)
+      mu.beta3[g] ~ dnorm(0,0.01)
+      sigma.beta1[g] ~ dunif(0,5)
+      sigma.beta2[g] ~ dunif(0,5)
+      sigma.beta3[g] ~ dunif(0,5)
+      tau.beta1[g] <- pow(sigma.beta1[g],-2)
+      tau.beta2[g] <- pow(sigma.beta2[g],-2)
+      tau.beta3[g] <- pow(sigma.beta3[g],-2)
+  }
 
   for (i in 1:I) { # for each species
   
       # Species level priors for occupancy coefficients (note that dnorm in JAGS is parametrized with precision [tau], not sd [sigma])
-      u[i] ~ dnorm(mu.u, tau.u)
-      alpha1[i] ~ dnorm(mu.alpha1,tau.alpha1)
-      # alpha2[i] ~ dnorm(mu.alpha2,tau.alpha2)
-      # alpha3[i] ~ dnorm(mu.alpha3,tau.alpha3)
-      # alpha4[i] ~ dnorm(mu.alpha4,tau.alpha4)
-      alpha5[i] ~ dnorm(mu.alpha5,tau.alpha5)
-      alpha6[i] ~ dnorm(mu.alpha6,tau.alpha6)
-      # alpha7[i] ~ dnorm(mu.alpha7,tau.alpha7)
-      # alpha8[i] ~ dnorm(mu.alpha8,tau.alpha8)
-      alpha9[i] ~ dnorm(mu.alpha9,tau.alpha9)
-      # alpha10[i] ~ dnorm(mu.alpha10,tau.alpha10)
-      # alpha11[i] ~ dnorm(mu.alpha11,tau.alpha11)
-      alpha12[i] ~ dnorm(mu.alpha12,tau.alpha12)
+      u[i] ~ dnorm(mu.u[group[i]], tau.u[group[i]])
+      alpha1[i] ~ dnorm(mu.alpha1[group[i]],tau.alpha1[group[i]])
+      alpha2[i] ~ dnorm(mu.alpha2[group[i]],tau.alpha2[group[i]])
+      alpha3[i] ~ dnorm(mu.alpha3[group[i]],tau.alpha3[group[i]])
+      # alpha4[i] ~ dnorm(mu.alpha4[group[i]],tau.alpha4[group[i]])
+      alpha5[i] ~ dnorm(mu.alpha5[group[i]],tau.alpha5[group[i]])
+      alpha6[i] ~ dnorm(mu.alpha6[group[i]],tau.alpha6[group[i]])
+      # alpha7[i] ~ dnorm(mu.alpha7[group[i]],tau.alpha7[group[i]])
+      # alpha8[i] ~ dnorm(mu.alpha8[group[i]],tau.alpha8[group[i]])
+      # alpha9[i] ~ dnorm(mu.alpha9[group[i]],tau.alpha9[group[i]])
+      # alpha10[i] ~ dnorm(mu.alpha10[group[i]],tau.alpha10[group[i]])
+      # alpha11[i] ~ dnorm(mu.alpha11[group[i]],tau.alpha11[group[i]])
+      alpha12[i] ~ dnorm(mu.alpha12[group[i]],tau.alpha12[group[i]])
   
       # Species level priors for detection coefficients
-      v[i] ~ dnorm(mu.v, tau.v)
-      beta1[i] ~ dnorm(mu.beta1,tau.beta1)
-      beta2[i] ~ dnorm(mu.beta2,tau.beta2)
-      beta3[i] ~ dnorm(mu.beta3,tau.beta3)
+      v[i] ~ dnorm(mu.v[group[i]], tau.v[group[i]])
+      beta1[i] ~ dnorm(mu.beta1[group[i]],tau.beta1[group[i]])
+      beta2[i] ~ dnorm(mu.beta2[group[i]],tau.beta2[group[i]])
+      beta3[i] ~ dnorm(mu.beta3[group[i]],tau.beta3[group[i]])
   
       for (j in 1:J) { # for each site
         
           # Ecological process model for latent occurrence z
-          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha5[i]*x_alpha5[j] + alpha6[i]*x_alpha6[j] + alpha9[i]*x_alpha9[j] + alpha12[i]*x_alpha12[j]
+          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha5[i]*x_alpha5[j] + alpha6[i]*x_alpha6[j] + alpha12[i]*x_alpha12[j]
           z[j,i] ~ dbern(psi[j,i])
           
           for (k in 1:K[j]) { # for each sampling period (survey) at site j
@@ -439,14 +468,14 @@ msom = jags(data = msom_data,
               "mu.u", "sigma.u", "u",
               "mu.v", "sigma.v", "v",
               "mu.alpha1", "sigma.alpha1", "alpha1",
-              # "mu.alpha2", "sigma.alpha2", "alpha2",
-              # "mu.alpha3", "sigma.alpha3", "alpha3",
+              "mu.alpha2", "sigma.alpha2", "alpha2",
+              "mu.alpha3", "sigma.alpha3", "alpha3",
               # "mu.alpha4", "sigma.alpha4", "alpha4",
               "mu.alpha5", "sigma.alpha5", "alpha5",
               "mu.alpha6", "sigma.alpha6", "alpha6",
               # "mu.alpha7", "sigma.alpha7", "alpha7",
               # "mu.alpha8", "sigma.alpha8", "alpha8",
-              "mu.alpha9", "sigma.alpha9", "alpha9",
+              # "mu.alpha9", "sigma.alpha9", "alpha9",
               # "mu.alpha10", "sigma.alpha10", "alpha10",
               # "mu.alpha11", "sigma.alpha11", "alpha11",
               "mu.alpha12", "sigma.alpha12", "alpha12",
@@ -518,36 +547,86 @@ ggplot(Nsite_posterior, aes(x = mean)) +
 
 # As covariates on occupancy were standardized, the inverse-logit (`plogis()`) of u[i] is the baseline occurrence probability for species i at a site with ‘average’ habitat characteristics.
 
-occurrence_prob = msom_summary %>% filter(stringr::str_starts(param, "u")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
-mean_occurrence_prob = msom_summary %>% filter(param == "mu.u")
-message("Mean species occurrence probability: ", round(mean_occurrence_prob$prob,2), " (95% BCI ", round(mean_occurrence_prob$prob_lower95,2), "–", round(mean_occurrence_prob$prob_upper95,2), ")")
-message("Species occurrence probability range: ", round(min(occurrence_prob$prob),2), "–", round(max(occurrence_prob$prob),2), " (", occurrence_prob %>% slice_min(prob, n=1) %>% pull(species_name), ", ", occurrence_prob %>% slice_max(prob, n=1) %>% pull(species_name), ")")
-ggplot(occurrence_prob, aes(x = as.factor(plot_order), y = prob)) +
-  geom_hline(yintercept = mean_occurrence_prob$prob,         linetype = "solid", color = "blue") +
-  geom_hline(yintercept = mean_occurrence_prob$prob_lower95, linetype = "dashed", color = "blue") +
-  geom_hline(yintercept = mean_occurrence_prob$prob_upper95, linetype = "dashed", color = "blue") +
-  geom_point() + geom_errorbar(aes(ymin = `prob_lower95`, ymax = `prob_upper95`), width = 0) +
-  scale_x_discrete(labels = occurrence_prob$species_name) + 
+species_occ_prob = msom_summary %>% filter(stringr::str_starts(param, "u")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx]) %>% left_join(groups, by = c("species_name" = "species"))
+mean_occurrence_prob = msom_summary %>% filter(stringr::str_starts(param, "mu.u"))
+if (nrow(mean_occurrence_prob) > 1) {
+  mean_occurrence_prob = mean_occurrence_prob %>% mutate(group_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param)))
+} else {
+  mean_occurrence_prob$group_idx = 1
+}
+
+message("Species occurrence probability range: ", round(min(species_occ_prob$prob),2), "–", round(max(species_occ_prob$prob),2), " (", species_occ_prob %>% slice_min(prob, n=1) %>% pull(species_name), ", ", species_occ_prob %>% slice_max(prob, n=1) %>% pull(species_name), ")")
+for (g in 1:nrow(mean_occurrence_prob)) {
+  g_mean_occ_prob = mean_occurrence_prob[g, ]
+  message("Mean occurrence probability (group ", g, "): ", round(g_mean_occ_prob$prob,2), " (95% BCI ", round(g_mean_occ_prob$prob_lower95,2), "–", round(g_mean_occ_prob$prob_upper95,2), ")")
+}
+
+mean_occurrence_prob = mean_occurrence_prob %>%
+  pivot_longer(cols = c(prob, prob_lower95, prob_upper95), names_to = "line_type", values_to = "yintercept") %>%
+  mutate(line_type = case_when(line_type == "prob" ~ "solid", TRUE ~ "dashed"),
+    group_idx = factor(group_idx),
+    line_type = as.character(line_type)
+  )
+plt = ggplot(species_occ_prob, aes(x = as.factor(plot_order), y = prob, color = factor(group_idx))) +
+  geom_point() +
+  geom_errorbar(aes(ymin = prob_lower95, ymax = prob_upper95), width = 0) +
+  scale_x_discrete(labels = species_occ_prob$species_name) + 
   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
-  labs(title = "Baseline occurrence probability", x = "Species", y = "Occurrence probability") +
-  coord_flip()
+  labs(title = "Baseline occurrence probability", x = "Species", y = "Occurrence probability", color = "Group") +
+  coord_flip() +
+  geom_hline(data = mean_occurrence_prob, aes(yintercept = yintercept, color = group_idx), linetype = mean_occurrence_prob$line_type, size = 1, alpha = 0.5); print(plt)
+
+# ggplot(species_occ_prob, aes(x = as.factor(plot_order), y = prob)) +
+#   geom_hline(yintercept = mean_occurrence_prob$prob,         linetype = "solid", color = "blue") +
+#   geom_hline(yintercept = mean_occurrence_prob$prob_lower95, linetype = "dashed", color = "blue") +
+#   geom_hline(yintercept = mean_occurrence_prob$prob_upper95, linetype = "dashed", color = "blue") +
+#   geom_point() + geom_errorbar(aes(ymin = `prob_lower95`, ymax = `prob_upper95`), width = 0) +
+#   scale_x_discrete(labels = species_occ_prob$species_name) + 
+#   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
+#   labs(title = "Baseline occurrence probability", x = "Species", y = "Occurrence probability") +
+#   coord_flip()
 
 # Similarly, the inverse-logit of v[i] is the detection probability for species i under 'average' detection conditions.
-detection_prob = msom_summary %>% filter(stringr::str_starts(param, "v")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
-mean_detection_prob = msom_summary %>% filter(param == "mu.v")
-message("Mean species detection probability: ", round(mean_detection_prob$prob,2), " (95% BCI ", round(mean_detection_prob$prob_lower95,2), "–", round(mean_detection_prob$prob_upper95,2), ")")
-message("Species detection probability range: ", round(min(detection_prob$prob),2), "–", round(max(detection_prob$prob),2), " (", detection_prob %>% slice_min(prob, n=1) %>% pull(species_name), ", ", detection_prob %>% slice_max(prob, n=1) %>% pull(species_name), ")")
-ggplot(detection_prob, aes(x = as.factor(plot_order), y = prob)) +
-  geom_hline(yintercept = mean_detection_prob$prob,         linetype = "solid", color = "blue") +
-  geom_hline(yintercept = mean_detection_prob$prob_lower95, linetype = "dashed", color = "blue") +
-  geom_hline(yintercept = mean_detection_prob$prob_upper95, linetype = "dashed", color = "blue") +
-  geom_point() + geom_errorbar(aes(ymin = `prob_lower95`, ymax = `prob_upper95`), width = 0) +
-  scale_x_discrete(labels = detection_prob$species_name) + 
+species_detect_prob = msom_summary %>% filter(stringr::str_starts(param, "v")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx]) %>% left_join(groups, by = c("species_name" = "species"))
+mean_detect_prob = msom_summary %>% filter(stringr::str_starts(param, "mu.v"))
+if (nrow(mean_detect_prob) > 1) {
+  mean_detect_prob = mean_detect_prob %>% mutate(group_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param)))
+} else {
+  mean_detect_prob$group_idx = 1
+}
+
+message("Species detection probability range: ", round(min(species_detect_prob$prob),2), "–", round(max(species_detect_prob$prob),2), " (", species_detect_prob %>% slice_min(prob, n=1) %>% pull(species_name), ", ", species_detect_prob %>% slice_max(prob, n=1) %>% pull(species_name), ")")
+for (g in 1:nrow(mean_detect_prob)) {
+  g_mean_det_prob = mean_detect_prob[g, ]
+  message("Mean detection probability (group ", g, "): ", round(g_mean_det_prob$prob,2), " (95% BCI ", round(g_mean_det_prob$prob_lower95,2), "–", round(g_mean_det_prob$prob_upper95,2), ")")
+}
+
+mean_detect_prob = mean_detect_prob %>%
+  pivot_longer(cols = c(prob, prob_lower95, prob_upper95), names_to = "line_type", values_to = "yintercept") %>%
+  mutate(line_type = case_when(line_type == "prob" ~ "solid", TRUE ~ "dashed"),
+         group_idx = factor(group_idx),
+         line_type = as.character(line_type)
+  )
+plt = ggplot(species_detect_prob, aes(x = as.factor(plot_order), y = prob, color = factor(group_idx))) +
+  geom_point() +
+  geom_errorbar(aes(ymin = prob_lower95, ymax = prob_upper95), width = 0) +
+  scale_x_discrete(labels = species_detect_prob$species_name) + 
   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
-  labs(title = "Baseline detection probability", x = "Species", y = "Detection probability") +
-  coord_flip()
+  labs(title = "Baseline detection probability", x = "Species", y = "Detection probability", color = "Group") +
+  coord_flip() +
+  geom_hline(data = mean_detect_prob, aes(yintercept = yintercept, color = group_idx), linetype = mean_detect_prob$line_type, size = 1, alpha = 0.5); print(plt)
+
+# ggplot(detection_prob, aes(x = as.factor(plot_order), y = prob)) +
+#   geom_hline(yintercept = mean_detection_prob$prob,         linetype = "solid", color = "blue") +
+#   geom_hline(yintercept = mean_detection_prob$prob_lower95, linetype = "dashed", color = "blue") +
+#   geom_hline(yintercept = mean_detection_prob$prob_upper95, linetype = "dashed", color = "blue") +
+#   geom_point() + geom_errorbar(aes(ymin = `prob_lower95`, ymax = `prob_upper95`), width = 0) +
+#   scale_x_discrete(labels = detection_prob$species_name) + 
+#   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
+#   labs(title = "Baseline detection probability", x = "Species", y = "Detection probability") +
+#   coord_flip()
 
 # Community-level summaries of the hyper-parameters for the detection and occupancy covariates
 # mu is the community response (mean across species) to a given covariate and sd is the standard deviation (among species). Thus, the hyper-parameters are simply the mean and variance for each covariate as measured across species (Kéry & Royle 2009)
@@ -559,30 +638,43 @@ message("Community-level summaries of hyper-parameters for occurrence and detect
     filter(str_detect(param, "^mu\\.beta|^sigma\\.beta")) %>% arrange(param) %>%
     select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0))
 
+if (length(unique(groups$group_idx)) > 1) {
+  occurrence_coeff_summary = occurrence_coeff_summary %>%
+    mutate(group_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param)), param = sub("\\[.*", "", param))
+  detection_coeff_summary = detection_coeff_summary %>%
+    mutate(group_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param)), param = sub("\\[.*", "", param))
+} else {
+  occurrence_coeff_summary$group_idx = 1
+  detection_coeff_summary$group_idx = 1
+}
+
 # Compare community level effect sizes for occurrence coefficients
 occurrence_effect_sizes = full_join(occurrence_coeff_summary %>% filter(str_starts(param, "mu")), params_alpha_names %>% mutate(param = paste0("mu.", param)), by='param')
-plt = ggplot(occurrence_effect_sizes, aes(x = mean, y = as.factor(name))) +
+plt = ggplot(occurrence_effect_sizes, aes(x = mean, y = factor(name), shape = factor(group_idx))) +
   geom_vline(xintercept = 0, color = "gray") +
-  geom_point(aes(color = overlap0)) +
-  geom_errorbar(aes(xmin = `25%`,  xmax = `75%`,   color = overlap0), width = 0, linewidth = 1) +
-  geom_errorbar(aes(xmin = `2.5%`, xmax = `97.5%`, color = overlap0), width = 0) +
+  geom_point(aes(color = overlap0), position = position_dodge(width = 0.5), size = 3) +
+  geom_errorbar(aes(xmin = `25%`,  xmax = `75%`,   color = overlap0), position = position_dodge(width = 0.5), width = 0, linewidth = 1) +
+  geom_errorbar(aes(xmin = `2.5%`, xmax = `97.5%`, color = overlap0), position = position_dodge(width = 0.5), width = 0) +
   scale_color_manual(values = c("black", "gray")) +
-  labs(title = "Community level effect sizes for occurrence covariates", x = "Coefficient estimate", y = "Parameter"); print(plt)
+  labs(title = "Community level effect sizes for occurrence covariates", x = "Coefficient estimate", y = "Parameter", shape = "Group", color = "Overlaps zero"); print(plt)
 
 # Compare species level effects of each covariate on occurrence
 for (alpha_param in params_alpha_names$param) {
   alpha_name = params_alpha_names %>% filter(param == alpha_param) %>% pull(name)
   alpha_coef = msom_summary %>% filter(str_detect(param, paste0("^", alpha_param, "(?!\\d)", "\\["))) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
     mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
-  mu_alpha_summary = msom_summary %>% filter(param == paste0("mu.", alpha_param)) %>% select(mean, `2.5%`, `97.5%`)
+  
+  # TODO: support groups
+  # mu_alpha_summary = msom_summary %>% filter(param == paste0("mu.", alpha_param))
+  
   plt = ggplot(alpha_coef, aes(x = as.factor(plot_order), y = mean)) +
     geom_hline(yintercept = 0, color = "gray") +
     geom_point(aes(color = overlap0)) +
     geom_errorbar(aes(ymin = `25%`,  ymax = `75%`,   color = overlap0), width = 0, linewidth = 1) +
     geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`, color = overlap0), width = 0) +
-    geom_hline(yintercept = mu_alpha_summary$mean,    linetype = "solid",  color = "blue") +
-    geom_hline(yintercept = mu_alpha_summary$`2.5%`,  linetype = "dashed", color = "blue") +
-    geom_hline(yintercept = mu_alpha_summary$`97.5%`, linetype = "dashed", color = "blue") +
+    # geom_hline(yintercept = mu_alpha_summary$mean,    linetype = "solid",  color = "blue") +
+    # geom_hline(yintercept = mu_alpha_summary$`2.5%`,  linetype = "dashed", color = "blue") +
+    # geom_hline(yintercept = mu_alpha_summary$`97.5%`, linetype = "dashed", color = "blue") +
     labs(title = paste("Effect of", alpha_name, "on occurrence"), x = "Species", y = paste(alpha_param, "coefficient estimate")) +
     scale_x_discrete(labels = alpha_coef$species_name) +
     scale_color_manual(values = c("0" = "black", "1" = "gray")) +
@@ -592,28 +684,31 @@ for (alpha_param in params_alpha_names$param) {
 
 # Compare community level effect sizes for detection coefficients
 detection_effect_sizes = full_join(detection_coeff_summary %>% filter(str_starts(param, "mu")), params_beta_names %>% mutate(param = paste0("mu.", param)), by='param')
-plt = ggplot(detection_effect_sizes, aes(x = mean, y = as.factor(name))) +
+plt = ggplot(detection_effect_sizes, aes(x = mean, y = factor(name), shape = factor(group_idx))) +
   geom_vline(xintercept = 0, color = "gray") +
-  geom_point(aes(color = overlap0)) +
-  geom_errorbar(aes(xmin = `25%`,  xmax = `75%`,   color = overlap0), width = 0, linewidth = 1) +
-  geom_errorbar(aes(xmin = `2.5%`, xmax = `97.5%`, color = overlap0), width = 0) +
+  geom_point(aes(color = overlap0), position = position_dodge(width = 0.5), size = 3) +
+  geom_errorbar(aes(xmin = `25%`,  xmax = `75%`,   color = overlap0), position = position_dodge(width = 0.5), width = 0, linewidth = 1) +
+  geom_errorbar(aes(xmin = `2.5%`, xmax = `97.5%`, color = overlap0), position = position_dodge(width = 0.5), width = 0) +
   scale_color_manual(values = c("black", "gray")) +
-  labs(title = "Community level effect sizes for detection covariates", x = "Coefficient estimate", y = "Parameter"); print(plt)
+  labs(title = "Community level effect sizes for detection covariates", x = "Coefficient estimate", y = "Parameter", shape = "Group", color = "Overlaps zero"); print(plt)
 
 # Compare species level effects of each covariate on detection
 for (beta_param in params_beta_names$param) {
   beta_name = params_beta_names %>% filter(param == beta_param) %>% pull(name)
   beta_coef = msom_summary %>% filter(str_detect(param, paste0("^", beta_param, "(?!\\d)", "\\["))) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
     mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
-  mu_beta_summary = msom_summary %>% filter(param == paste0("mu.", beta_param)) %>% select(mean, `2.5%`, `97.5%`)
+  
+  # TODO: support groups
+  # mu_beta_summary = msom_summary %>% filter(param == paste0("mu.", beta_param)) %>% select(mean, `2.5%`, `97.5%`)
+  
   plt = ggplot(beta_coef, aes(x = as.factor(plot_order), y = mean)) +
     geom_hline(yintercept = 0, color = "gray") +
     geom_point(aes(color = overlap0)) +
     geom_errorbar(aes(ymin = `25%`,  ymax = `75%`,   color = overlap0), width = 0, size = 1) +
     geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`, color = overlap0), width = 0) +
-    geom_hline(yintercept = mu_beta_summary$mean,    linetype = "solid",  color = "blue") +
-    geom_hline(yintercept = mu_beta_summary$`2.5%`,  linetype = "dashed", color = "blue") +
-    geom_hline(yintercept = mu_beta_summary$`97.5%`, linetype = "dashed", color = "blue") +
+    # geom_hline(yintercept = mu_beta_summary$mean,    linetype = "solid",  color = "blue") +
+    # geom_hline(yintercept = mu_beta_summary$`2.5%`,  linetype = "dashed", color = "blue") +
+    # geom_hline(yintercept = mu_beta_summary$`97.5%`, linetype = "dashed", color = "blue") +
     labs(title = paste("Effect of", beta_name, "on detection"), x = "Species", y = paste(beta_param, "coefficient estimate")) +
     scale_x_discrete(labels = beta_coef$species_name) +
     scale_color_manual(values = c("black", "gray")) +
@@ -622,6 +717,7 @@ for (beta_param in params_beta_names$param) {
 }
 
 # Mean marginal probabilities of occurrence for the metacommunity in relation to alpha
+# TODO: Adapt for multiple groups
 alpha_coef = msom_summary %>% filter(stringr::str_starts(param, "alpha6")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
   mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
 mean_alpha6 = attributes(x_alpha6_scaled)$`scaled:center` # to transform between z-scale and original scale
@@ -670,6 +766,7 @@ ggplot(alpha6_preds, aes(x = alpha6, y = psi, group = species_name)) +
   theme(legend.position = "none")
 
 # Mean marginal probabilities of occurrence for specific species in relation to alpha1 cover
+# TODO: adapt for multiple groups
 species_of_interest = c("Orange-crowned Warbler", "Brown Creeper", "Pacific Wren")
 alpha6_preds_filtered = alpha6_preds %>% filter(species_name %in% species_of_interest)
 species_idx = match(species_of_interest, species)
@@ -707,6 +804,7 @@ ggplot(posterior_summary, aes(x = alpha6, y = psi_mean, color = species_name, fi
   labs(title = "Occurrence probability in relation to alpha6", x = "alpha6 (original scale)", y = "Occurrence probability", color = "Species", fill = "Species")
 
 # Mean marginal probabilities of detection for the metacommunity in relation to day of year
+# TODO: adapt for multiple groups
 beta_coef = msom_summary %>% filter(stringr::str_starts(param, "beta1")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
   mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
 mean_yday = attributes(x_beta1_scaled)$`scaled:center` # to transform between z-scale and original scale
