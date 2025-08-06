@@ -235,10 +235,10 @@ x_alpha5_scaled = scale(local_plot_data$plot_ht_cv_hs)
 x_alpha6_scaled = scale(local_plot_data$plot_canopy_cover_rs)
 x_alpha7_scaled = scale(local_plot_data$plot_snagden_hs)
 x_alpha8_scaled = scale(local_plot_data$plot_downvol_hs)
-x_alpha9_scaled = scale(local_plot_data$plot_understory_vol)
+x_alpha9_scaled = scale(local_plot_data$plot_treeden_gt10cmDbh_hs)
 x_alpha10_scaled = scale(local_plot_data$tree_all_diversity)
 x_alpha11_scaled = scale(local_plot_data$dist_watercourses_major)
-x_alpha12_scaled = scale(local_plot_data$dist_nearest_edge)
+x_alpha12_scaled = scale(local_plot_data$plot_understory_vol)
 params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha1", name = "plot_elev_rs"))
 # params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha2", name = "plot_treeden_gt10cmDbh_hs"))
 # params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha3", name = "plot_treeden_lt10cmDbh_hs"))
@@ -247,10 +247,10 @@ params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha5", name
 params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha6", name = "plot_canopy_cover_rs"))
 # params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha7", name = "plot_snagden_hs"))
 # params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha8", name = "plot_downvol_hs"))
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha9", name = "plot_understory_vol"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha9", name = "plot_treeden_gt10cmDbh_hs"))
 # params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha10", name = "tree_all_diversity"))
 # params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha11", name = "dist_watercourses_major"))
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha12", name = "dist_nearest_edge"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha12", name = "plot_understory_vol"))
 
 # Standardize detection covariate data to z-scale (mean 0, standard deviation 1)
 params_beta_names = data.frame()
@@ -310,7 +310,7 @@ model{
   psi.mean ~ dunif(0,1)                   # probability scale
   mu.u <- log(psi.mean) - log(1-psi.mean) # logit scale
   sigma.u ~ dunif(0,5)                    # standard deviation
-  tau.u <- pow(sigma.v,-2)                # precision
+  tau.u <- pow(sigma.u,-2)                # precision
   
   # Covariate effects on occurrence
   mu.alpha1  ~ dnorm(0,0.01)
@@ -605,7 +605,7 @@ for (beta_param in params_beta_names$param) {
   beta_name = params_beta_names %>% filter(param == beta_param) %>% pull(name)
   beta_coef = msom_summary %>% filter(str_detect(param, paste0("^", beta_param, "(?!\\d)", "\\["))) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
     mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
-  mu_beta_summary = msom_summary %>% filter(param == "mu.beta1") %>% select(mean, `2.5%`, `97.5%`)
+  mu_beta_summary = msom_summary %>% filter(param == paste0("mu.", beta_param)) %>% select(mean, `2.5%`, `97.5%`)
   plt = ggplot(beta_coef, aes(x = as.factor(plot_order), y = mean)) +
     geom_hline(yintercept = 0, color = "gray") +
     geom_point(aes(color = overlap0)) +
