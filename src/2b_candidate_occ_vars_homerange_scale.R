@@ -38,7 +38,7 @@ mapview(rast_cover_clean,
 # NOTE: For now, just look at a few representative scales
 
 # Start with all candidate variables
-data_homerange_scale_focus = as.data.frame(data_homerange_scale[['median']])
+data_homerange_scale_focus = as.data.frame(data_homerange_scale[['mean']])
 buffer_size = unique(data_homerange_scale_focus$buffer)
 
 data_homerange_scale_candidates = data_homerange_scale_focus %>% st_drop_geometry() %>% select(where(is.numeric), -buffer)
@@ -83,8 +83,10 @@ vars_to_drop = c(
   # NOTE: prop_abund_1 ~ cw_edge_density
   'prop_abund_1',
   # NOTE: focal_patch_pcnt ~ aggregation_idx
-  'aggregation_idx'
+  'aggregation_idx',
+  # NOTE: focal_patch_isolation has no variation for species will small home range sizes
   # TODO: calculate and drop prop_abund_7 in favor of density_streams
+  
 )
 data_homerange_scale_candidates = data_homerange_scale_candidates %>% select(-all_of(vars_to_drop))
 cor_matrix = cor(data_homerange_scale_candidates, use = "pairwise.complete.obs", method = "pearson")
