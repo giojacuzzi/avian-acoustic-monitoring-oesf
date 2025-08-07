@@ -261,16 +261,16 @@ x_alpha10_scaled = scale(data_homerange_scale$prop_abund_4)
 x_alpha11_scaled = scale(data_homerange_scale$prop_abund_5)
 x_alpha12_scaled = scale(data_homerange_scale$cover_forest_diversity)
 params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha1", name = "focal_patch_pcnt"))
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha2", name = "cw_edge_density"))
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha3", name = "shape_idx"))
-# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha4", name = "plot_qmd_all_hs"))
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha5", name = "density_roads_paved"))
-params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha6", name = "density_streams_major"))
-# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha7", name = "plot_snagden_hs"))
-# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha8", name = "plot_downvol_hs"))
-# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha9", name = "tree_all_diversity"))
-# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha10", name = "tree_all_diversity"))
-# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha11", name = "dist_watercourses_major"))
+# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha2", name = "focal_patch_isolation"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha3", name = "cw_edge_density"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha4", name = "shape_idx"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha5", name = "density_roads"))
+# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha6", name = "density_roads_paved"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha7", name = "density_streams"))
+# params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha8", name = "density_streams_major"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha9", name = "prop_abund_3"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha10", name = "prop_abund_4"))
+params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha11", name = "prop_abund_5"))
 params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha12", name = "cover_forest_diversity"))
 
 # Standardize detection covariate data to z-scale (mean 0, standard deviation 1)
@@ -316,16 +316,16 @@ msom_data = list(
   G = G,                                             # number of groups
   # Occupancy covariates
   x_alpha1   = x_alpha1_scaled[,1],
-  x_alpha2   = x_alpha2_scaled[,1],
+  # x_alpha2   = x_alpha2_scaled[,1],
   x_alpha3   = x_alpha3_scaled[,1],
-  # x_alpha4   = x_alpha4_scaled[,1],
+  x_alpha4   = x_alpha4_scaled[,1],
   x_alpha5   = x_alpha5_scaled[,1],
-  x_alpha6   = x_alpha6_scaled[,1],
-  # x_alpha7   = x_alpha7_scaled[,1],
+  # x_alpha6   = x_alpha6_scaled[,1],
+  x_alpha7   = x_alpha7_scaled[,1],
   # x_alpha8   = x_alpha8_scaled[,1],
-  # x_alpha9   = x_alpha9_scaled[,1],
-  # x_alpha10  = x_alpha10_scaled[,1],
-  # x_alpha11  = x_alpha11_scaled[,1],
+  x_alpha9   = x_alpha9_scaled[,1],
+  x_alpha10  = x_alpha10_scaled[,1],
+  x_alpha11  = x_alpha11_scaled[,1],
   x_alpha12  = x_alpha12_scaled[,1],
   # Detection covariates
   x_beta1 = array(x_beta1_scaled, dim = dim(x_yday)), # TODO: shared among species?
@@ -353,40 +353,40 @@ model{
       
       # Covariate effects on occurrence
       mu.alpha1[g]  ~ dnorm(0,0.01)
-      mu.alpha2[g]  ~ dnorm(0,0.01)
+      # mu.alpha2[g]  ~ dnorm(0,0.01)
       mu.alpha3[g]  ~ dnorm(0,0.01)
-      # mu.alpha4[g]  ~ dnorm(0,0.01)
+      mu.alpha4[g]  ~ dnorm(0,0.01)
       mu.alpha5[g]  ~ dnorm(0,0.01)
-      mu.alpha6[g]  ~ dnorm(0,0.01)
-      # mu.alpha7[g]  ~ dnorm(0,0.01)
+      # mu.alpha6[g]  ~ dnorm(0,0.01)
+      mu.alpha7[g]  ~ dnorm(0,0.01)
       # mu.alpha8[g]  ~ dnorm(0,0.01)
-      # mu.alpha9[g]  ~ dnorm(0,0.01)
-      # mu.alpha10[g] ~ dnorm(0,0.01)
-      # mu.alpha11[g] ~ dnorm(0,0.01)
+      mu.alpha9[g]  ~ dnorm(0,0.01)
+      mu.alpha10[g] ~ dnorm(0,0.01)
+      mu.alpha11[g] ~ dnorm(0,0.01)
       mu.alpha12[g] ~ dnorm(0,0.01)
       sigma.alpha1[g]  ~ dunif(0,5)
-      sigma.alpha2[g]  ~ dunif(0,5)
+      # sigma.alpha2[g]  ~ dunif(0,5)
       sigma.alpha3[g]  ~ dunif(0,5)
-      # sigma.alpha4[g]  ~ dunif(0,5)
+      sigma.alpha4[g]  ~ dunif(0,5)
       sigma.alpha5[g]  ~ dunif(0,5)
-      sigma.alpha6[g]  ~ dunif(0,5)
-      # sigma.alpha7[g]  ~ dunif(0,5)
+      # sigma.alpha6[g]  ~ dunif(0,5)
+      sigma.alpha7[g]  ~ dunif(0,5)
       # sigma.alpha8[g]  ~ dunif(0,5)
-      # sigma.alpha9[g]  ~ dunif(0,5)
-      # sigma.alpha10[g] ~ dunif(0,5)
-      # sigma.alpha11[g] ~ dunif(0,5)
+      sigma.alpha9[g]  ~ dunif(0,5)
+      sigma.alpha10[g] ~ dunif(0,5)
+      sigma.alpha11[g] ~ dunif(0,5)
       sigma.alpha12[g] ~ dunif(0,5)
       tau.alpha1[g]  <- pow(sigma.alpha1[g],-2)
-      tau.alpha2[g]  <- pow(sigma.alpha2[g],-2)
+      # tau.alpha2[g]  <- pow(sigma.alpha2[g],-2)
       tau.alpha3[g]  <- pow(sigma.alpha3[g],-2)
-      # tau.alpha4[g]  <- pow(sigma.alpha4[g],-2)
+      tau.alpha4[g]  <- pow(sigma.alpha4[g],-2)
       tau.alpha5[g]  <- pow(sigma.alpha5[g],-2)
-      tau.alpha6[g]  <- pow(sigma.alpha6[g],-2)
-      # tau.alpha7[g]  <- pow(sigma.alpha7[g],-2)
+      # tau.alpha6[g]  <- pow(sigma.alpha6[g],-2)
+      tau.alpha7[g]  <- pow(sigma.alpha7[g],-2)
       # tau.alpha8[g]  <- pow(sigma.alpha8[g],-2)
-      # tau.alpha9[g]  <- pow(sigma.alpha9[g],-2)
-      # tau.alpha10[g] <- pow(sigma.alpha10[g],-2)
-      # tau.alpha11[g] <- pow(sigma.alpha11[g],-2)
+      tau.alpha9[g]  <- pow(sigma.alpha9[g],-2)
+      tau.alpha10[g] <- pow(sigma.alpha10[g],-2)
+      tau.alpha11[g] <- pow(sigma.alpha11[g],-2)
       tau.alpha12[g] <- pow(sigma.alpha12[g],-2)
       
       # Group mean detection
@@ -412,16 +412,16 @@ model{
       # Species level priors for occupancy coefficients (note that dnorm in JAGS is parametrized with precision [tau], not sd [sigma])
       u[i] ~ dnorm(mu.u[group[i]], tau.u[group[i]])
       alpha1[i] ~ dnorm(mu.alpha1[group[i]],tau.alpha1[group[i]])
-      alpha2[i] ~ dnorm(mu.alpha2[group[i]],tau.alpha2[group[i]])
+      # alpha2[i] ~ dnorm(mu.alpha2[group[i]],tau.alpha2[group[i]])
       alpha3[i] ~ dnorm(mu.alpha3[group[i]],tau.alpha3[group[i]])
-      # alpha4[i] ~ dnorm(mu.alpha4[group[i]],tau.alpha4[group[i]])
+      alpha4[i] ~ dnorm(mu.alpha4[group[i]],tau.alpha4[group[i]])
       alpha5[i] ~ dnorm(mu.alpha5[group[i]],tau.alpha5[group[i]])
-      alpha6[i] ~ dnorm(mu.alpha6[group[i]],tau.alpha6[group[i]])
-      # alpha7[i] ~ dnorm(mu.alpha7[group[i]],tau.alpha7[group[i]])
+      # alpha6[i] ~ dnorm(mu.alpha6[group[i]],tau.alpha6[group[i]])
+      alpha7[i] ~ dnorm(mu.alpha7[group[i]],tau.alpha7[group[i]])
       # alpha8[i] ~ dnorm(mu.alpha8[group[i]],tau.alpha8[group[i]])
-      # alpha9[i] ~ dnorm(mu.alpha9[group[i]],tau.alpha9[group[i]])
-      # alpha10[i] ~ dnorm(mu.alpha10[group[i]],tau.alpha10[group[i]])
-      # alpha11[i] ~ dnorm(mu.alpha11[group[i]],tau.alpha11[group[i]])
+      alpha9[i] ~ dnorm(mu.alpha9[group[i]],tau.alpha9[group[i]])
+      alpha10[i] ~ dnorm(mu.alpha10[group[i]],tau.alpha10[group[i]])
+      alpha11[i] ~ dnorm(mu.alpha11[group[i]],tau.alpha11[group[i]])
       alpha12[i] ~ dnorm(mu.alpha12[group[i]],tau.alpha12[group[i]])
   
       # Species level priors for detection coefficients
@@ -433,7 +433,7 @@ model{
       for (j in 1:J) { # for each site
         
           # Ecological process model for latent occurrence z
-          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha5[i]*x_alpha5[j] + alpha6[i]*x_alpha6[j] + alpha12[i]*x_alpha12[j]
+          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + alpha5[i]*x_alpha5[j] + alpha7[i]*x_alpha7[j] + alpha9[i]*x_alpha9[j] + alpha10[i]*x_alpha10[j] + alpha11[i]*x_alpha11[j] + alpha12[i]*x_alpha12[j]
           z[j,i] ~ dbern(psi[j,i])
           
           for (k in 1:K[j]) { # for each sampling period (survey) at site j
@@ -479,16 +479,16 @@ msom = jags(data = msom_data,
               "mu.u", "sigma.u", "u",
               "mu.v", "sigma.v", "v",
               "mu.alpha1", "sigma.alpha1", "alpha1",
-              "mu.alpha2", "sigma.alpha2", "alpha2",
+              # "mu.alpha2", "sigma.alpha2", "alpha2",
               "mu.alpha3", "sigma.alpha3", "alpha3",
-              # "mu.alpha4", "sigma.alpha4", "alpha4",
+              "mu.alpha4", "sigma.alpha4", "alpha4",
               "mu.alpha5", "sigma.alpha5", "alpha5",
-              "mu.alpha6", "sigma.alpha6", "alpha6",
-              # "mu.alpha7", "sigma.alpha7", "alpha7",
+              # "mu.alpha6", "sigma.alpha6", "alpha6",
+              "mu.alpha7", "sigma.alpha7", "alpha7",
               # "mu.alpha8", "sigma.alpha8", "alpha8",
-              # "mu.alpha9", "sigma.alpha9", "alpha9",
-              # "mu.alpha10", "sigma.alpha10", "alpha10",
-              # "mu.alpha11", "sigma.alpha11", "alpha11",
+              "mu.alpha9", "sigma.alpha9", "alpha9",
+              "mu.alpha10", "sigma.alpha10", "alpha10",
+              "mu.alpha11", "sigma.alpha11", "alpha11",
               "mu.alpha12", "sigma.alpha12", "alpha12",
               "mu.beta1",  "sigma.beta1",  "beta1",
               "mu.beta2",  "sigma.beta2",  "beta2",
