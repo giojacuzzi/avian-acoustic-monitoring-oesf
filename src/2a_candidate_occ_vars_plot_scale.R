@@ -80,21 +80,15 @@ dpsc_hs_scaled = scale(dpsc_hs)
 pca = prcomp(dpsc_hs_scaled, center = TRUE, scale. = TRUE)
 summary(pca)
 
+# Loadings for first 3 PCs
+round(pca$rotation[, 1:3], 2)
 
 factoextra::fviz_eig(pca)
-factoextra::fviz_pca_ind(pca,
-                         geom.ind = "point", 
-                         col.ind = "cos2",
-                         repel = TRUE)
-factoextra::fviz_pca_ind(pca,
-                         geom.ind = "point",
+factoextra::fviz_pca_ind(pca, geom.ind = "point", col.ind = "cos2", repel = TRUE)
+factoextra::fviz_pca_ind(pca, geom.ind = "point",
                          col.ind = st_drop_geometry(data_plot_scale)[data_plot_scale$hs == TRUE, 'stratum'],
-                         addEllipses = TRUE,
-                         legend.title = "Group",
-                         repel = TRUE)
-factoextra::fviz_pca_var(pca, 
-                         col.var = "contrib",
-                         repel = TRUE)
+                         addEllipses = TRUE, legend.title = "Group", repel = TRUE)
+factoextra::fviz_pca_var(pca, col.var = "contrib", repel = TRUE)
 
 ### Comparison of habitat survey and remote sensing data ##############################################################
 

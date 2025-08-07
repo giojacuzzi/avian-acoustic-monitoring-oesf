@@ -35,22 +35,68 @@ mapview(rast_cover_clean,
   mapview(layer.name = 'mean', st_buffer(data_plot_scale, 468), alpha.regions = 0.0, lwd = 2) +
   mapview(layer.name = 'nearmax', st_buffer(data_plot_scale, 1000), alpha.regions = 0.0, lwd = 2)
 
+# NOTE: For now, just look at a few representative scales
+
+# Start with all candidate variables
+data_homerange_scale_focus = as.data.frame(data_homerange_scale[['median']])
+buffer_size = unique(data_homerange_scale_focus$buffer)
+
+data_homerange_scale_candidates = data_homerange_scale_focus %>% st_drop_geometry() %>% select(where(is.numeric), -buffer)
+length(names(data_homerange_scale_candidates))
+data_homerange_scale_candidates = as.data.frame(data_homerange_scale_candidates)
+data_homerange_scale_candidates = as.data.frame(sapply(data_homerange_scale_candidates, as.numeric))
+colnames(data_homerange_scale_candidates)
+
 ### Principal component analysis ##############################################################
 
+# PCA of habitat survey variables
+dpsc_hs_scaled = scale(data_homerange_scale_candidates)
+pca = prcomp(dpsc_hs_scaled, center = TRUE, scale. = TRUE)
+summary(pca)
+
+# Loadings for first 3 PCs
+round(pca$rotation[, 1:3], 2)
+
+factoextra::fviz_eig(pca)
+factoextra::fviz_pca_ind(pca, geom.ind = "point", col.ind = "cos2", repel = TRUE)
+factoextra::fviz_pca_ind(pca, geom.ind = "point", addEllipses = TRUE, legend.title = "Group", repel = TRUE)
+factoextra::fviz_pca_var(pca, col.var = "contrib", repel = TRUE)
 
 
 ### Collinearity analysis ##############################################################
 
-# TODO: Should I be including all spatial scales together?
-
-# Start with all candidate variables
-data_homerange_scale_focus = data_homerange_scale$Mean
-
-data_homerange_scale_plot_candidates = data_homerange_scale_focus %>% st_drop_geometry() %>% select(where(is.numeric))
-length(names(data_homerange_scale_plot_candidates))
-data_homerange_scale_plot_candidates = as.data.frame(data_homerange_scale_plot_candidates)
-data_homerange_scale_plot_candidates = sapply(data_homerange_scale_plot_candidates, as.numeric)
-
-cor_matrix = cor(data_homerange_scale_plot_candidates, use = "pairwise.complete.obs", method = "pearson")
+cor_matrix = cor(data_homerange_scale_candidates, use = "pairwise.complete.obs", method = "pearson")
 cor_matrix[lower.tri(cor_matrix, diag = TRUE)] = NA
 (collinearity_candidates = subset(as.data.frame(as.table(cor_matrix)), !is.na(Freq) & abs(Freq) >= 0.8))
+
+# Reduce list of candidate variables (highly correlated, less preferable, irrelevant, etc.)
+vars_to_drop = c(
+  # focal_patch_pcnt ~ focal_patch_core_pcnt
+  # Drop focal_patch_core_pcnt in favor of uncorrelated metrics of edge density
+  'focal_patch_core_pcnt',
+  # Drop cover diversity metrics in favor of forest cover diversity metrics
+  'cover_diversity', 'cover_richness', 'cover_evenness',
+  # cover_forest_diversity ~ cover_forest_richness ~ cover_forest_evenness
+  'cover_forest_richness', 'cover_forest_evenness',
+  # prop_abund_6 ~ density_roads_paved
+  'prop_abund_6',
+  # NOTE: prop_abund_1 ~ cw_edge_density
+  'prop_abund_1',
+  # NOTE: focal_patch_pcnt ~ aggregation_idx
+  'aggregation_idx'
+  # TODO: calculate and drop prop_abund_7 in favor of density_streams
+)
+data_homerange_scale_candidates = data_homerange_scale_candidates %>% select(-all_of(vars_to_drop))
+cor_matrix = cor(data_homerange_scale_candidates, use = "pairwise.complete.obs", method = "pearson")
+cor_matrix[lower.tri(cor_matrix, diag = TRUE)] = NA
+(collinearity_candidates = subset(as.data.frame(as.table(cor_matrix)), !is.na(Freq) & abs(Freq) >= 0.8))
+names(data_homerange_scale_candidates)
+length(names(data_homerange_scale_candidates))
+
+# VIF analysis for multicollinearity
+library(car)
+model = lm(rep(1, nrow(data_homerange_scale_candidates)) ~ ., data = data_homerange_scale_candidates)
+sort(vif(model))
+# Consider dropping variable(s) with high VIF values (> 10)
+model = lm(rep(1, nrow(data_homerange_scale_candidates)) ~ . -prop_abund_2, data = data_homerange_scale_candidates)
+sort(vif(model))
