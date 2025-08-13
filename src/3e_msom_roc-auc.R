@@ -18,6 +18,7 @@ library(tidyverse)
 library(jagsUI)
 library(MCMCvis)
 library(ggplot2)
+library(ggrepel)
 theme_set(theme_classic())
 
 # Get local plot and homerange scale data
@@ -431,21 +432,23 @@ p_dsim = msom$sims.list$p.dsim
 p_val  = mean(p_dobs > p_dsim) # proportion of samples for which the model fits the observed data worse than the simulated data
 message("Bayesian p-value: ", round(p_val, 3))
 
-## Model predictive performance (ROC AUC) for model selection
+## Model predictive performance (in-sample ROC AUC) for model selection
 
 # "We evaluated model performance by computing the area under the curve of the receiver operating characteristic (AUC). When applied to the dataset used during model construction, AUC measures a model’s goodness-of-fit by estimating the probability that a randomly chosen occupied sampling point (where zij=1) has a higher probability of occupancy than a randomly chosen unoccupied sampling point (where zij=0). If a model fits well, then it consistently predicts a higher probability of occupancy for occupied sites yielding an AUC closer to 1.0. Conversely, if a model fits poorly, it will perform the same as chance yielding an AUC closer to 0.5. We utilized AUC for evaluating our model in two ways..." (Mattsson et al. 2013)
+# "The AUC (ranging from 0–1) measures the discriminatory ability of a model, which in this case corresponds to the ability to correctly project which areas are occupied. A value of 0.5 indicates that the model performs no better than random. Values greater than 0.5 indicate progressively better discriminatory capabilities (Hosmer and Lemeshow 2000)." ()
 
 # Get posterior samples (i.e. MCMC simulated draws) for estimated occurrence psi and latent state z
 psi_samples = msom$sims.list$psi
 z_samples   = msom$sims.list$z
 # These should be of dimension: samples x sites x species
+n_samples = dim(psi_samples)[1]
 stopifnot(identical(J, dim(psi_samples)[2]))
 stopifnot(identical(I, dim(psi_samples)[3]))
 stopifnot(identical(J, dim(z_samples)[2]))
 stopifnot(identical(I, dim(z_samples)[3]))
-n_samples = dim(psi_samples)[1]
 
 # "First, we calculated mean and 95% Bayesian credibility interval (BCI) AUC values reflecting goodness-of-fit for the model based on the vector of AUC values across MCMC iterations (henceforth, consolidated AUC values) for all species combined."
+# This effectively estimates the probability that a randomly chosen occupied species-site combination has a higher probability of occurrence than a random unoccupied one. As such, it reflects an overal measure of model fit. Note that the number of site-species pairs is dominated by common species, so these can disproportionately influence the combined AUC value. This is why it's important to also quantify species-specific AUC.
 
 auc_combined = rep(NA, n_samples)
 for (s in 1:n_samples) {
@@ -465,6 +468,7 @@ auc_combined_bci  = round(quantile(auc_combined, probs=c(0.025, 0.975), na.rm=TR
 message("Combined mean AUC: ", auc_combined_mean, " (95% BCI ", auc_combined_bci[1], "–", auc_combined_bci[2], ")")
 
 # "Second, we calculated AUC values reflecting model goodness-of-fit for each species under each model rendering a mean and 95% BCI AUC value for each species-model combination (henceforth, species-specific AUC values). Calculating AUCs for each species in each model is made possible by examining the species-specific binary occupancy predictions along with predicted occupancy probabilities for each sampling point across the respective vectors of MCMC iterations."
+# Check for outlier species with poor fit. Note that AUC is less stable when there are fewer positive occurrence examples for a species. Interpret rare species with caution.
 
 auc_species = matrix(NA, nrow=n_samples, ncol=I)
 for (s in 1:n_samples) {
@@ -482,13 +486,32 @@ for (s in 1:n_samples) {
 }
 auc_species_mean = round(apply(auc_species, 2, mean, na.rm=TRUE), 3)
 auc_species_bci  = round(apply(auc_species, 2, quantile, probs=c(0.025, 0.975), na.rm=TRUE), 3)
-
-message("Species-specific AUC and 95% BCI:")
-print(data.frame(
+nocc_samples = msom$sims.list$Nocc # posterior mean number of occupied sites (z=1) per species (i.e. effective positive sample size)
+nocc_mean = round(apply(Nocc_samples, 2, mean),1)
+nocc_bci = apply(Nocc_samples, 2, quantile, probs = c(0.025, 0.975))
+auc_species = data.frame(
   species = species[1:I],
   mean_auc = auc_species_mean,
-  lower95 = auc_species_bci["2.5%", ],
-  upper95 = auc_species_bci["97.5%", ]
-))
+  lower95_auc = auc_species_bci["2.5%", ],
+  upper95_auc = auc_species_bci["97.5%", ],
+  mean_nocc = nocc_mean,
+  lower95_nocc = nocc_bci["2.5%", ],
+  upper95_nocc = nocc_bci["97.5%", ]
+)
+
+message("Species-specific AUC and 95% BCI:")
+print(auc_species)
+summary(auc_species)
+ggplot(auc_species, aes(x = mean_nocc, y = mean_auc)) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "red") +
+  geom_errorbar(aes(ymin = lower95_auc, ymax = upper95_auc), width = 0, color = "gray") +
+  geom_errorbarh(aes(xmin = lower95_nocc, xmax = upper95_nocc), height = 0, color = "gray") +
+  geom_point() +
+  scale_y_continuous(breaks = seq(0.5, 1.0, by = 0.1)) +
+  geom_text_repel(aes(label = species), size = 2) +
+  labs(
+    x = "Mean estimated number of occurring sites", y = "Mean ROC AUC",
+    title = "Species-specific AUC x effective positive sample size"
+  )
 
 # "We concluded a statistically significant difference between posterior distributions when the 95% BCI (2.5th to 97.5th percentile of the posterior distribution) for one posterior excluded the BCI of the opposing posterior."
