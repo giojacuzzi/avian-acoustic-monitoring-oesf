@@ -8,7 +8,7 @@
 # TODO: Ensure that aru site locations are correctly positioned within patches (i.e. not near edges so as to get incorrect covariate estimates)
 
 overwrite_rast_cover_cache = FALSE
-overwrite_data_plot_scale_cache = FALSE
+overwrite_data_plot_scale_cache = TRUE
 overwrite_data_homerange_scale_cache = TRUE
 path_rast_cover_clean_out = "data/cache/occurrence_covariates/rast_cover_clean.tif"
 path_data_plot_scale_out = "data/cache/occurrence_covariates/data_plot_scale.rds"
@@ -56,27 +56,37 @@ load_raster = function(path_rast) {
 # Compute raster function value for a buffer
 compute_raster_buffer_value_func = function(raster, points, buffer_distance, func) {
   r = project(raster, crs(points))
-  site_buffers = st_buffer(points, dist = buffer_distance)
-  buffer_values = terra::extract(r, vect(site_buffers), fun = func, na.rm = TRUE)
+  region = st_buffer(points, dist = buffer_distance)
+  buffer_values = terra::extract(r, vect(region), fun = func, na.rm = TRUE)
 }
 
-compute_cv = function(x, na.rm = TRUE) {
+# Compute summary statistics for the given numeric vector
+# Column 1: mean
+# Column 2: standard deviation
+# Column 3: coefficient of variation
+summary_stats = function(x, na.rm = TRUE, conversion_factor = 1) {
   if (na.rm) x = x[!is.na(x)]
-  if (length(x) == 0 || mean(x) == 0) {
-    return(NA)
+  if (length(x) == 0) return(c(mean = NA, sd = NA, cv = NA))
+  x = x * conversion_factor
+  mu = mean(x)
+  sigma = sd(x)
+  if (mu == 0) {
+    cv = NA
   } else {
-    return(sd(x) / mean(x))
+    cv = sigma / mu
   }
+  return(data.frame(mean = mu, sd = sigma, cv = cv))
 }
 
 # Conversion factors
-conv_sqftAcre_m2Ha = 0.229568 # ft2/acre to m2/ha
-conv_acre_hectare = 2.47105 # acre to hectare
-conv_hectare_acre = 0.404686 # hectare to acre
-conv_in_cm = 2.54 # inches to centimeters
-conv_ft_m = 0.3048 # feet to meters
-conv_ft3_m3 = 0.0283168 # cubic feet to cubic meters
-conv_m2_ha = 0.0001 # square meter to hectare
+conv_in_to_cm =                  2.54 # inches to centimeters
+conv_ft_to_m =                 0.3048 # feet to meters
+conv_ft2peracre_to_m2perha = 0.229568 # square feet/acre to square meters/ha
+conv_ft3_to_m3 = 0.0283168            # cubic feet to cubic meters
+conv_ft3peracre_to_m3perha = 0.069968 # cubic feet/acre to cubic meters/hectare
+conv_peracre_to_perha = 2.47105       # units per acreto units per hectare
+conv_perha_to_peracre = 0.404686      # units per hectare to units per acre
+conv_m2_to_ha         = 0.0001        # square meters to ha # TODO: CHECK THIS
 
 # Base RS-FRIS data (0.1 acre resolution, i.e. ~404m2 or 20.10836 * 20.10836 m grain, roughly 1% of the area of a 100m radius circle)
 # RS-FRIS 4.0 uses a combination of 2019 and 2020 photogrammetry.
@@ -211,11 +221,11 @@ mapview(roads, zcol = 'road_usgs1') + mapview(aru_sites, label = aru_sites$site)
 
 # "The Hoh-Clearwater Mainline is our only double-lane mainline, and it is about 26 feet wide for the asphalt surface. If we’re looking at right of way widths, we could easily assume a minimum width of about 50 feet for a 12-foot road, probably a good 60-80 feet for a 14-20 foot wide road, and about 100 feet for the Hoh Mainline. 100 feet might be good for US 101 as well for right of way width, and maybe about 30 feet for actual road surface width."
 paved_primary_roads   = st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway")))
-road_half_width_primary = max(100 / 2 * conv_ft_m, res(rast_stratum)[1] / 2)
+road_half_width_primary = max(100 / 2 * conv_ft_to_m, res(rast_stratum)[1] / 2)
 # mapview(paved_primary_roads) + mapview(st_union(st_buffer(paved_primary_roads, road_half_width_primary)))
 # "Our minimum road surface width is going to be 12 feet. That would cover most of our roads. Main arterials/single lane mainlines will have a minimum surface width of 14 feet, with a few up to 20 feet."
 paved_secondary_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Light-Duty Road")))
-road_half_width_secondary = max(30 / 2 * conv_ft_m, res(rast_stratum)[1] / 2)
+road_half_width_secondary = max(30 / 2 * conv_ft_to_m, res(rast_stratum)[1] / 2)
 # mapview(paved_secondary_roads) + mapview(st_union(st_buffer(paved_secondary_roads, road_half_width_secondary)))
 
 template = rast(ext(rast_stratum), resolution = res(rast_stratum), crs = crs(rast_stratum))
@@ -261,7 +271,7 @@ if (overwrite_rast_cover_cache) {
 
   r = rast_updated
   cell_res <- res(r)[1] # cell resolution (in meters)
-  min_area <- 0.785 * 1e4 # hectares to square meters
+  min_area <- 0.785 * 1e4 # TODO: check --> hectares to square meters?
   min_width <- 50 # in meters
   min_cells_area <- ceiling(min_area / (cell_res^2))  # min number of cells by area
   min_cells_width <- ceiling(min_width / cell_res)    # min number of cells by width
@@ -429,13 +439,14 @@ if (overwrite_data_plot_scale_cache) {
   
   # Elevation [m] (derived from WA state LiDAR flights 3x3-ft raster grid)
   elevation = read.csv('data/environment/site_elevation_ft.csv')
-  elevation$plot_elev_rs = elevation$elev_ft * conv_ft_m
+  elevation$plot_elev_rs = elevation$elev_ft * conv_ft_to_m
   data_plot_scale = data_plot_scale %>% left_join(elevation %>% select(site, plot_elev_rs), by = 'site')
   
   # Age (mean and cv) [#]
   data_plot_scale$age_point = terra::extract(rast_age, vect(data_plot_scale))[, 2]
-  data_plot_scale$age_mean = as.numeric(compute_raster_buffer_value_func(rast_age, data_plot_scale, plot_buffer, mean)[,2])
-  data_plot_scale$age_cv = as.numeric(compute_raster_buffer_value_func(rast_age, data_plot_scale, plot_buffer, compute_cv)[,2])
+  stats_age = compute_raster_buffer_value_func(rast_age, data_plot_scale, plot_buffer, summary_stats)
+  data_plot_scale$age_mean = as.numeric(stats_age[,2])
+  data_plot_scale$age_cv   = as.numeric(stats_age[,4])
   hist(data_plot_scale$age_point, breaks = seq(0, max(data_plot_scale$age_point) + 10, by = 10))
   hist(data_plot_scale$age_mean, breaks = seq(0, max(data_plot_scale$age_mean) + 10, by = 10))
   table(data_plot_scale$age_point)
@@ -449,85 +460,32 @@ if (overwrite_data_plot_scale_cache) {
   # Thinning treatment [categorical]
   data_plot_scale$thinning_treatment
   
-  # Basal area [m2/ha] TODO: confirm if this is a mean value at local level
+  # Basal area (all live trees) [m2/ha] TODO: confirm if this is a mean value at local plot level
   data_plot_scale = data_plot_scale %>% left_join(data_plot %>% select(site, plot_ba_hs = ba_ha_all), by = 'site')
   
-  rast_ba = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_BA_EXPORT.tif'))
-  data_plot_scale$plot_ba_rs = as.numeric(compute_raster_buffer_value_func(rast_ba, data_plot_scale, plot_buffer, mean)[,2]) * conv_sqftAcre_m2Ha
-  data_plot_scale$plot_ba_sd_rs = as.numeric(compute_raster_buffer_value_func(rast_ba, data_plot_scale, plot_buffer, sd)[,2]) * conv_sqftAcre_m2Ha
-  
-  ggplot(data_plot_scale, aes(x = plot_ba_hs, y = plot_ba_rs, label = site)) +
-    geom_point() + geom_text_repel(size = 2) + geom_abline(slope = 1) +
-    xlim(0, max(data_plot_scale$plot_ba_hs, data_plot_scale$plot_ba_rs, na.rm = TRUE)) +
-    ylim(0, max(data_plot_scale$plot_ba_hs, data_plot_scale$plot_ba_rs, na.rm = TRUE)) +
-    ggtitle('Basal area [m2/ha]')
-  mapview(rast_ba) +
-    mapview(data_plot_scale, zcol = 'plot_ba_rs', legend = T)
-  
-  # Tree density (large, dbh > 10 cm) [# trees/ha]
+  # Tree density (all live trees large, dbh > 10 cm) [# trees/ha]
   data_plot_scale = data_plot_scale %>% left_join(data_plot %>% select(site, plot_treeden_gt10cmDbh_hs = large_per_hectare_all), by = 'site')
-  
-  rast_treeden_gt4inDbh = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_TREE_ACRE_4.img'))
-  data_plot_scale$plot_treeden_gt4inDbh_rs = as.numeric(compute_raster_buffer_value_func(rast_treeden_gt4inDbh, data_plot_scale, plot_buffer, mean)[,2]) * conv_acre_hectare
-  
-  ggplot(data_plot_scale, aes(x = plot_treeden_gt10cmDbh_hs, y = plot_treeden_gt4inDbh_rs, label = site)) +
-    geom_point() + geom_text_repel(size = 2) + geom_abline(slope = 1) +
-    xlim(0, max(data_plot_scale$plot_treeden_gt10cmDbh_hs, data_plot_scale$plot_treeden_gt4inDbh_rs, na.rm = TRUE)) +
-    ylim(0, max(data_plot_scale$plot_treeden_gt10cmDbh_hs, data_plot_scale$plot_treeden_gt4inDbh_rs, na.rm = TRUE)) +
-    ggtitle('Tree density (large, dbh > 10 cm) [# trees/ha]')
-  
-  # mapview(rast_treeden_gt4inDbh) +
-    # mapview(data_plot_scale, zcol = 'plot_treeden_gt4inDbh', legend = T)
   
   # Tree density (small, dbh < 10 cm) [# trees/ha]
   data_plot_scale = data_plot_scale %>% left_join(data_plot %>% select(site, plot_treeden_lt10cmDbh_hs = small_per_hectare), by = 'site')
   
-  rast_treeden_all = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_TREE_ACRE.img'))
-  data_plot_scale$plot_treeden_all_rs = as.numeric(compute_raster_buffer_value_func(rast_treeden_all, data_plot_scale, plot_buffer, mean)[,2]) * conv_acre_hectare
-  data_plot_scale$plot_treeden_lt4inDbh_rs = data_plot_scale$plot_treeden_all_rs - data_plot_scale$plot_treeden_gt4inDbh_rs
-  
-  ggplot(data_plot_scale, aes(x = plot_treeden_lt10cmDbh_hs, y = plot_treeden_lt4inDbh_rs, label = site)) +
-    geom_point() + geom_text_repel(size = 2) + geom_abline(slope = 1) +
-    xlim(0, max(data_plot_scale$plot_treeden_lt10cmDbh_hs, data_plot_scale$plot_treeden_lt4inDbh_rs, na.rm = TRUE)) +
-    ylim(0, max(data_plot_scale$plot_treeden_lt10cmDbh_hs, data_plot_scale$plot_treeden_lt4inDbh_rs, na.rm = TRUE)) +
-    ggtitle('Tree density (small, dbh < 10 cm) [# trees/ha]')
-  
   # Total tree density (all sizes) [# trees/ha]
   data_plot_scale$plot_treeden_all_hs = data_plot_scale$plot_treeden_gt10cmDbh_hs + data_plot_scale$plot_treeden_lt10cmDbh_hs
   
-  ggplot(data_plot_scale, aes(x = plot_treeden_all_hs, y = plot_treeden_all_rs, label = site)) +
-    geom_point() + geom_text_repel(size = 2) + geom_abline(slope = 1) +
-  xlim(0, max(data_plot_scale$plot_treeden_all_hs, data_plot_scale$plot_treeden_all_rs, na.rm = TRUE)) +
-    ylim(0, max(data_plot_scale$plot_treeden_all_hs, data_plot_scale$plot_treeden_all_rs, na.rm = TRUE)) +
-    ggtitle('Tree density (total, all sizes) [# trees/ha]')
-  
-  # Stand density index (Reineke's) [#]
-  rast_sdi = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_SDI_SUM.img'))
-  data_plot_scale$plot_sdi_rs = as.numeric(compute_raster_buffer_value_func(rast_sdi, data_plot_scale, plot_buffer, mean)[,2])
-  
-  # Tree diameter (mean and SD) [cm]
+  # Tree quadratic mean diameter (large, dbh > 10cm) [cm]
   data_plot_scale = data_plot_scale %>% left_join(
     data_plot %>% select(site, plot_qmd_gt10cmDbh_hs = avg_dbh_cm_all) %>%
       mutate(plot_qmd_gt10cmDbh_hs = replace_na(plot_qmd_gt10cmDbh_hs, 0.0)),
     by = 'site')
+  # Tree quadratic mean diameter (small, dbh < 10 cm) [cm]
   data_plot_scale = data_plot_scale %>% left_join(
     data_plot %>% select(site, plot_qmd_lt10cmDbh_hs = avg_dbh_cm) %>%
       mutate(plot_qmd_lt10cmDbh_hs = replace_na(plot_qmd_lt10cmDbh_hs, 0.0)),
     by = 'site')
+  # Tree quadratic mean diameter (all) [cm]
   data_plot_scale$plot_qmd_all_hs = data_plot_scale$plot_qmd_gt10cmDbh_hs + data_plot_scale$plot_qmd_lt10cmDbh_hs
   
-  rast_qmd = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_QMD.img')) #load_raster('data/environment/rs_fris/rs_fris_QMD/RS_FRIS_QMD.tif')
-  data_plot_scale$plot_qmd_rs = as.numeric(compute_raster_buffer_value_func(rast_qmd, data_plot_scale, plot_buffer, mean)[,2]) * conv_in_cm
-  
-  ggplot(data_plot_scale, aes(x = plot_qmd_all_hs, y = plot_qmd_rs, label = site)) +
-    geom_point() + geom_text_repel(size = 2) + geom_abline(slope = 1) +
-    xlim(0, max(data_plot_scale$plot_qmd_all_hs, data_plot_scale$plot_qmd_rs, na.rm = TRUE)) +
-    ylim(0, max(data_plot_scale$plot_qmd_all_hs, data_plot_scale$plot_qmd_rs, na.rm = TRUE)) +
-    ggtitle('Tree diameter (quadratic mean) [cm]')
-  mapview(rast_qmd) +
-    mapview(data_plot_scale, zcol = 'plot_qmd_rs', legend = T)
-  
-  # Tree height (mean and cv) [m] and canopy layers [#]
+  # Tree height (mean and cv) [m]
   # TODO: Get high-resolution LiDAR height data from DNR approval procedure
   data_plot_scale = data_plot_scale %>% left_join(
     data_plot %>% select(site, plot_ht_hs = avg_height_m_all) %>%
@@ -537,35 +495,6 @@ if (overwrite_data_plot_scale_cache) {
     data_plot %>% select(site, plot_ht_cv_hs = cv_height_all) %>%
       mutate(plot_ht_cv_hs = replace_na(plot_ht_cv_hs, 0.0)),
     by = 'site')
-  
-  rast_htmax = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_HTMAX.img')) * conv_ft_m # convert from ft to m
-  data_plot_scale$plot_htmax_rs = as.numeric(compute_raster_buffer_value_func(rast_htmax, data_plot_scale, plot_buffer, mean)[,2])
-  data_plot_scale$plot_htmax_cv_rs = as.numeric(compute_raster_buffer_value_func(rast_htmax, data_plot_scale, plot_buffer, compute_cv)[,2])
-  
-  ggplot(data_plot_scale, aes(x = plot_ht_hs, y = plot_htmax_rs, label = site)) +
-    geom_point() + geom_text_repel(size = 2) + geom_abline(slope = 1) +
-    xlim(0, max(data_plot_scale$plot_ht_hs, data_plot_scale$plot_htmax_rs, na.rm = TRUE)) +
-    ylim(0, max(data_plot_scale$plot_ht_hs, data_plot_scale$plot_htmax_rs, na.rm = TRUE)) +
-    ggtitle('Tree height (mean) [m]')
-  
-  ggplot(data_plot_scale, aes(x = plot_ht_cv_hs, y = plot_htmax_cv_rs, label = site)) +
-    geom_point() + geom_text_repel(size = 2) + geom_abline(slope = 1) +
-    xlim(0, max(data_plot_scale$plot_ht_cv_hs, data_plot_scale$plot_htmax_cv_rs, na.rm = TRUE)) +
-    ylim(0, max(data_plot_scale$plot_ht_cv_hs, data_plot_scale$plot_htmax_cv_rs, na.rm = TRUE)) +
-    ggtitle('Tree height (cv) [m]')
-  
-  rast_canopy_layers = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_CANOPY_LAYERS.img'))
-  data_plot_scale$canopy_layers_rs = as.numeric(compute_raster_buffer_value_func(rast_canopy_layers, data_plot_scale, plot_buffer, mean)[,2])
-  
-  # Canopy cover and closure [%]
-  rast_canopy_cover = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_COVER.img'))
-  data_plot_scale$plot_canopy_cover_rs = as.numeric(compute_raster_buffer_value_func(rast_canopy_cover, data_plot_scale, plot_buffer, mean)[,2])
-  
-  rast_canopy_closure = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_CLOSURE.img'))
-  data_plot_scale$plot_canopy_closure_rs = as.numeric(compute_raster_buffer_value_func(rast_canopy_closure, data_plot_scale, plot_buffer, mean)[,2])
-  
-  mapview(rast_canopy_cover) +
-    mapview(data_plot_scale, zcol = 'plot_canopy_cover_rs', legend = T)
   
   # Height to live crown [m], length of live crown (live crown depth) [m], and live crown ratio [#]
   data_plot_scale = data_plot_scale %>% left_join(
@@ -581,26 +510,8 @@ if (overwrite_data_plot_scale_cache) {
   # Density of all snags [# snags/ha]
   data_plot_scale = data_plot_scale %>% left_join(data_plot %>% select(site, plot_snagden_hs = snags_ha) %>% mutate(plot_snagden_hs = replace_na(plot_snagden_hs, 0.0)), by = 'site')
   
-  rast_snagden = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_SNAG_ACRE_15.img'))
-  data_plot_scale$plot_snagden_rs = as.numeric(compute_raster_buffer_value_func(rast_snagden, data_plot_scale, plot_buffer, mean)[,2]) * conv_acre_hectare
-  
-  ggplot(data_plot_scale, aes(x = plot_snagden_hs, y = plot_snagden_rs, label = site)) +
-    geom_point() + geom_text_repel(size = 2) + geom_abline(slope = 1) +
-    xlim(0, max(data_plot_scale$plot_snagden_hs, data_plot_scale$plot_snagden_rs, na.rm = TRUE)) +
-    ylim(0, max(data_plot_scale$plot_snagden_hs, data_plot_scale$plot_snagden_rs, na.rm = TRUE)) +
-    ggtitle('Snag density [#/ha]')
-  
   # Downed wood volume [m3/ha]
   data_plot_scale = data_plot_scale %>% left_join(data_plot %>% select(site, plot_downvol_hs = vol_alldown_m3) %>% mutate(plot_downvol_hs = replace_na(plot_downvol_hs, 0.0)), by = 'site')
-  
-  rast_downvol = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_CFVOL_DDWM.img'))
-  data_plot_scale$plot_downvol_rs = as.numeric(compute_raster_buffer_value_func(rast_downvol, data_plot_scale, plot_buffer, mean)[,2]) * (conv_ft3_m3 / conv_hectare_acre)
-  
-  ggplot(data_plot_scale, aes(x = plot_downvol_hs, y = plot_downvol_rs, label = site)) +
-    geom_point() + geom_text_repel(size = 2) + geom_abline(slope = 1) +
-    xlim(0, max(data_plot_scale$plot_downvol_hs, data_plot_scale$plot_downvol_rs, na.rm = TRUE)) +
-    ylim(0, max(data_plot_scale$plot_downvol_hs, data_plot_scale$plot_downvol_rs, na.rm = TRUE)) +
-    ggtitle('Downed wood volume [m3/ha]')
   
   # Understory vegetation cover [%] and volume [m3/ha]
   data_plot_scale = data_plot_scale %>% left_join(data_plot %>% select(site, plot_understory_cover = per_cover_total_understory) %>% mutate(plot_understory_cover = replace_na(plot_understory_cover, 0.0)), by = 'site')
@@ -685,19 +596,14 @@ if (overwrite_data_plot_scale_cache) {
   # Understory reinit: tshe dominates, abam establishing, tree size less uniform
   # Old forest: tshe is climax species, abam established
   metric = "tree_all_density_" # "tree_all_density_", "tree_gte10cm_density_"
-  df_long <- data_plot_scale %>% select(site, `stage`, starts_with(metric)) %>%
+  dps_long = data_plot_scale %>% select(site, `stage`, starts_with(metric)) %>%
     pivot_longer(cols = starts_with(metric), names_to = "species", values_to = "density") %>%
     mutate(species = gsub(metric, "", species))
-  ggplot(df_long, aes(x = species, y = density, fill = species)) +
+  ggplot(dps_long, aes(x = species, y = density, fill = species)) +
     geom_boxplot() +
     facet_wrap(~ stage, scales = "free_y") +
     coord_cartesian(ylim = c(0, 1250)) + 
     labs(title = "Tree species density by stage") +
-    theme_minimal()
-  
-  # Inspect specific variables by stage
-  ggplot(data_plot_scale, aes(x = stage, y = canopy_layers_rs)) +
-    geom_boxplot() +
     theme_minimal()
   
   # Distance to water (type 1-3 and all types) [m]
@@ -713,7 +619,7 @@ if (overwrite_data_plot_scale_cache) {
   
   # Distance to nearest edge [m]
   # For each site, find its patch, then find the distance to the nearest non-patch cell
-  patch_ids <- patches(rast_cover_clean, directions=8, values=TRUE)
+  patch_ids = patches(rast_cover_clean, directions=8, values=TRUE)
   data_plot_scale$dist_nearest_edge = NA
   for (i in 1:nrow(data_plot_scale)) {
     d = data_plot_scale[i,]
@@ -758,11 +664,34 @@ if (overwrite_data_homerange_scale_cache) {
   )
   # DEBUG
   
-  # Calculate per species according to predicted home range size
+  ## Load forest structure rasters
+  
+  # Basal area [ft2/acre] --> [m2/ha]
+  rast_ba = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_BA_EXPORT.tif')) * 0.229568
+  # Tree density (total) [#/acre] --> [#/ha]
+  rast_treeden_all = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_TREE_ACRE.img'))  * conv_peracre_to_perha
+  # Tree density (DBH > 4 in) [#/acre]-->[#/ha]
+  rast_treeden_gt4inDbh = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_TREE_ACRE_4.img')) * conv_peracre_to_perha
+  # Tree quadratic mean diameter [in]-->[cm]
+  rast_qmd = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_QMD.img')) * conv_in_to_cm
+  # Tree height (max) [ft]-->[m]
+  rast_htmax = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_HTMAX.img')) * conv_ft_to_m
+  # Canopy layers [#]
+  rast_canopy_layers = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_CANOPY_LAYERS.img'))
+  # Canopy cover [%]
+  rast_canopy_cover = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_COVER.img'))
+  # Canopy closure [%]
+  rast_canopy_closure = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_CLOSURE.img'))
+  # Density of snags > 15" DBH [#/acre] --> [#/ha]
+  rast_snagden_gt15inDbh = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_SNAG_ACRE_15.img')) * conv_peracre_to_perha
+  # Downed wood volume [ft3/acre] --> [m3/ha]
+  rast_downvol = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_CFVOL_DDWM.img')) * 0.069968
+  
+  # Calculate per scale according to predicted home range size
   for (i in 1:nrow(homeranges)) {
     scale = homeranges[i,'common_name']
     homerange_buffer_size = homeranges[i,'home_range_radius_m']
-    message("Scale '", scale, "', home range buffer size ", homerange_buffer_size)
+    message("Scale '", scale, "', home range buffer size: ", homerange_buffer_size)
     
     data_homerange_scale_species = data.frame()
   
@@ -772,29 +701,35 @@ if (overwrite_data_homerange_scale_cache) {
     
     sites = 1:nrow(data_plot_scale)
     for (j in sites) {
+      
+      ## Get site cover data within and surrounding homerange buffer
       site = data_plot_scale[j,]
-      # message(site$site, ' (', round(j / length(sites),3), ')')
-      cover_class = terra::extract(rast_cover_clean, vect(site))[,2]
+      message(site$site, ' (', round(j / length(sites),3), ')')
       
       homerange_and_edge_buffer = st_buffer(site, homerange_buffer_size + core_area_buffer) # additional buffer to ensure that edges are retained in mask
       homerange_buffer = st_buffer(site, homerange_buffer_size)
       homerange_and_edge_crop = crop(rast_cover_clean, vect(homerange_and_edge_buffer))
       homerange_and_edge = mask(homerange_and_edge_crop, vect(homerange_and_edge_buffer))
-      # mapview(homerange_and_edge) + mapview(homerange_buffer)
+      homerange_crop = crop(rast_cover_clean, vect(homerange_buffer))
+      homerange_cover = mask(homerange_crop, vect(homerange_buffer))
+      rast_homerange = ifel(!is.na(homerange_cover), 1, NA)
+      mapview(homerange_cover) + mapview(homerange_and_edge) + mapview(homerange_buffer)
       
       patch_ids = patches(homerange_and_edge, directions=8, values=TRUE)
       pid = terra::extract(patch_ids, vect(site))[,2]
-      focal_patch = trim(classify(patch_ids, cbind(pid, 1), others = NA))
-      focal_patch = crop(focal_patch, vect(homerange_buffer))
-      focal_patch = mask(focal_patch, vect(homerange_buffer))
+      rast_focal_patch = trim(classify(patch_ids, cbind(pid, 1), others = NA))
+      rast_focal_patch = crop(rast_focal_patch, vect(homerange_buffer))
+      rast_focal_patch = mask(rast_focal_patch, vect(homerange_buffer))
+      mapview(rast_focal_patch) + mapview(homerange_buffer)
+      
+      ## Focal patch scale
+      
+      # Focal patch cover class
+      focalpatch_class = terra::extract(rast_cover_clean, vect(site))[,2]
       
       # Focal patch area [ha]
-      # lsm_p_area(focal_patch, directions = 8)[1, 'value'] # in hectares (ha)
-      # global(!is.na(focal_patch), sum, na.rm = TRUE) * prod(res(focal_patch)) # in sq meters
-      # mapview(site) + mapview(homerange_and_edge) + mapview(homerange_buffer, col.regions = 'transparent', lwd = 2) + mapview(focal_patch)
-      
-      ncells_focal_patch = sum(!is.na(values(focal_patch)))
-      (focal_patch_area = ncells_focal_patch * prod(res(focal_patch)) * conv_m2_ha)
+      ncells_focal_patch = sum(!is.na(values(rast_focal_patch)))
+      (focal_patch_area = ncells_focal_patch * prod(res(rast_focal_patch)) * conv_m2_to_ha)
       
       # Focal patch core area [ha]
       focal_patch_and_edge_buffer = trim(classify(patch_ids, cbind(pid, 1), others = NA))
@@ -804,36 +739,79 @@ if (overwrite_data_homerange_scale_cache) {
       focal_patch_core = ifel(focal_patch_edge_dist >= core_area_buffer, 1, NA)
       focal_patch_core = crop(focal_patch_core, vect(homerange_buffer))
       focal_patch_core = mask(focal_patch_core, vect(homerange_buffer))
-      # mapview(homerange_buffer, col.regions = 'transparent', lwd = 2) + mapview(focal_patch_edge_dist) + mapview(focal_patch) + mapview(focal_patch_and_edge_buffer) + mapview(focal_patch_core)
-      
+      # mapview(homerange_buffer, col.regions = 'transparent', lwd = 2) + mapview(focal_patch_edge_dist) + mapview(rast_focal_patch) + mapview(focal_patch_and_edge_buffer) + mapview(focal_patch_core)
       ncells_focal_patch_core = sum(!is.na(values(focal_patch_core)))
-      (focal_patch_core_area = ncells_focal_patch_core * prod(res(focal_patch)) * conv_m2_ha)
+      (focal_patch_core_area = ncells_focal_patch_core * prod(res(rast_focal_patch)) * conv_m2_to_ha)
       
-      homerange_crop = crop(rast_cover_clean, vect(homerange_buffer))
-      homerange_cover = mask(homerange_crop, vect(homerange_buffer))
+      # Structural variables (across focal patch, then across homerange)
+      results_list = list()
+      regions = list(
+        focalpatch = rast_focal_patch,
+        homerange  = rast_homerange
+      )
+      for (k in seq_along(regions)) {
+        region_name = names(regions)[k]
+        message("Calculating forest structural variables for: ", region_name)
+        region = resample(regions[[k]], rast_age, method = "near") # align region to raster data
+        print(sum(!is.na(values(region))))
+        
+        vars = c(
+          # Age [#]
+          age = summary_stats(values(mask(rast_age, region)), na.rm = TRUE),
+          # Basal area [m2/ha]
+          ba = summary_stats(values(mask(rast_ba, region)), na.rm = TRUE),
+          # Tree density (total) [# trees/ha]
+          treeden_all = summary_stats(values(mask(rast_treeden_all, region)), na.rm = TRUE),
+          # Tree density (large, dbh > 4 in) [# trees/ha]
+          treeden_gt4inDbh = summary_stats(values(mask(rast_treeden_gt4inDbh, region)), na.rm = TRUE),
+          # Tree diameter [cm]
+          qmd = summary_stats(values(mask(rast_qmd, region)), na.rm = TRUE),
+          # Tree height [m]
+          htmax = summary_stats(values(mask(rast_htmax, region)), na.rm = TRUE),
+          # Canopy layers [#]
+          canopy_layers = summary_stats(values(mask(rast_canopy_layers, region)), na.rm = TRUE),
+          # Canopy cover [%]
+          canopy_cover = summary_stats(values(mask(rast_canopy_cover, region)), na.rm = TRUE),
+          # Canopy closure [%]
+          canopy_closure = summary_stats(values(mask(rast_canopy_closure, region)), na.rm = TRUE),
+          # Density of snags > 15" DBH [#/ha]
+          snagden_gt15dbh = summary_stats(values(mask(rast_snagden_gt15inDbh, region)), na.rm = TRUE),
+          # Downed wood volume [m3/ha]
+          downvol = summary_stats(values(mask(rast_downvol, region)), na.rm = TRUE)
+        )
+        # format and discard irrelevant variables
+        vars = as.data.frame(vars) %>% select(-ends_with(".sd"))
+        results_list[[region_name]] = vars
+      }
+      final_df = do.call(cbind, results_list) %>% janitor::clean_names()
+    
+      ## Homerange scale metrics
+      
+      message("Calculating homerange configuration and composition variables")
+      
       homerange_cover_forest = homerange_cover
-      homerange_cover_forest[!(homerange_cover_forest[] %in% c(1, 2, 3, 4, 5))] <- NA
+      homerange_cover_forest[!(homerange_cover_forest[] %in% c(1, 2, 3, 4, 5))] = NA
       # mapview(homerange_cover) + mapview(homerange_cover_forest)
       ncells_homerange = sum(!is.na(values(homerange_cover)))
       
       # Focal patch percentage of home range [%]
-      (focal_patch_pcnt = sum(!is.na(values(focal_patch))) / ncells_homerange)
+      (focalpatch_pcnt = sum(!is.na(values(rast_focal_patch))) / ncells_homerange)
       
       # Focal patch core percentage of home range [%]
-      (focal_patch_core_pcnt = sum(!is.na(values(focal_patch_core))) / ncells_homerange)
+      (focalpatch_core_pcnt = sum(!is.na(values(focal_patch_core))) / ncells_homerange)
   
       # Focal patch euclidean nearest neighbor distance [m]
       # Quantifies habitat isolation
       # Approaches 0 as the distance to the nearest neighbor decreases. Minimum is constrained by the cell size.
       focal_cover_class = site$stratum
       matching_cover = rast_cover_clean
-      matching_cover[matching_cover != focal_cover_class] = NA
-      focal_patch_extended = extend(focal_patch, matching_cover)
+      matching_cover[matching_cover != focal_cover_class] <- NA
+      focal_patch_extended = extend(rast_focal_patch, matching_cover)
       matching_neighbors = mask(matching_cover, focal_patch_extended, maskvalue=NA, inverse=TRUE)
       focal_patch_distance = distance(focal_patch_extended)
       matching_neighbor_distance = mask(focal_patch_distance, matching_neighbors, maskvalue=NA, inverse=FALSE)
-      # mapview(matching_neighbors) + mapview(focal_patch) + mapview(focal_patch_distance) + mapview(matching_neighbor_distance)
-      (focal_patch_isolation = min(values(matching_neighbor_distance), na.rm = TRUE))
+      # mapview(matching_neighbors) + mapview(rast_focal_patch) + mapview(focal_patch_distance) + mapview(matching_neighbor_distance)
+      (focalpatch_isolation = min(values(matching_neighbor_distance), na.rm = TRUE) - res(matching_neighbor_distance)[1])
       
       # Cover class richness [#]
       # Quantifies the number of cover types present in home range
@@ -879,7 +857,6 @@ if (overwrite_data_homerange_scale_cache) {
       # Contrast-weighted edge density [m/ha]
       # The density of patch edges weighted by their contrast
       # Equals 0 when there is no edge in the landscape (i.e. landscape consists of a single patch). Increases as the amount of edge in the landscape increases and/or as the contrast in edges increase (i.e. contrast weight approaches 1).
-      rast_htmax = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_HTMAX.img')) * conv_ft_m # convert from ft to m
       max_ht_m = max(values(rast_htmax), na.rm = TRUE)
       homerange_height = mask(crop(rast_htmax, homerange_and_edge_buffer), homerange_and_edge_buffer)
       # mapview(patch_ids) + mapview(homerange_height)
@@ -901,7 +878,7 @@ if (overwrite_data_homerange_scale_cache) {
         # d = 0 --> 0 m difference
         # d = 1 --> max m difference (i.e. maximum tree height of entire landscape)
         weights = height_diff_matrix / max_ht_m
-        homerange_rast_area = ncells_homerange * res(homerange_cover)[1] * res(homerange_cover)[2] * conv_m2_ha
+        homerange_rast_area = ncells_homerange * res(homerange_cover)[1] * res(homerange_cover)[2] * conv_m2_to_ha
         (cw_edge_density = sum(edge_lengths * weights, na.rm = TRUE) / homerange_rast_area)
       } else { 
         # Only one patch type
@@ -929,13 +906,14 @@ if (overwrite_data_homerange_scale_cache) {
       (density_streams = homerange_streams_length / homerange_buffer_area_ha)
       # mapview(homerange_streams_major) + mapview(homerange_streams) + mapview(homerange_buffer) + homerange_cover
       
-      data_homerange_scale_species = rbind(data_homerange_scale_species, data.frame(
-        species = scale,
+      final_df = cbind(data.frame(
+        scale = scale,
+        buffer_radius_m = homerange_buffer_size,
         site = site$site,
-        buffer = homerange_buffer_size,
-        focal_patch_pcnt,
-        focal_patch_core_pcnt,
-        focal_patch_isolation,
+        focalpatch_class,
+        focalpatch_pcnt,
+        focalpatch_core_pcnt,
+        focalpatch_isolation,
         cover_richness,
         cover_forest_richness,
         cover_evenness,
@@ -955,17 +933,19 @@ if (overwrite_data_homerange_scale_cache) {
         density_roads,
         density_streams_major,
         density_streams
-      ))
+      ), final_df)
+      
+      data_homerange_scale_species = rbind(data_homerange_scale_species, final_df)
     }
     
     # Sanity check results
     if (FALSE) {
-      site_check = data_homerange_scale_species %>% slice_max(focal_patch_isolation, n = 1, with_ties = FALSE) %>% pull(site)
+      site_check = data_homerange_scale_species %>% slice_max(focalpatch_isolation, n = 1, with_ties = FALSE) %>% pull(site)
       site_check = data_plot_scale %>% filter(site == site_check)
       site_check_buffer = st_buffer(site_check, homerange_buffer_size)
       mapview(site_check) + mapview(mask(crop(rast_cover_clean, site_check_buffer), site_check_buffer))
       
-      site_check = data_homerange_scale_species %>% slice_min(focal_patch_isolation, n = 1, with_ties = FALSE) %>% pull(site)
+      site_check = data_homerange_scale_species %>% slice_min(focalpatch_isolation, n = 1, with_ties = FALSE) %>% pull(site)
       site_check = data_plot_scale %>% filter(site == site_check)
       site_check_buffer = st_buffer(site_check, homerange_buffer_size)
       mapview(site_check) + mapview(mask(crop(rast_cover_clean, site_check_buffer), site_check_buffer))
@@ -983,103 +963,43 @@ if (overwrite_data_homerange_scale_cache) {
   data_homerange_scale = readRDS(path_data_homerange_scale_out)
 }
 
-# #############################################################################################################
-# # Data inspection
-# 
-# ### Plot scale candidate variables
-# 
-# data_plot_scale_candidates = data_plot_scale %>% st_drop_geometry() %>% select(where(is.numeric))
-# 
-# cor_matrix_plot_scale = cor(data_plot_scale_candidates, use = "pairwise.complete.obs", method = "pearson")
-# cor_matrix_plot_scale[lower.tri(cor_matrix_plot_scale, diag = TRUE)] = NA
-# collinearity_candidates = subset(as.data.frame(as.table(cor_matrix_plot_scale)), !is.na(Freq) & abs(Freq) >= 0.8)
-# 
-# # Reduce list of candidate variables (highly correlated, less preferable, irrelevant, etc.)
-# vars_to_drop = c(
-#   # Highly correlated with age_mean, which is a better representation of stand age
-#   'age_point',
-#   # Highly correlated with plot_treeden_all_rs
-#   'plot_treeden_lt4inDbh_rs',
-#   # Individual tree species composition is better summarized with taxonomic diversity metrics
-#   'tree_gte10cm_density_psme', 'tree_gte10cm_density_thpl', 'tree_gte10cm_density_abam', 'tree_gte10cm_density_tshe', 'tree_gte10cm_density_alru', 'tree_gte10cm_density_pisi',
-#   'tree_all_density_thpl', 'tree_all_density_abam', 'tree_all_density_tshe', 'tree_all_density_alru', 'tree_all_density_pisi', 'tree_all_density_psme',
-#   # TODO: Basal area (ba), height, qmd, and stand density are highly correlated.
-#   # Josh and Teddy recommend independent variables for 1) tree density and 2) tree size (QMD).
-#   # Dan, however, notes that integrative metrics that incorporate both tree density and (mean) tree size do the best job in these analyses.
-#   # Drop SDI (which is highly correlated with qmd, ba, and ht) in favor of a raw density measurement.
-#  'plot_sdi_rs',
-#  # Canopy cover and closure are highly correlated. Drop closure in favor of cover here because it is likely a more accurate measurement and is more widely used in landscape-scale analyses.
-#  'plot_canopy_closure_rs'
-# )
-# data_plot_scale_candidates = data_plot_scale_candidates %>% select(-all_of(vars_to_drop))
-# 
-# corrplot::corrplot(cor_matrix_plot_scale, method = "color", tl.cex = 0.8)
-# 
-# 
-# 
-# 
-# 
-# 
-# ggplot(data_plot_scale, aes(x = `stage`, y = plot_qmd_all_hs)) +
-#   geom_violin() +
-#   stat_summary(fun = mean, geom = "point") +
-#   ggtitle("Tree species richness across stages") + theme_minimal()
-# 
-# df_long <- data_plot_scale %>% select(site, `stage`, plot_qmd_lt10cmDbh_hs, plot_qmd_gt10cmDbh_hs, plot_qmd_all_hs) %>%
-#   pivot_longer(cols = starts_with("plot_qmd"), names_to = "metric", values_to = "qmd")
-# ggplot(df_long, aes(x = stage, y = qmd, fill = metric)) +
-#   geom_boxplot() + theme_minimal()
-# 
-# ggplot(data_plot_scale %>% select(site, `stage`, plot_treeden_lt10cmDbh_hs, plot_treeden_gt10cmDbh_hs, plot_treeden_all_hs) %>%
-#          pivot_longer(cols = starts_with("plot_treeden"), names_to = "variable", values_to = "value"),
-#        aes(x = stage, y = value, fill = variable)) +
-#   geom_boxplot() + coord_cartesian(ylim = c(0, 2500)) + theme_minimal() +
-#   ggtitle('Tree density (habitat surveys)')
-# 
-# ggplot(data_plot_scale %>% select(site, `stage`, plot_treeden_lt4inDbh_rs, plot_treeden_gt4inDbh_rs, plot_treeden_all_rs) %>%
-#          pivot_longer(cols = starts_with("plot_treeden"), names_to = "variable", values_to = "value"),
-#        aes(x = stage, y = value, fill = variable)) +
-#   geom_boxplot() + theme_minimal() +
-#   ggtitle('Tree density (remote sensing)')
-# 
-# # psme - Douglas fir
-# # thpl - Western redcedar
-# # abam - Pacific silver fir
-# # tshe - Western hemlock
-# # alru - Red alder
-# # pisi - Sitka spruce
-# #
-# # Stand initiation: small alru pioneers newly-disturbed habitat as an early-seral species, otherwise plantation psme and tshe are establishing
-# # Stem exclusion: alru is outcompeted by psme and tshe and mostly disappears, tree size is more uniform
-# # Understory reinit: tshe dominates, abam establishing, tree size less uniform
-# # Old forest: tshe is climax species, abam established
-# metric = "tree_all_density_" # "tree_all_density_", "tree_gte10cm_density_"
-# df_long <- data_plot_scale %>% select(site, age_mean, `stage`, starts_with(metric)) %>%
-#   pivot_longer(cols = starts_with(metric), names_to = "species", values_to = "density") %>%
-#   mutate(species = gsub(metric, "", species))
-# ggplot(df_long, aes(x = species, y = log(density), fill = species)) +
-#   geom_boxplot() +
-#   facet_wrap(~ stage, scales = "free_y") +
-#   # coord_cartesian(ylim = c(0, 1250)) + 
-#   labs(title = "Tree species density by stage") +
-#   theme_minimal()
-# 
-# ggplot(data_plot_scale, aes(x = `stage`, y = plot_elev_rs, fill = `stage`)) +
-#   geom_boxplot()
-# 
-# # Inspect specific variables by stage
-# ggplot(data_plot_scale, aes(x = stage, y = canopy_layers_rs)) +
-#   geom_boxplot() +
-#   theme_minimal()
-# 
-# 
-# 
-# 
-# 
-# 
-# 
-# ### Homerange scales
-# hist(data_homerange_scale[["Nearmax"]]$focal_patch_pcnt)
-# hist(data_homerange_scale[["Nearmax"]]$cover_forest_richness)
-# hist(data_homerange_scale[["Plot"]]$cw_edge_density)
+#############################################################################################################
+# Data inspection at plot scale
+
+data_total = full_join(st_drop_geometry(data_plot_scale), data_homerange_scale[['min']], by = 'site')
+
+comparison_plot = function(x, y, s, title, x_lab = "Habitat survey", y_lab = "Remote sensing") {
+  r = cor(x, y, use = "complete.obs", method = "pearson")
+  ggplot() +
+    geom_abline(slope = 1, color = "gray") +
+    geom_point(aes(x = x, y = y)) +
+    geom_text_repel(aes(x = x, y = y, label = s), size = 2) +
+    xlim(0, max(x, y, na.rm = TRUE)) +
+    ylim(0, max(x, y, na.rm = TRUE)) +
+    labs(
+      title = title, subtitle = paste0("(Pearson r = ", round(r, 2), ")"),
+      x = x_lab, y = y_lab
+    )
+}
+
+comparison_plot(data_total$plot_ba_hs, data_total$homerange_ba_mean, data_total$site, "Basal area [m2/ha]")
+
+comparison_plot(data_total$plot_treeden_gt10cmDbh_hs, data_total$homerange_treeden_gt4in_dbh_mean, data_total$site, "Density (large trees, DBH > 10 cm) [# trees/ha]")
+
+comparison_plot(data_total$plot_treeden_all_hs, data_total$homerange_treeden_all_mean, data_total$site, "Density (all tree sizes) [# trees/ha]")
+
+comparison_plot(data_total$plot_qmd_all_hs, data_total$homerange_qmd_mean, data_total$site, "Quadratic mean diameter [cm]")
+
+comparison_plot(data_total$plot_ht_hs, data_total$homerange_htmax_mean, data_total$site, "Height mean [cm]")
+
+# TODO: plot_ht_cv_hs appears erroneous?
+comparison_plot(data_total$plot_ht_cv_hs, data_total$homerange_htmax_cv, data_total$site, "Height CV [cm]")
+
+comparison_plot(data_total$plot_snagden_hs, data_total$homerange_snagden_gt15dbh_mean, data_total$site, "Snag density [cm]")
+
+comparison_plot(data_total$plot_downvol_hs, data_total$homerange_downvol_mean, data_total$site, "Downed wood volume [m3/ha]")
+
+# Inspect specific variables by stage or stratum
+ggplot(data_total, aes(x = stage, y = homerange_canopy_layers_mean)) +
+  geom_boxplot()
 
