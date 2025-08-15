@@ -453,11 +453,11 @@ stopifnot(identical(I, dim(z_samples)[3]))
 auc_combined = rep(NA, n_samples)
 for (s in 1:n_samples) {
   print(round(s/n_samples,3))
-  psi_all = psi_samples[s, , ]
-  z_all   = z_samples[s, , ]
+  psi_all = as.vector(psi_samples[s, , ]) # combine all species into a single vector
+  z_all   = as.vector(z_samples[s, , ])
   
   if (length(unique(z_all)) > 1) {
-    auc_combined[s] = as.numeric(auc(roc(z_all, psi_all, quiet=TRUE)))
+    auc_combined[s] = as.numeric(pROC::auc(pROC::roc(z_all, psi_all, quiet=TRUE)))
   } else {
     stop("Cannot calculate ROC")
   }
@@ -478,7 +478,7 @@ for (s in 1:n_samples) {
     z_vec   = z_samples[s, , i]
 
     if (length(unique(z_vec)) > 1) {
-      auc_species[s, i] = as.numeric(auc(roc(z_vec, psi_vec, quiet=TRUE)))
+      auc_species[s, i] = as.numeric(pROC::auc(pROC::roc(z_vec, psi_vec, quiet=TRUE)))
     } else {
       stop("Cannot calculate ROC")
     }
