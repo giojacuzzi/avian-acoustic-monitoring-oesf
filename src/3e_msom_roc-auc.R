@@ -480,15 +480,16 @@ for (s in 1:n_samples) {
     if (length(unique(z_vec)) > 1) {
       auc_species[s, i] = as.numeric(pROC::auc(pROC::roc(z_vec, psi_vec, quiet=TRUE)))
     } else {
-      stop("Cannot calculate ROC")
+      # species[i] latent z state is identical at all sites for this sample, cannot calculate ROC
+      message(species[i], " latent 'z' state identical at all sites, cannot calculate ROC")
     }
   }
 }
 auc_species_mean = round(apply(auc_species, 2, mean, na.rm=TRUE), 3)
 auc_species_bci  = round(apply(auc_species, 2, quantile, probs=c(0.025, 0.975), na.rm=TRUE), 3)
 nocc_samples = msom$sims.list$Nocc # posterior mean number of occupied sites (z=1) per species (i.e. effective positive sample size)
-nocc_mean = round(apply(Nocc_samples, 2, mean),1)
-nocc_bci = apply(Nocc_samples, 2, quantile, probs = c(0.025, 0.975))
+nocc_mean = round(apply(nocc_samples, 2, mean),1)
+nocc_bci = apply(nocc_samples, 2, quantile, probs = c(0.025, 0.975))
 auc_species = data.frame(
   species = species[1:I],
   mean_auc = auc_species_mean,
@@ -500,6 +501,7 @@ auc_species = data.frame(
 )
 
 message("Species-specific AUC and 95% BCI:")
+message("Mean AUC (weighting species equally): ", round(mean(auc_species$mean_auc),3))
 print(auc_species)
 summary(auc_species)
 ggplot(auc_species, aes(x = mean_nocc, y = mean_auc)) +
@@ -515,3 +517,5 @@ ggplot(auc_species, aes(x = mean_nocc, y = mean_auc)) +
   )
 
 # "We concluded a statistically significant difference between posterior distributions when the 95% BCI (2.5th to 97.5th percentile of the posterior distribution) for one posterior excluded the BCI of the opposing posterior."
+
+
