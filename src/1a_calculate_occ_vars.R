@@ -14,6 +14,7 @@ path_rast_cover_clean_out = "data/cache/occurrence_covariates/rast_cover_clean.t
 path_data_plot_scale_out = "data/cache/occurrence_covariates/data_plot_scale.rds"
 path_data_homerange_scale_out = "data/cache/occurrence_covariates/data_homerange_scale.rds"
 
+library(progress)
 library(tidyverse)
 library(sf)
 library(terra)
@@ -22,7 +23,6 @@ options(mapview.maxpixels = 2117676)
 library(ggrepel)
 theme_set(theme_minimal())
 library(landscapemetrics)
-library(lwgeom)
 library(units)
 library(viridis)
 library(vegan)
@@ -33,6 +33,8 @@ library(vegan)
 crs_m = 32610 # coordinate reference system EPSG:32610, UTM Zone 10N, (meters)
 crs_m_rast = "EPSG:32610"
 
+species_trait_data = read.csv("data/cache/species_traits/species_traits.csv")
+
 # ARU locations (sites)
 aru_sites = st_read('data/environment/GIS Data/AcousticStations.shp') %>%
   st_drop_geometry() %>% janitor::clean_names() %>% as.data.frame() %>%
@@ -41,7 +43,7 @@ aru_sites = st_read('data/environment/GIS Data/AcousticStations.shp') %>%
 mapview(aru_sites, label = aru_sites$name)
 
 # Study area boundary buffer
-study_area = st_buffer(st_as_sfc(st_bbox(aru_sites)), dist = 100) # TODO: Re-run with larger buffer (10000)
+study_area = st_buffer(st_as_sfc(st_bbox(aru_sites)), dist = 10000)
 
 # Load a raster, cropped, projected, and masked to the study area
 load_raster = function(path_rast) {
@@ -152,7 +154,7 @@ rast_wadnr_class = classify(rast_age, matrix(c(
 rast_wadnr_class = as.factor(rast_wadnr_class)
 unique(terra::values(rast_wadnr_class))
 data_plot_scale$wadnr_stage_rast = terra::extract(rast_wadnr_class, vect(data_plot_scale))[, 2]
-data_plot_scale$wadnr_stage_rast = factor(data_plot_scale$wadnr_stage_rast, labels = wadnr_classes)
+data_plot_scale$wadnr_stage_rast = factor(data_plot_scale$wadnr_stage_rast)
 
 # Fill in missing patches with WADNR predictions
 rast_impute = mask(rasterize(vect(vect_patches), rast_origin_missing, field = "wadnr_stage_vect"), rast_origin_missing)
@@ -162,6 +164,7 @@ rast_impute = classify(rast_impute, matrix(c(
   0, 1, 2,    # "canclose" > "stem exclusion"
   2, 3, 3     # "understory reinitiation"
 ), ncol = 3, byrow = TRUE), include.lowest = TRUE, right = FALSE)
+mapview(rast_stage_class) + mapview(rast_impute)
 rast_stage_class = cover(rast_impute, rast_stage_class)
 
 # Determine thinning treatment
@@ -204,8 +207,9 @@ table(data_plot_scale$stratum, useNA = 'ifany')
 
 # From here forward, we use "rast_stratum" as the classification scheme to delineate patches
 mapview(vect_patches) + mapview(poly_thinning_treatment)
-summary(data_plot_scale$stage)
-mapview(rast_stratum) + mapview(aru_sites, label = aru_sites$site) + mapview(st_buffer(aru_sites, 100), col.regions = 'transparent', lwd = 2)
+summary(data_plot_scale$stratum)
+mapview(rast_stratum) +
+  mapview(aru_sites, label = aru_sites$site)
 
 # Further delineate patch boundaries by roads, waterbodies, and watercourses
 
@@ -217,7 +221,7 @@ roads_wsdot = st_read('data/environment/WSDOT_-_Local_Agency_Public_Road_Routes/
 roads_wsdot$road_usgs1 = 'Primary Highway'
 roads_wsdot$road_surfa = NA
 roads = rbind(roads_wsdot, roads_wadnr)
-mapview(roads, zcol = 'road_usgs1') + mapview(aru_sites, label = aru_sites$site)
+# mapview(roads, zcol = 'road_usgs1') + mapview(aru_sites, label = aru_sites$site)
 
 # "The Hoh-Clearwater Mainline is our only double-lane mainline, and it is about 26 feet wide for the asphalt surface. If we’re looking at right of way widths, we could easily assume a minimum width of about 50 feet for a 12-foot road, probably a good 60-80 feet for a 14-20 foot wide road, and about 100 feet for the Hoh Mainline. 100 feet might be good for US 101 as well for right of way width, and maybe about 30 feet for actual road surface width."
 paved_primary_roads   = st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway")))
@@ -243,7 +247,6 @@ rast_updated = cover(rast_paved_roads_secondary, rast_updated)
 # Watercourses/waterbodies (rivers and streams) from Type 1-3. These support distinct riparian vegetation which constitutes different habitat. Type 4 (non-fish-bearing streams) and type 5 are not boundaries because they are small features that do not change the vegetation, support less aquatic biota, and often are not permanent.
 watercourses = st_read('data/environment/DNR_Hydrography/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation.shp')
 watercourses = watercourses %>% st_crop(st_transform(study_area, st_crs(watercourses))) %>% st_transform(crs_m) %>% janitor::clean_names() %>% select(geometry, sl_wtrty_c)
-
 # mapview(watercourses, zcol = 'sl_wtrty_c')
 
 boundary_watercourses = watercourses %>% filter(sl_wtrty_c %in% c(1, 2, 3))
@@ -261,71 +264,107 @@ waterbodies = waterbodies %>% st_crop(st_transform(study_area, st_crs(waterbodie
 boundary_waterbodies = waterbodies %>% filter(sl_wtrty_c %in% c(1))
 rast_waterbodies = rasterize(vect(boundary_waterbodies), template, field = 7, background = NA, touches=TRUE)
 # mapview(rast_waterbodies) + mapview(boundary_waterbodies)
+
+# Fill missing water bodies off coast
+ocean_polyfill = st_polygon(list(rbind(
+  c(-180, -90), c(-124.42, -90), c(-124.42, 47.63), c(-180, 47.63), c(-180, -90)
+))) |> st_sfc(crs = 4326) |> st_transform(crs(rast_waterbodies))
+p = terra::project(vect(ocean_polyfill), crs(rast_waterbodies))
+mask_r = rasterize(p, rast_waterbodies, field=1, background=NA, touches=TRUE)
+rast_waterbodies[!is.na(mask_r[])] <- 7
+
 rast_updated = cover(rast_waterbodies, rast_updated)
 mapview(rast_updated)
+
+# TODO: Cover impervious surfaces
+
+# Impute any remaining missing patches with cover class 2 (stem exclusion)
+rast_updated[is.na(rast_updated[])] <- 2
+mapview(rast_updated)
+
+# Crop raster to the study area (bounded by maximum home range size)
+max_homerange_buffers = st_buffer(aru_sites, max(species_trait_data$home_range_radius_m))
+study_region_bbox = st_bbox(st_union(max_homerange_buffers))
+
+r_cropped = crop(rast_updated, ext(study_region_bbox$xmin, study_region_bbox$xmax, study_region_bbox$ymin, study_region_bbox$ymax))
+
+mapview(r_cropped) +
+  mapview(rast_updated) +
+  mapview(aru_sites, label = aru_sites$site) +
+  mapview(st_buffer(aru_sites, 100), col.regions = 'transparent', lwd = 2) +
+  mapview(max_homerange_buffers, col.regions = 'transparent', lwd = 2) +
+  mapview(study_region_bbox)
+
+rast_updated = r_cropped
 
 # Clean raster by generalizing minimum patch area and width
 if (overwrite_rast_cover_cache) {
   
   message("Generating cover cache (current time ", time_start <- Sys.time(), ")")
+  
+  min_species_homerange_area_m2 = round(pi * min(species_trait_data$home_range_radius_m)^2,0)
 
   r = rast_updated
-  cell_res <- res(r)[1] # cell resolution (in meters)
-  min_area <- 0.785 * 1e4 # TODO: check --> hectares to square meters?
-  min_width <- 50 # in meters
-  min_cells_area <- ceiling(min_area / (cell_res^2))  # min number of cells by area
-  min_cells_width <- ceiling(min_width / cell_res)    # min number of cells by width
+  cell_res = res(r)[1] # cell resolution (in meters)
+  min_area = min_species_homerange_area_m2 # OR 0.785 * 1e4 --> e.g. 0.785 hectares to square meters
+  min_width = 50 # in meters
+  min_cells_area = ceiling(min_area / (cell_res^2))  # min number of cells by area
+  min_cells_width = ceiling(min_width / cell_res)    # min number of cells by width
   
   # Identify discrete contiguous patches with unique ids
-  patch_list <- list()
-  start_id <- 1  # Starting patch ID to ensure uniqueness
+  message("Identifying discrete contiguous patch candidates")
+  patch_list = list()
+  start_id = 1  # Starting patch ID to ensure uniqueness
   cls = sort(na.omit(unique(values(r))))
   for (cl in cls) {
-    r_class <- mask(r, r == cl, maskvalues = FALSE) # Mask only the current class
-    r_patches <- patches(r_class, directions = 8) # Compute patches for this class only
+    message("Class: ", cl)
+    r_class = mask(r, r == cl, maskvalues = FALSE) # Mask only the current class
+    r_patches = patches(r_class, directions = 8) # Compute patches for this class only
     # Reclassify patch IDs to be globally unique
-    max_patch_id <- global(r_patches, "max", na.rm = TRUE)[1,1]
+    max_patch_id = global(r_patches, "max", na.rm = TRUE)[1,1]
     if (!is.na(max_patch_id)) {
-      r_patches <- classify(r_patches, cbind(1:max_patch_id, start_id:(start_id + max_patch_id - 1)))
-      start_id <- start_id + max_patch_id
+      r_patches = classify(r_patches, cbind(1:max_patch_id, start_id:(start_id + max_patch_id - 1)))
+      start_id = start_id + max_patch_id
     }
     patch_list[[as.character(cl)]] <- r_patches
   }
   
   # Merge patch ids for each raster type into one raster
-  patch_ids <- cover(patch_list[[1]], patch_list[[2]])
-  patch_ids <- cover(patch_ids, patch_list[[3]])
-  patch_ids <- cover(patch_ids, patch_list[[4]])
-  patch_ids <- cover(patch_ids, patch_list[[5]])
-  patch_ids <- cover(patch_ids, patch_list[[6]])
+  patch_ids = cover(patch_list[[1]], patch_list[[2]])
+  patch_ids = cover(patch_ids, patch_list[[3]])
+  patch_ids = cover(patch_ids, patch_list[[4]])
+  patch_ids = cover(patch_ids, patch_list[[5]])
+  patch_ids = cover(patch_ids, patch_list[[6]])
+  patch_ids = cover(patch_ids, patch_list[[7]])
   
   # Create a raster stack (cover class and patch id)
-  patch_stack <- c(patch_ids, r)
-  names(patch_stack) <- c("patch_id", "cover_class")
+  patch_stack = c(patch_ids, r)
+  names(patch_stack) = c("patch_id", "cover_class")
   
   mapview(patch_stack[["patch_id"]], col.regions = viridis) + 
     mapview(patch_stack[["cover_class"]])
   
   # Identify patches with maximum width less than minimum width ##################################################
-  narrow_patches <- c()
+  message("Identifying patch candidates with negligible width")
+  narrow_patches = c()
   pids = unique(na.omit(as.vector(values(patch_stack[['patch_id']]))))
   for (pid in pids) {
     print(pid)
     m = trim(classify(patch_stack[['patch_id']], cbind(pid, 1), others = NA)) # Mask patch
-    m_vals <- as.matrix(m, wide=TRUE)
+    m_vals = as.matrix(m, wide=TRUE)
     
     if (all(is.na(m_vals))) next  # Skip empty masks
     
-    max_h_run <- max(apply(m_vals, 1, function(row) { # Horizontal runs (per row)
-      rle_row <- rle(row)
+    max_h_run = max(apply(m_vals, 1, function(row) { # Horizontal runs (per row)
+      rle_row = rle(row)
       max(c(0, rle_row$lengths[rle_row$values == 1]), na.rm = TRUE)
     }), na.rm = TRUE)
-    max_v_run <- max(apply(m_vals, 2, function(col) { # Vertical runs (per column)
-      rle_col <- rle(col)
+    max_v_run = max(apply(m_vals, 2, function(col) { # Vertical runs (per column)
+      rle_col = rle(col)
       max(c(0, rle_col$lengths[rle_col$values == 1]), na.rm = TRUE)
     }), na.rm = TRUE)
     if (max_h_run < min_cells_width || max_v_run < min_cells_width) { # Keep if both directions have max run < 3
-      narrow_patches <- c(narrow_patches, pid)
+      narrow_patches = c(narrow_patches, pid)
     }
   }
   
@@ -338,6 +377,7 @@ if (overwrite_rast_cover_cache) {
   mapview(patch_stack[['cover_class']])
   
   # Identify patches with area less than minimum area ##################################################
+  message("Identifying patch candidates with negligible area")
   
   # Identify patches with negligible area
   freq_table = freq(patch_stack[["patch_id"]])
@@ -349,13 +389,14 @@ if (overwrite_rast_cover_cache) {
   values(patch_stack[["cover_class"]])[which(values(!is.na(patch_stack[['patch_small']])))] = 0
   mapview(patch_stack[['cover_class']])
   
-  r_zero_alt <- patch_stack[['cover_class']]
+  r_zero_alt = patch_stack[['cover_class']]
   values(r_zero_alt)[values(r_zero_alt) != 0] <- NA
   mapview(r_zero_alt)
   p = patches(r_zero_alt, directions = 8, values=TRUE)
   
   # Reclassify (generalize) negligible patches as the mode of adjacent nearest neighbors
-  rast_cover_clean <- patch_stack[["cover_class"]]
+  message("Reclassifying negligible patches as the mode of adjacent nearest neighbors")
+  rast_cover_clean = patch_stack[["cover_class"]]
   i = 1
   patch_ids_to_generalize = unique(na.omit(values(p)))
   total = length(patch_ids_to_generalize)
@@ -406,7 +447,10 @@ rast_cover_clean = as.factor(rast_cover_clean)
 
 mapview(rast_cover_clean,
         alpha.regions = 1.0,
-        col.regions = c('#90c6bd', '#3c8273', '#d8c18a', '#9b652b', '#b2675e', 'darkgray', '#6495ed'))
+        col.regions = c('#90c6bd', '#3c8273', '#d8c18a', '#9b652b', '#b2675e', 'darkgray', '#6495ed')) +
+  mapview(aru_sites, label = aru_sites$site) +
+  mapview(st_buffer(aru_sites, 100), col.regions = 'transparent', lwd = 2) +
+  mapview(max_homerange_buffers, col.regions = 'transparent', lwd = 2)
 
 ##############################################################################
 # Local plot scale covariates
@@ -439,8 +483,8 @@ if (overwrite_data_plot_scale_cache) {
   
   # Elevation [m] (derived from WA state LiDAR flights 3x3-ft raster grid)
   elevation = read.csv('data/environment/site_elevation_ft.csv')
-  elevation$plot_elev_rs = elevation$elev_ft * conv_ft_to_m
-  data_plot_scale = data_plot_scale %>% left_join(elevation %>% select(site, plot_elev_rs), by = 'site')
+  elevation$elev = elevation$elev_ft * conv_ft_to_m
+  data_plot_scale = data_plot_scale %>% left_join(elevation %>% select(site, elev), by = 'site')
   
   # Age (mean and cv) [#]
   data_plot_scale$age_point = terra::extract(rast_age, vect(data_plot_scale))[, 2]
@@ -527,9 +571,9 @@ if (overwrite_data_plot_scale_cache) {
     large_per_hectare_alru, # Red alder
     large_per_hectare_pisi  # Sitka spruce
   )
-  tree_gte10cm_richness  = specnumber(tree_gte10cm_obs %>% select(-site))
-  tree_gte10cm_diversity = diversity(tree_gte10cm_obs %>% select(-site), index = 'shannon')
-  tree_gte10cm_evenness  = tree_gte10cm_diversity / log(tree_gte10cm_richness)
+  plot_tree_gte10cm_richness  = specnumber(tree_gte10cm_obs %>% select(-site))
+  plot_tree_gte10cm_diversity = diversity(tree_gte10cm_obs %>% select(-site), index = 'shannon')
+  plot_tree_gte10cm_evenness  = plot_tree_gte10cm_diversity / log(plot_tree_gte10cm_richness)
   
   tree_density_lt10cm = data_plot %>% pull(small_per_hectare)
   tree_lt10cm_obs = data.frame(
@@ -541,9 +585,9 @@ if (overwrite_data_plot_scale_cache) {
     small_per_hectare_alru = tree_density_lt10cm * data_plot %>% pull(percent_alru) / 100,
     small_per_hectare_pisi = tree_density_lt10cm * data_plot %>% pull(percent_pisi) / 100
   )
-  tree_lt10cm_richness  = specnumber(tree_lt10cm_obs %>% select(-site))
-  tree_lt10cm_diversity = diversity(tree_lt10cm_obs %>% select(-site), index = 'shannon')
-  tree_lt10cm_evenness  = tree_lt10cm_diversity / log(tree_lt10cm_richness)
+  plot_tree_lt10cm_richness  = specnumber(tree_lt10cm_obs %>% select(-site))
+  plot_tree_lt10cm_diversity = diversity(tree_lt10cm_obs %>% select(-site), index = 'shannon')
+  plot_tree_lt10cm_evenness  = plot_tree_lt10cm_diversity / log(plot_tree_lt10cm_richness)
   
   tree_all_obs = data.frame(
     site = data_plot %>% pull(site),
@@ -554,32 +598,32 @@ if (overwrite_data_plot_scale_cache) {
     all_per_hectare_alru = tree_gte10cm_obs$large_per_hectare_alru + tree_lt10cm_obs$small_per_hectare_alru,
     all_per_hectare_pisi = tree_gte10cm_obs$large_per_hectare_pisi + tree_lt10cm_obs$small_per_hectare_pisi
   )
-  tree_all_richness  = specnumber(tree_all_obs %>% select(-site))
-  tree_all_diversity = diversity(tree_all_obs %>% select(-site), index = 'shannon')
-  tree_all_evenness  = tree_all_diversity / log(tree_all_richness)
+  plot_tree_all_richness  = specnumber(tree_all_obs %>% select(-site))
+  plot_tree_all_diversity = diversity(tree_all_obs %>% select(-site), index = 'shannon')
+  plot_tree_all_evenness  = plot_tree_all_diversity / log(plot_tree_all_richness)
   
   tree_div_metrics = data.frame(
     site = data_plot %>% pull(site),
-    tree_all_richness,  tree_gte10cm_richness,  tree_lt10cm_richness,
-    tree_all_diversity, tree_gte10cm_diversity, tree_lt10cm_diversity,
-    tree_all_evenness,  tree_gte10cm_evenness,  tree_lt10cm_evenness,
-    tree_gte10cm_density_psme = tree_gte10cm_obs$large_per_hectare_psme,
-    tree_gte10cm_density_thpl = tree_gte10cm_obs$large_per_hectare_thpl,
-    tree_gte10cm_density_abam = tree_gte10cm_obs$large_per_hectare_abam,
-    tree_gte10cm_density_tshe = tree_gte10cm_obs$large_per_hectare_tshe,
-    tree_gte10cm_density_alru = tree_gte10cm_obs$large_per_hectare_alru,
-    tree_gte10cm_density_pisi = tree_gte10cm_obs$large_per_hectare_pisi,
-    tree_all_density_psme = tree_all_obs$all_per_hectare_psme,
-    tree_all_density_thpl = tree_all_obs$all_per_hectare_thpl,
-    tree_all_density_abam = tree_all_obs$all_per_hectare_abam,
-    tree_all_density_tshe = tree_all_obs$all_per_hectare_tshe,
-    tree_all_density_alru = tree_all_obs$all_per_hectare_alru,
-    tree_all_density_pisi = tree_all_obs$all_per_hectare_pisi
+    plot_tree_all_richness,  plot_tree_gte10cm_richness,  plot_tree_lt10cm_richness,
+    plot_tree_all_diversity, plot_tree_gte10cm_diversity, plot_tree_lt10cm_diversity,
+    plot_tree_all_evenness,  plot_tree_gte10cm_evenness,  plot_tree_lt10cm_evenness,
+    plot_tree_gte10cm_density_psme = tree_gte10cm_obs$large_per_hectare_psme,
+    plot_tree_gte10cm_density_thpl = tree_gte10cm_obs$large_per_hectare_thpl,
+    plot_tree_gte10cm_density_abam = tree_gte10cm_obs$large_per_hectare_abam,
+    plot_tree_gte10cm_density_tshe = tree_gte10cm_obs$large_per_hectare_tshe,
+    plot_tree_gte10cm_density_alru = tree_gte10cm_obs$large_per_hectare_alru,
+    plot_tree_gte10cm_density_pisi = tree_gte10cm_obs$large_per_hectare_pisi,
+    plot_tree_all_density_psme = tree_all_obs$all_per_hectare_psme,
+    plot_tree_all_density_thpl = tree_all_obs$all_per_hectare_thpl,
+    plot_tree_all_density_abam = tree_all_obs$all_per_hectare_abam,
+    plot_tree_all_density_tshe = tree_all_obs$all_per_hectare_tshe,
+    plot_tree_all_density_alru = tree_all_obs$all_per_hectare_alru,
+    plot_tree_all_density_pisi = tree_all_obs$all_per_hectare_pisi
   )
   
   data_plot_scale = data_plot_scale %>% left_join(tree_div_metrics, by = 'site')
   
-  ggplot(data_plot_scale, aes(x = `stratum`, y = tree_all_diversity)) +
+  ggplot(data_plot_scale, aes(x = as.factor(`stratum`), y = plot_tree_all_diversity)) +
     geom_violin() +
     stat_summary(fun = mean, geom = "point") +
     ggtitle("Tree shannon diversity across strata") + theme_minimal()
@@ -595,7 +639,7 @@ if (overwrite_data_plot_scale_cache) {
   # Stem exclusion: alru is outcompeted by psme and tshe and mostly disappears, tree size is more uniform
   # Understory reinit: tshe dominates, abam establishing, tree size less uniform
   # Old forest: tshe is climax species, abam established
-  metric = "tree_all_density_" # "tree_all_density_", "tree_gte10cm_density_"
+  metric = "plot_tree_all_density_" # "tree_all_density_", "tree_gte10cm_density_"
   dps_long = data_plot_scale %>% select(site, `stage`, starts_with(metric)) %>%
     pivot_longer(cols = starts_with(metric), names_to = "species", values_to = "density") %>%
     mutate(species = gsub(metric, "", species))
@@ -617,24 +661,24 @@ if (overwrite_data_plot_scale_cache) {
   data_plot_scale$dist_watercourses_all = dist_watercourses_all
   mapview(data_plot_scale, zcol = "dist_watercourses_all") + mapview(watercourses)
   
-  # Distance to nearest edge [m]
-  # For each site, find its patch, then find the distance to the nearest non-patch cell
-  patch_ids = patches(rast_cover_clean, directions=8, values=TRUE)
-  data_plot_scale$dist_nearest_edge = NA
-  for (i in 1:nrow(data_plot_scale)) {
-    d = data_plot_scale[i,]
-    cover_class = terra::extract(rast_cover_clean, vect(d))[,2]
-    pid = terra::extract(patch_ids, vect(d))[,2]
-    m = trim(classify(patch_ids, cbind(pid, 1), others = NA))
-    na_cells <- which(is.na(values(m)))
-    na_coords <- xyFromCell(m, na_cells)
-    d_coords <- st_coordinates(d)
-    distances <- sqrt((na_coords[,1] - d_coords[1])^2 + (na_coords[,2] - d_coords[2])^2)
-    min_dist <- min(distances)
-    data_plot_scale[i, 'dist_nearest_edge'] = min_dist
-    # mapview(d) + mapview(m) + mapview(st_buffer(d, 100), col.regions = 'transparent', lwd = 2)
-  }
-  mapview(rast_cover_clean) + mapview(data_plot_scale, label = data_plot_scale$site, zcol = 'dist_nearest_edge') + mapview(st_buffer(data_plot_scale, 100), col.regions = 'transparent', lwd = 2)
+  # # Distance to nearest edge [m]
+  # # For each site, find its patch, then find the distance to the nearest non-patch cell
+  # patch_ids = patches(rast_cover_clean, directions=8, values=TRUE)
+  # data_plot_scale$dist_nearest_edge = NA
+  # for (i in 1:nrow(data_plot_scale)) {
+  #   d = data_plot_scale[i,]
+  #   cover_class = terra::extract(rast_cover_clean, vect(d))[,2]
+  #   pid = terra::extract(patch_ids, vect(d))[,2]
+  #   m = trim(classify(patch_ids, cbind(pid, 1), others = NA))
+  #   na_cells = which(is.na(values(m)))
+  #   na_coords = xyFromCell(m, na_cells)
+  #   d_coords = st_coordinates(d)
+  #   distances = sqrt((na_coords[,1] - d_coords[1])^2 + (na_coords[,2] - d_coords[2])^2)
+  #   min_dist = min(distances)
+  #   data_plot_scale[i, 'dist_nearest_edge'] = min_dist
+  #   # mapview(d) + mapview(m) + mapview(st_buffer(d, 100), col.regions = 'transparent', lwd = 2)
+  # }
+  # mapview(rast_cover_clean) + mapview(data_plot_scale, label = data_plot_scale$site, zcol = 'dist_nearest_edge') + mapview(st_buffer(data_plot_scale, 100), col.regions = 'transparent', lwd = 2)
   
   message('Saving plot scale data cache ', path_data_plot_scale_out)
   dir.create(dirname(path_data_plot_scale_out), recursive = TRUE, showWarnings = FALSE)
@@ -655,16 +699,26 @@ if (overwrite_data_homerange_scale_cache) {
 
   data_homerange_scale = list()
   
-  homeranges = read.csv("data/cache/species_traits/species_traits.csv") %>% select(common_name, home_range_radius_m)
+  homeranges = species_trait_data %>% select(common_name, home_range_radius_m)
+  message("Homerange buffer median: ", min(homeranges$home_range_radius_m))
+  message("Homerange buffer median: ", buff_median <- round(median(homeranges$home_range_radius_m),0))
+  message("Homerange buffer mean: ",   buff_mean <- round(mean(homeranges$home_range_radius_m),0))
+  message("Homerange buffer max: ",    buff_max <- round(max(homeranges$home_range_radius_m),0))
+  homeranges = rbind(data.frame(
+    common_name = c("min", "median", "mean", "max"),
+    home_range_radius_m = c(100, buff_median, buff_mean, buff_max)
+  ), homeranges %>% mutate(home_range_radius_m = round(home_range_radius_m, 0)))
+  
   # DEBUG
   # Overwrite homeranges with the median and mean range only for now
   homeranges = data.frame(
-    common_name = c("min", "median", "mean"),
-    home_range_radius_m = c(100, 250, 600)
+    common_name = c("min", "median", "mean", "max"),
+    home_range_radius_m = c(100, buff_median, buff_mean, buff_max)
   )
   # DEBUG
   
   ## Load forest structure rasters
+  message("Loading forest structure rasters")
   
   # Basal area [ft2/acre] --> [m2/ha]
   rast_ba = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_BA_EXPORT.tif')) * 0.229568
@@ -688,6 +742,7 @@ if (overwrite_data_homerange_scale_cache) {
   rast_downvol = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_CFVOL_DDWM.img')) * 0.069968
   
   # Calculate per scale according to predicted home range size
+  message("Calculating homerange variables across all scales")
   for (i in 1:nrow(homeranges)) {
     scale = homeranges[i,'common_name']
     homerange_buffer_size = homeranges[i,'home_range_radius_m']
@@ -700,11 +755,12 @@ if (overwrite_data_homerange_scale_cache) {
     core_area_buffer_ncells = round(core_area_buffer / res(rast_cover_clean)[1], 0)
     
     sites = 1:nrow(data_plot_scale)
+    pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = nrow(data_plot_scale), clear = FALSE)
     for (j in sites) {
       
       ## Get site cover data within and surrounding homerange buffer
       site = data_plot_scale[j,]
-      message(site$site, ' (', round(j / length(sites),3), ')')
+      # message(site$site, ' [j=', j,']', ' (', round(j / length(sites),3), ')')
       
       homerange_and_edge_buffer = st_buffer(site, homerange_buffer_size + core_area_buffer) # additional buffer to ensure that edges are retained in mask
       homerange_buffer = st_buffer(site, homerange_buffer_size)
@@ -713,19 +769,35 @@ if (overwrite_data_homerange_scale_cache) {
       homerange_crop = crop(rast_cover_clean, vect(homerange_buffer))
       homerange_cover = mask(homerange_crop, vect(homerange_buffer))
       rast_homerange = ifel(!is.na(homerange_cover), 1, NA)
-      mapview(homerange_cover) + mapview(homerange_and_edge) + mapview(homerange_buffer)
-      
-      patch_ids = patches(homerange_and_edge, directions=8, values=TRUE)
+      # mapview(homerange_cover) + mapview(homerange_and_edge) + mapview(homerange_buffer)
+
+      r = homerange_and_edge
+      patch_ids = r 
+      values(patch_ids) <- NA 
+      start_id = 1  # Starting patch ID to ensure uniqueness
+      cls = sort(na.omit(unique(values(r))))
+      for (cl in cls) {
+        # message("Class: ", cl)
+        r_class = mask(r, r == cl, maskvalues = FALSE) # Mask only the current class
+        r_patches = patches(r_class, directions = 8) # Compute patches for this class only
+        # Reclassify patch IDs to be globally unique
+        max_patch_id = global(r_patches, "max", na.rm = TRUE)[1,1]
+        if (!is.na(max_patch_id)) {
+          r_patches = classify(r_patches, cbind(1:max_patch_id, start_id:(start_id + max_patch_id - 1)))
+          start_id = start_id + max_patch_id
+        }
+        patch_ids = cover(patch_ids, r_patches)
+      }
       pid = terra::extract(patch_ids, vect(site))[,2]
       rast_focal_patch = trim(classify(patch_ids, cbind(pid, 1), others = NA))
       rast_focal_patch = crop(rast_focal_patch, vect(homerange_buffer))
       rast_focal_patch = mask(rast_focal_patch, vect(homerange_buffer))
-      mapview(rast_focal_patch) + mapview(homerange_buffer)
+      # mapview(rast_focal_patch) + mapview(homerange_cover)
       
       ## Focal patch scale
       
       # Focal patch cover class
-      focalpatch_class = terra::extract(rast_cover_clean, vect(site))[,2]
+      (focalpatch_cover = terra::extract(rast_cover_clean, vect(site))[,2])
       
       # Focal patch area [ha]
       ncells_focal_patch = sum(!is.na(values(rast_focal_patch)))
@@ -751,9 +823,9 @@ if (overwrite_data_homerange_scale_cache) {
       )
       for (k in seq_along(regions)) {
         region_name = names(regions)[k]
-        message("Calculating forest structural variables for: ", region_name)
+        # message("Calculating forest structural variables for: ", region_name)
         region = resample(regions[[k]], rast_age, method = "near") # align region to raster data
-        print(sum(!is.na(values(region))))
+        # print(sum(!is.na(values(region))))
         
         vars = c(
           # Age [#]
@@ -787,7 +859,7 @@ if (overwrite_data_homerange_scale_cache) {
     
       ## Homerange scale metrics
       
-      message("Calculating homerange configuration and composition variables")
+      # message("Calculating homerange configuration and composition variables")
       
       homerange_cover_forest = homerange_cover
       homerange_cover_forest[!(homerange_cover_forest[] %in% c(1, 2, 3, 4, 5))] = NA
@@ -795,15 +867,15 @@ if (overwrite_data_homerange_scale_cache) {
       ncells_homerange = sum(!is.na(values(homerange_cover)))
       
       # Focal patch percentage of home range [%]
-      (focalpatch_pcnt = sum(!is.na(values(rast_focal_patch))) / ncells_homerange)
+      (focalpatch_area_homeange_pcnt = sum(!is.na(values(rast_focal_patch))) / ncells_homerange)
       
       # Focal patch core percentage of home range [%]
-      (focalpatch_core_pcnt = sum(!is.na(values(focal_patch_core))) / ncells_homerange)
+      (focalpatch_core_area_homeange_pcnt = sum(!is.na(values(focal_patch_core))) / ncells_homerange)
   
       # Focal patch euclidean nearest neighbor distance [m]
       # Quantifies habitat isolation
       # Approaches 0 as the distance to the nearest neighbor decreases. Minimum is constrained by the cell size.
-      focal_cover_class = site$stratum
+      (focal_cover_class = site$stratum)
       matching_cover = rast_cover_clean
       matching_cover[matching_cover != focal_cover_class] <- NA
       focal_patch_extended = extend(rast_focal_patch, matching_cover)
@@ -836,13 +908,15 @@ if (overwrite_data_homerange_scale_cache) {
       (cover_forest_diversity = lsm_l_shdi(homerange_cover_forest) %>% pull(value))
       
       # Proportional abundance of each cover class [%]
-      (prop_abund_1 = cover_freq %>% filter(value == 1) %>% pull(count) / ncells_homerange)
-      (prop_abund_2 = cover_freq %>% filter(value == 2) %>% pull(count) / ncells_homerange)
-      (prop_abund_3 = cover_freq %>% filter(value == 3) %>% pull(count) / ncells_homerange)
-      (prop_abund_4 = cover_freq %>% filter(value == 4) %>% pull(count) / ncells_homerange)
-      (prop_abund_5 = cover_freq %>% filter(value == 5) %>% pull(count) / ncells_homerange)
-      (prop_abund_6 = cover_freq %>% filter(value == 6) %>% pull(count) / ncells_homerange)
-      (prop_abund_7 = cover_freq %>% filter(value == 7) %>% pull(count) / ncells_homerange)
+      (prop_abund_standinit = cover_freq %>% filter(value == 1)     %>% pull(count) / ncells_homerange) # "stand initiation" 0-25 yr
+      (prop_abund_stemexcl = cover_freq %>% filter(value == 2)      %>% pull(count) / ncells_homerange) # "stem exclusion" 25-80 yr
+      (prop_abund_undstryreinit = cover_freq %>% filter(value == 3) %>% pull(count) / ncells_homerange) # "understory reinitiation" 80-200 yr
+      (prop_abund_oldgrowth = cover_freq %>% filter(value == 4)     %>% pull(count) / ncells_homerange) # "old-growth forest" 200+ yr
+      (prop_abund_lsog = prop_abund_undstryreinit + prop_abund_oldgrowth) # "late-successional and old growth forest" (80+ yr)
+      
+      (prop_abund_comthin = cover_freq %>% filter(value == 5) %>% pull(count) / ncells_homerange) # "commercial thinning"
+      (prop_abund_roads = cover_freq %>% filter(value == 6)   %>% pull(count) / ncells_homerange) # "roads"
+      (prop_abund_water = cover_freq %>% filter(value == 7)   %>% pull(count) / ncells_homerange) # "water"
       
       # Aggregation index [#]
       # Quantifies degree of habitat contiguity versus fragmentation
@@ -870,21 +944,21 @@ if (overwrite_data_homerange_scale_cache) {
         colnames(zonal_means) = c('class', 'height')
         # mapview(classify(patch_ids, rcl = zonal_means))
         edge_lengths = get_adjacencies(patch_ids, neighbourhood = 8, what = "unlike", upper = FALSE)[[1]] * res(patch_ids)[1]
-        heights <- zonal_means$height
-        names(heights) <- zonal_means$class
-        height_diff_matrix <- outer(heights, heights, FUN = function(x, y) abs(x - y))
+        heights = zonal_means$height
+        names(heights) = zonal_means$class
+        height_diff_matrix = outer(heights, heights, FUN = function(x, y) abs(x - y))
         
         # Weights are derived from proportion of difference in height relative to the maximum potential difference in height (Hou and Walz 2016, Huang et al. 2014)
         # d = 0 --> 0 m difference
         # d = 1 --> max m difference (i.e. maximum tree height of entire landscape)
         weights = height_diff_matrix / max_ht_m
         homerange_rast_area = ncells_homerange * res(homerange_cover)[1] * res(homerange_cover)[2] * conv_m2_to_ha
-        (cw_edge_density = sum(edge_lengths * weights, na.rm = TRUE) / homerange_rast_area)
+        (density_edge_cw = sum(edge_lengths * weights, na.rm = TRUE) / homerange_rast_area)
       } else { 
         # Only one patch type
-        (cw_edge_density = 0.0)
+        (density_edge_cw = 0.0)
       }
-      cw_edge_density = set_units(cw_edge_density, 'm/ha')
+      density_edge_cw = set_units(density_edge_cw, 'm/ha')
       
       homerange_buffer_area_ha = set_units(st_area(homerange_buffer), ha)
       
@@ -910,9 +984,9 @@ if (overwrite_data_homerange_scale_cache) {
         scale = scale,
         buffer_radius_m = homerange_buffer_size,
         site = site$site,
-        focalpatch_class,
-        focalpatch_pcnt,
-        focalpatch_core_pcnt,
+        focalpatch_cover,
+        focalpatch_area_homeange_pcnt,
+        focalpatch_core_area_homeange_pcnt,
         focalpatch_isolation,
         cover_richness,
         cover_forest_richness,
@@ -920,15 +994,17 @@ if (overwrite_data_homerange_scale_cache) {
         cover_forest_evenness,
         cover_diversity,
         cover_forest_diversity,
-        prop_abund_1,
-        prop_abund_2,
-        prop_abund_3,
-        prop_abund_4,
-        prop_abund_5,
-        prop_abund_6,
+        prop_abund_standinit,
+        prop_abund_stemexcl,
+        prop_abund_undstryreinit,
+        prop_abund_oldgrowth,
+        prop_abund_lsog,
+        prop_abund_comthin,
+        prop_abund_roads,
+        prop_abund_water,
         aggregation_idx,
         shape_idx,
-        cw_edge_density,
+        density_edge_cw,
         density_roads_paved,
         density_roads,
         density_streams_major,
@@ -936,6 +1012,7 @@ if (overwrite_data_homerange_scale_cache) {
       ), final_df)
       
       data_homerange_scale_species = rbind(data_homerange_scale_species, final_df)
+      pb$tick()
     }
     
     # Sanity check results

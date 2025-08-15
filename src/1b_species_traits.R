@@ -153,6 +153,9 @@ trait_data$range_bin = cut(trait_data$home_range_radius_m,
                     include.lowest = TRUE,
                     labels = c("Very Small", "Small", "Medium", "Large"))
 
+print(trait_data)
+summary(trait_data$home_range_radius_m)
+
 if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
 write.csv(trait_data, path_out)
 message("Cached trait data: ", path_out)
