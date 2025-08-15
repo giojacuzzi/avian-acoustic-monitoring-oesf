@@ -501,7 +501,7 @@ auc_species = data.frame(
 )
 
 message("Species-specific AUC and 95% BCI:")
-message("Mean AUC (weighting species equally): ", round(mean(auc_species$mean_auc),3))
+message("Mean AUC (species equally weighted): ", round(mean(auc_species$mean_auc),3))
 print(auc_species)
 summary(auc_species)
 ggplot(auc_species, aes(x = mean_nocc, y = mean_auc)) +
