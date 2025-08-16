@@ -5,7 +5,6 @@ library(ggplot2)
 library(PRROC)
 
 p_tp = 0.95 # Desired probability of true positive
-
 display_plots = FALSE
 
 conf_to_logit = function(c) {
@@ -17,6 +16,8 @@ conf_to_logit = function(c) {
 logit_to_conf = function(l) {
   return(1 / (1 + exp(-l)))
 }
+
+message("Calculating species-specific thresholds and performance metrics (current time ", time_start <- format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ")")
 
 models = c("source", "target")
 for (model in models) {
@@ -200,5 +201,8 @@ print(species_thresholds_manual_selection)
 
 path_out = paste0("data/cache/1_calculate_species_thresholds/species_thresholds_manual_selection.csv")
 if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
-write.csv(results, path_out, row.names = FALSE)
+write.csv(species_thresholds_manual_selection, path_out, row.names = FALSE)
 message(crayon::green("Cached manual selection of species threshold data to ", path_out))
+
+message(crayon::green("Finished calculating species-specific thresholds and performance metrics (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " min )"))
+
