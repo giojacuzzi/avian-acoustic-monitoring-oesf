@@ -54,8 +54,8 @@ var_candidates_plotscale_hs = var_candidates_plotscale_hs %>% select(-all_of(c(
   # Age is not a variable of direct interest
   'age_point', 'age_mean', 'age_cv',
   # Individual tree species composition is better summarized with taxonomic diversity metrics
-  'tree_gte10cm_density_psme', 'tree_gte10cm_density_thpl', 'tree_gte10cm_density_abam', 'tree_gte10cm_density_tshe', 'tree_gte10cm_density_alru', 'tree_gte10cm_density_pisi',
-  'tree_all_density_thpl', 'tree_all_density_abam', 'tree_all_density_tshe', 'tree_all_density_alru', 'tree_all_density_pisi', 'tree_all_density_psme',
+  'plot_tree_gte10cm_density_psme', 'plot_tree_gte10cm_density_thpl', 'plot_tree_gte10cm_density_abam', 'plot_tree_gte10cm_density_tshe', 'plot_tree_gte10cm_density_alru', 'plot_tree_gte10cm_density_pisi',
+  'plot_tree_all_density_thpl', 'plot_tree_all_density_abam', 'plot_tree_all_density_tshe', 'plot_tree_all_density_alru', 'plot_tree_all_density_pisi', 'plot_tree_all_density_psme',
   # Drop distance from intermittent streams; favor only consistent watercourses indicative of different riparian habitat.
   'dist_watercourses_all'
 )))
@@ -71,11 +71,11 @@ var_candidates_plotscale_hs = var_candidates_plotscale_hs %>% select(-all_of(c(
   # Choose between understory cover and volume. We keep volume here to better represent vertical structure.
   'plot_understory_cover',
   # Most taxonomic diversity metrics are highly correlated between tree size classes; favor all sizes for interpretability.
-  'tree_lt10cm_richness', 'tree_gte10cm_richness',
-  'tree_lt10cm_evenness', 'tree_gte10cm_evenness',
-  'tree_lt10cm_diversity', 'tree_gte10cm_diversity',
+  'plot_tree_lt10cm_richness',  'plot_tree_gte10cm_richness',
+  'plot_tree_lt10cm_evenness',  'plot_tree_gte10cm_evenness',
+  'plot_tree_lt10cm_diversity', 'plot_tree_gte10cm_diversity',
   # Furthermore, diversity and evenness are highly correlated; favor shannon diversity for interpretability.
-  'tree_all_evenness', 'tree_all_richness',
+  'plot_tree_all_evenness', 'plot_tree_all_richness',
   # Tree height, height-to-live-crown, and length-of-live-crown are highly correlated
   'plot_hlc_hs', 'plot_llc_hs'
 )))
@@ -89,7 +89,7 @@ model = lm(rep(1, nrow(var_candidates_plotscale_hs)) ~ . -plot_ba_hs, data = var
 sort(vif(model))
 
 # RESULT: Do not include plot_ba_hs alongside plot_qmd_all_hs
-var_candidates_plotscale_hs = sort(names(sort(vif(model))))
+(var_candidates_plotscale_hs = sort(names(sort(vif(model)))))
 
 
 ### Collinearity analysis - local plot scale variables from remote sensing ##############################################################
@@ -101,24 +101,25 @@ var_candidates_plotscale_rs = var_candidates_plotscale_rs %>% select(starts_with
 # A priori reduce list of candidate plot scale variables (remove irrelevant variables)
 var_candidates_plotscale_rs = var_candidates_plotscale_rs %>% select(-all_of(c(
   # Age is not a variable of direct interest
-  'homerange_age_mean', 'homerange_age_cv'
+  'homerange_age_mean', 'homerange_age_cv',
+  # The following measures of structural variation are not of direct interest
+  'homerange_ba_cv', 'homerange_treeden_all_cv', 'homerange_treeden_gt4in_dbh_cv', 'homerange_qmd_cv',
+  'homerange_canopy_layers_cv', 'homerange_snagden_gt15dbh_cv', 'homerange_downvol_cv', 'homerange_canopy_cover_cv',
+  # Canopy cover is more applicable than closure
+  'homerange_canopy_closure_mean', 'homerange_canopy_closure_cv'
 )))
 (names(var_candidates_plotscale_rs))
 pairwise_collinearity(var_candidates_plotscale_rs)
 
 # Reduce list of candidate variables (highly correlated, less preferable, etc.)
 var_candidates_plotscale_rs = var_candidates_plotscale_rs %>% select(-all_of(c(
-  # Canopy cover is more applicable than closure
-  'homerange_canopy_closure_mean', 'homerange_canopy_closure_cv',
-  # The following measures of structural variation are not of direct interest
-  'homerange_ba_cv', 'homerange_treeden_all_cv', 'homerange_treeden_gt4in_dbh_cv', 'homerange_qmd_cv',
-  'homerange_canopy_layers_cv', 'homerange_snagden_gt15dbh_cv', 'homerange_downvol_cv', 'homerange_canopy_cover_cv',
   # homerange_ba_mean ~ (homerange_qmd_mean, homerange_htmax_mean, homerange_canopy_cover_mean, homerange_snagden_gt15dbh_mean)
   'homerange_ba_mean', 'homerange_htmax_mean',
   # homerange_htmax_cv ~ homerange_treeden_gt4in_dbh_mean
   'homerange_treeden_gt4in_dbh_mean',
   # Drop canopy cover for comparison with analogous habitat survey (hs) variables
-  'homerange_canopy_cover_mean', 'homerange_canopy_layers_mean',
+  'homerange_canopy_cover_mean',
+  'homerange_canopy_layers_mean',
   # homerange_qmd_mean ~ homerange_snagden_gt15dbh_mean
   'homerange_snagden_gt15dbh_mean'
 )))
@@ -132,25 +133,28 @@ sort(vif(model))
 # RESULT:
 # At the local plot scale (100m radius), there is a higher degree of multicollinearity among structural variables measured via remote sensing than via habitat surveys
 # Do not include homerange_ba_mean alongside homerange_qmd_mean or homerange_snagden_gt15dbh_mean
-var_candidates_plotscale_rs = sort(names(sort(vif(model))))
+(var_candidates_plotscale_rs = sort(names(sort(vif(model)))))
 
 
 ### Collinearity analysis - homerange scale variables (composition, configuration) ############################################
 message("Assessing collinearity among variables at homerange scale (composition, configuration)")
 
-scale = 'max' # e.g. 'min', 'median', 'mean', 'max'
+scale = 'median' # e.g. 'min', 'median', 'mean', 'max'
 var_candidates_homerangescale = data_homerange_scale[[scale]] %>% select(where(is.numeric), -buffer_radius_m)
-var_candidates_homerangescale = var_candidates_homerangescale[,1:22] # only look at composition/configuration variables
+# only look at composition/configuration variables
+var_candidates_homerangescale = var_candidates_homerangescale[,1:(which(colnames(var_candidates_homerangescale) == "focalpatch_age_mean")-1)]
 
 # A priori reduce list of candidate plot scale variables (remove irrelevant variables)
 var_candidates_homerangescale = var_candidates_homerangescale %>% select(-all_of(c(
   # Drop cover diversity metrics in favor of forest cover diversity metrics
-  'cover_diversity', 'cover_richness', 'cover_evenness'
+  'cover_diversity', 'cover_richness', 'cover_evenness',
+  # Drop density streams in favor of density major streams (which are perennial and bordered by riparian habitat)
+  'density_streams'
 )))
 (names(var_candidates_homerangescale))
 pairwise_collinearity(var_candidates_homerangescale)
 
-# Pairwise collinearity >= 0.8 across scales 
+# TODO: re-run pairwise collinearity >= 0.8 across scales 
 #
 # min: 
 # focalpatch_pcnt ~ focalpatch_core_pcnt, aggregation_idx
@@ -186,11 +190,13 @@ pairwise_collinearity(var_candidates_homerangescale)
 # Reduce list of candidate variables (highly correlated, less preferable, etc.)
 var_candidates_homerangescale = var_candidates_homerangescale %>% select(-all_of(c(
   # The following variables cause issues of collinearity across multiple homerange scales
-  'focalpatch_core_pcnt', 'aggregation_idx',
-  'cover_forest_richness', 'cover_forest_evenness',
-  'prop_abund_1', # stand initiation
-  'prop_abund_2', # competitive exclusion
-  'prop_abund_6'  # roads
+  'focalpatch_core_area_homeange_pcnt', 'aggregation_idx',
+  'cover_forest_richness', 'cover_forest_evenness', # ~ cover_forest_diversity
+  'prop_abund_undstryreinit', 'prop_abund_oldgrowth', # prop_abund_lsog = prop_abund_undstryreinit + prop_abund_oldgrowth
+  'prop_abund_standinit',  # ~ density_edge_cw
+  # 'prop_abund_2',        # competitive exclusion
+  'prop_abund_roads',      # ~ density_roads_paved
+  'prop_abund_water'       # ~ density_streams_major
 )))
 (names(var_candidates_homerangescale))
 pairwise_collinearity(var_candidates_homerangescale)
@@ -198,18 +204,20 @@ pairwise_collinearity(var_candidates_homerangescale)
 # VIF analysis for multicollinearity (consider dropping variable(s) with high VIF values (> 10))
 model = lm(rep(1, nrow(var_candidates_homerangescale)) ~ ., data = var_candidates_homerangescale)
 sort(vif(model))
-model = lm(rep(1, nrow(var_candidates_homerangescale)) ~ . -cover_forest_diversity -density_roads, data = var_candidates_homerangescale)
+model = lm(rep(1, nrow(var_candidates_homerangescale)) ~ . -density_roads -prop_abund_stemexcl, data = var_candidates_homerangescale)
 sort(vif(model))
 
 # RESULT:
+# prop_abund_stemexcl should be dropped as baseline state
+# prop_abund_standinit ~ density_edge_cw
 # density_roads causes multicollinearity at large spatial scales
-var_candidates_homerangescale = sort(names(sort(vif(model))))
+(var_candidates_homerangescale = sort(names(sort(vif(model)))))
 
 
 ### Collinearity analysis - plot scale (habitat survey) plus homerange scale ##############################################################
 message("Assessing collinearity among remaining variables at both the plot (habitat survey) and homerange (composition, configuration) scales")
 
-scale = 'max' # e.g. 'min', 'median', 'mean', 'max'
+scale = 'median' # e.g. 'min', 'median', 'mean', 'max'
 var_candidates_hs_combined = full_join(
   data_plot_scale %>% select(all_of(c("site", var_candidates_plotscale_hs))),
   data_homerange_scale[[scale]] %>% select(all_of(c("site", var_candidates_homerangescale))),
@@ -221,8 +229,6 @@ pairwise_collinearity(var_candidates_hs_combined, threshold = 0.8)
 
 model = lm(rep(1, nrow(var_candidates_hs_combined)) ~ ., data = var_candidates_hs_combined)
 sort(vif(model))
-model = lm(rep(1, nrow(var_candidates_hs_combined)) ~ . -density_streams, data = var_candidates_hs_combined)
-sort(vif(model))
 
 # RESULT: No multicollinearity among variables at min, median, or mean scales. At max scale, density_streams removed.
 var_candidates_hs_combined = sort(names(sort(vif(model))))
@@ -232,7 +238,7 @@ print(var_candidates_hs_combined)
 ### Collinearity analysis - plot scale (remote sensing) plus homerange scale ##############################################################
 message("Assessing collinearity among remaining variables at both the plot (remote sensing) and homerange (composition, configuration) scales")
 
-scale = 'max' # e.g. 'min', 'median', 'mean', 'max'
+scale = 'median' # e.g. 'min', 'median', 'mean', 'max'
 var_candidates_rs_combined = full_join(
   data_homerange_scale[['min']] %>% select(all_of(c("site", var_candidates_plotscale_rs))), # 100m local plot scale
   data_homerange_scale[[scale]] %>% select(all_of(c("site", var_candidates_homerangescale))),

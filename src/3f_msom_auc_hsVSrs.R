@@ -1,17 +1,25 @@
 ####################################################################################
+# Compare sets of predictor variables among a shared number of sites:
+# - Local plot variables (measured by habitat survey)
+# - Local plot variables (measured by remote sensing)
+# - Homerange (i.e. neighborhood/landscape) variables
+# QUESTION: Is community assembly at a given OESF forest location influenced more by local structural characteristics of the stand, or by the surrounding composition and configuration of the landscape?
+#
 # A multi-species static occupancy model with predictive performance measured via ROC AUC for model selection
-# Comparing a set of related strucutral variables calculated at the habitat survey plot and 100-m remote sensing scales
 #
 # Formulated according to:
 # - https://besjournals.onlinelibrary.wiley.com/doi/10.1111/j.1365-2664.2009.01664.x#b14
 # - https://wildlife.onlinelibrary.wiley.com/doi/10.1002/jwmg.442
 #
 # INPUT:
-HS_OR_RS = "HS" # "HS" or "RS"
+param_set_HS_RS_HR = "HS" # "HS" habitat survey local or "RS" remote sensing local or "HR" homerange
+# Naive conversion from continuous score prediction to binary detection-nondetection
+naive_threshold = NA # set to NA to use probabilistic threshold from 1c_calculate_species_thresholds.R
 #
-path_community_survey_data = "data/cache/1_derive_community_array/community_survey_data.rds"
-path_plot_scale_data = "data/cache/occurrence_covariates/data_plot_scale.rds"
-path_homerange_scale_data = "data/cache/occurrence_covariates/data_homerange_scale.rds"
+path_community_survey_data = "data/cache/1_derive_community_survey_data/community_survey_data_2025-08-15.rds"
+path_species_thresholds    = "data/cache/1_calculate_species_thresholds/species_thresholds_manual_selection.csv"
+path_plot_scale_data       = "data/cache/occurrence_covariates/data_plot_scale.rds"
+path_homerange_scale_data  = "data/cache/occurrence_covariates/data_homerange_scale.rds"
 ####################################################################################
 
 generate_diagnostic_plots = FALSE
@@ -27,15 +35,17 @@ theme_set(theme_classic())
 
 # Get occurrence data (local plot and homerange scales)
 occ_data_plot_shared = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site, hs, elev
+  site, hs, elev, dist_watercourses_major
 )
 
 occ_data_rs_shared = readRDS(path_homerange_scale_data)[['min']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site #, homerange_canopy_cover_mean
+  site, homerange_canopy_cover_mean
 )
 
 occ_data_plot_hs = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site, plot_downvol_hs, plot_ht_cv_hs, plot_ht_hs, plot_qmd_all_hs, plot_snagden_hs, plot_treeden_all_hs, plot_understory_vol, plot_tree_all_diversity
+  site, plot_downvol_hs, plot_ht_cv_hs, plot_ht_hs, plot_lcr_hs,
+  plot_qmd_all_hs, plot_snagden_hs, plot_tree_all_diversity,
+  plot_treeden_all_hs, plot_treeden_gt10cmDbh_hs, plot_treeden_lt10cmDbh_hs, plot_understory_vol
 )
 
 occ_data_plot_rs = readRDS(path_homerange_scale_data)[['min']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
@@ -43,73 +53,121 @@ occ_data_plot_rs = readRDS(path_homerange_scale_data)[['min']] %>% arrange(site)
 )
 
 occ_data_homerange = readRDS(path_homerange_scale_data)[['median']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site, prop_abund_standinit, prop_abund_undstryreinit, prop_abund_oldgrowth, prop_abund_comthin,
-  focalpatch_area_homeange_pcnt, focalpatch_isolation,
-  density_edge_cw, shape_idx,
-  density_roads_paved, density_streams_major
+  site, cover_forest_diversity, density_edge_cw, density_roads_paved, density_streams_major,
+  focalpatch_area_homeange_pcnt, prop_abund_standinit, prop_abund_lsog, prop_abund_comthin, shape_idx
 )
 
 occ_data_hs = occ_data_plot_shared %>%
   left_join(occ_data_rs_shared, by = "site") %>%
   left_join(occ_data_plot_hs, by = "site") %>%
-  left_join(occ_data_homerange, by = "site") %>% filter(hs == TRUE)
+  filter(hs == TRUE)
 
 occ_data_rs = occ_data_plot_shared %>%
   left_join(occ_data_rs_shared, by = "site") %>%
   left_join(occ_data_plot_rs, by = "site") %>%
-  left_join(occ_data_homerange, by = "site")
+  filter(hs == TRUE)
 
-if (HS_OR_RS == "HS") {
+occ_data_hr = occ_data_plot_shared %>%
+  left_join(occ_data_rs_shared, by = "site") %>%
+  left_join(occ_data_homerange, by = "site") %>%
+  filter(hs == TRUE)
+
+if (param_set_HS_RS_HR == "HS") {
   occ_data = occ_data_hs
-} else {
+} else if (param_set_HS_RS_HR == "RS") {
   occ_data = occ_data_rs
+} else if (param_set_HS_RS_HR == "HR") {
+  occ_data = occ_data_hr
 }
 occ_data = occ_data %>% mutate(across(where(~ !is.character(.) & !is.logical(.)), as.numeric))
 
 # Check for multicollinearity via pairwise correlation and VIF
 cor_matrix = cor(occ_data %>% select(where(is.numeric)), use = "pairwise.complete.obs", method = "pearson")
 cor_matrix[lower.tri(cor_matrix, diag = TRUE)] = NA
-(collinearity_candidates = subset(as.data.frame(as.table(cor_matrix)), !is.na(Freq) & abs(Freq) >= 0.8))
+collinearity_candidates = subset(as.data.frame(as.table(cor_matrix)), !is.na(Freq) & abs(Freq) >= 0.8)
+if (nrow(collinearity_candidates) > 0) {
+  message(crayon::yellow("WARNING:", nrow(collinearity_candidates), "covariates with high collinearity"))
+  print(collinearity_candidates)
+}
 
-if (HS_OR_RS == "HS") {
+# Remove correlated variable(s)
+if (param_set_HS_RS_HR == "HS") {
   occ_data = occ_data %>% select(
-    -prop_abund_standinit,   # plot_ht_hs
+    -plot_treeden_all_hs, -plot_ht_hs
   )
 } else {
-  occ_data = occ_data %>% select(
-    -prop_abund_standinit,   # homerange_qmd_mean @ 100m
-  )
+  # occ_data = occ_data %>% select(
+  #   -prop_abund_standinit,   # homerange_qmd_mean @ 100m
+  # )
 }
 vif_model = lm(rep(1, nrow(occ_data)) ~ ., data = occ_data %>% select(where(is.numeric)))
-sort(vif(vif_model))
-
+vif_results = sort(vif(vif_model))
+if (max(vif_results) > 10) {
+  message(crayon::yellow("WARNING: covariates with high multi-collinearity"))
+  print(vif_results)
+}
 
 # Season `t`
 t = "2020"
 year = as.numeric(t)
-threshold = 0.75 # naive conversion from continuous score prediction to binary detection-nondetection
 
 message("Loading community survey data")
 community_survey_data = readRDS(path_community_survey_data)
 community_survey_data = community_survey_data[, , t, ]
 dimnames(community_survey_data)
 
+# Load species-specific thresholds
+message("Loading species-specific thresholds")
+species_thresholds = read.csv(path_species_thresholds)
+
 # Derive putative observation and survey date matricies
 message("Deriving detection-nondetection and yday matricies for each species")
 species = dimnames(community_survey_data)[["common_name"]]
 ylist   = setNames(vector("list", length(species)), species)
 xlist_yday = setNames(vector("list", length(species)), species)
+
+species_discrepancies = sort(c(setdiff(species, species_thresholds$species), setdiff(species_thresholds$species, species)))
+if (length(species_discrepancies) > 0) {
+  message(crayon::yellow("WARNING:", length(species_discrepancies), "species discrepancies"))
+  message(crayon::yellow(paste(species_discrepancies, collapse = ", ")))
+}
+
 for (sp in species) {
+  # Populate putative observation matrix (detection-nondetection via thresholded confidence scores)
+  n_row = dim(community_survey_data)[1]
+  n_col = dim(community_survey_data)[2]
+  dim_names = dimnames(community_survey_data)[1:2]
   species_data = community_survey_data[, , sp]
   
-  # Putative observation matrix (detection-nondetection via thresholded confidence scores)
-  mat_obs = matrix(
-    unlist(lapply(species_data, function(x) if (!is.null(x)) as.integer(any(x$confidence >= threshold, na.rm = TRUE)) else NA)),
-    nrow = dim(community_survey_data)[1],
-    ncol = dim(community_survey_data)[2],
-    dimnames = dimnames(community_survey_data)[1:2]
-  )
-  ylist[[sp]] = mat_obs
+  if (is.na(naive_threshold)) {
+    # Use probablistic thresholding
+    if (sp %in% species_thresholds$species) {
+      sp_threshdata = species_thresholds %>% filter(species == sp)
+      model     = sp_threshdata %>% pull(model)
+      threshold = sp_threshdata %>% pull(threshold)
+      if (model == "source") {
+        mat_obs = matrix(
+          unlist(lapply(species_data, function(x) if (!is.null(x)) as.integer(any(x$confidence_source >= threshold, na.rm = TRUE)) else NA)),
+          nrow = n_row, ncol = n_col, dimnames = dim_names)
+      } else if (model == "target") {
+        mat_obs = matrix(
+          unlist(lapply(species_data, function(x) if (!is.null(x)) as.integer(any(x$confidence_target >= threshold, na.rm = TRUE)) else NA)),
+          nrow = n_row, ncol = n_col, dimnames = dim_names)
+      }
+    } else {
+      # There is no threshold for this species
+      threshold = NA
+      mat_obs = matrix(
+        unlist(lapply(species_data, function(x) if (!is.null(x)) 0.0 else NA)),
+        nrow = n_row, ncol = n_col, dimnames = dim_names)
+    }
+  } else {
+    # Use naive arbitrary thresholding with both models (i.e. "confidence" column)
+    mat_obs = matrix(
+      unlist(lapply(species_data, function(x) if (!is.null(x)) as.integer(any(x$confidence >= naive_threshold, na.rm = TRUE)) else NA)),
+      nrow = n_row, ncol = n_col, dimnames = dim_names)
+  }
+  ylist[[sp]] = mat_obs # Store the resulting putative observations
 }
 
 # Survey date matrix (day of year)
@@ -121,7 +179,7 @@ x_yday = matrix(
 )
 
 # Discard sites with no environmental data
-sites_missing_environmental_data = setdiff(dimnames(community_survey_data)$unit, occ_data$site)
+sites_missing_environmental_data = setdiff(dimnames(community_survey_data)$site, occ_data$site)
 if (length(sites_missing_environmental_data) > 0) {
   message("Discarding ", length(sites_missing_environmental_data), " sites with missing environmental data")
   ylist = lapply(ylist, function(mat) { mat[!(rownames(mat) %in% sites_missing_environmental_data), , drop = FALSE] })
@@ -129,7 +187,7 @@ if (length(sites_missing_environmental_data) > 0) {
   x_yday = x_yday[!rownames(x_yday) %in% sites_missing_environmental_data, ]
 }
 # Discard sites with no observations
-sites_with_environmental_data_missing_observations = setdiff(occ_data$site, dimnames(community_survey_data)$unit)
+sites_with_environmental_data_missing_observations = setdiff(occ_data$site, dimnames(community_survey_data)$site)
 if (length(sites_with_environmental_data_missing_observations) > 0) {
   message("Discarding ", length(sites_with_environmental_data_missing_observations), " sites with missing observations")
   ylist = lapply(ylist, function(mat) { mat[!(rownames(mat) %in% sites_with_environmental_data_missing_observations), , drop = FALSE] })
@@ -176,9 +234,9 @@ naive_occurrence = data.frame(species = names(naive_occurrence), nsites = naive_
   arrange(desc(nsites)) %>% mutate(species = factor(species, levels = rev(species))) %>% mutate(prob = nsites / length(sites))
 message(naive_occurrence %>% filter(nsites > 0) %>% nrow(), " species detected")
 message("Most commonly detected species:")
-cat(naive_occurrence %>% slice_max(prob, n=1) %>% pull(species) %>% as.character(), '\n')
+print(naive_occurrence %>% slice_max(prob, n=1) %>% pull(species) %>% as.character())
 message("Least commonly detected species:")
-cat(naive_occurrence %>% slice_min(prob, n=1) %>% pull(species) %>% as.character(), '\n')
+print(naive_occurrence %>% slice_min(prob, n=1) %>% pull(species) %>% as.character())
 p = ggplot(naive_occurrence, aes(x = nsites, y = species)) +
   geom_bar(stat = "identity") +
   geom_vline(xintercept = mean(naive_occurrence$nsites), color = "blue") +
@@ -198,12 +256,11 @@ p = ggplot(species_per_site, aes(x = species_detected)) +
   geom_vline(xintercept = mean_species_detected, color = "blue") +
   labs(title = "Naive species richness per site", x = "Number of species detected", y = "Number of sites"); print(p)
 
-# Exclude species that were detected below a minimum number of sites
-message("The following species are excluded from the model:")
-min_sites_detected = 5
+min_sites_detected = 1
+message("Excluding species that were detected at fewer than the minimum number of sites (", min_sites_detected, "):")
 species_to_remove = naive_occurrence %>% filter(nsites < min_sites_detected) %>% pull(species) %>% as.character() %>% sort()
-species_to_remove = c(species_to_remove, "Great Horned Owl", "Hermit Warbler", "Pine Grosbeak", "Townsend's Solitaire", "Cooper's Hawk", "Bald Eagle", "Merlin", "Cassin's Vireo", "Sharp-shinned Hawk", "Clark's Nutcracker", "Fox Sparrow", "Spotted Owl", "American Crow", "Osprey", "Black-capped Chickadee", "House Finch", "American Dipper", "Anna's Hummingbird", "Common Merganser", "Northern Rough-winged Swallow", "Barn Swallow", "American Kestrel", "Chipping Sparrow", "Tree Swallow", "Lincoln's Sparrow", "Willow Flycatcher", "White-throated Sparrow", "Western Bluebird", "Bewick's Wren", "Horned Lark", "Common Yellowthroat", "Savannah Sparrow", "Barn Owl", "Peregrine Falcon", "Eurasian Collared-Dove", "Marbled Murrelet") # TODO: incorporate these additional species determined to be absent via manual review above into the naive statistics
-cat(species_to_remove, "\n")
+# TODO: incorporate these additional species determined to be absent via manual review above into the naive statistics
+print(species_to_remove)
 ylist[species_to_remove] = NULL
 species = names(ylist)
 
@@ -275,70 +332,57 @@ x_prcp = get_var_matrix("prcp_mm_day")
 occ_data = occ_data %>% filter(site %in% dimnames(y)$site) # discard data for irrelevant sites
 stopifnot(dimnames(y)$site == occ_data$site) # check that covariate data are aligned with observation matrix by site
 
-# Standardize occurrence covariate data
-params_alpha_names = data.frame()
-if (HS_OR_RS == "HS") {
-  x_alpha1_scaled = scale(occ_data$plot_elev_rs)
-  x_alpha2_scaled = scale(occ_data$plot_downvol_hs)
-  x_alpha3_scaled = scale(occ_data$plot_ht_cv_hs)
-  x_alpha4_scaled = scale(occ_data$plot_ht_hs)
-  x_alpha5_scaled = scale(occ_data$plot_qmd_all_hs)
-  x_alpha6_scaled = scale(occ_data$plot_snagden_hs)
-  x_alpha7_scaled = scale(occ_data$plot_treeden_all_hs)
-  x_alpha8_scaled = scale(occ_data$plot_understory_vol)
-  x_alpha9_scaled = scale(occ_data$tree_all_diversity)
-  x_alpha10_scaled = scale(occ_data$focalpatch_pcnt)
-  x_alpha11_scaled = scale(occ_data$cw_edge_density)
-  x_alpha12_scaled = scale(occ_data$prop_abund_5)
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha1", name = "plot_elev_rs"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha2", name = "plot_downvol_hs"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha3", name = "plot_ht_cv_hs"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha4", name = "plot_ht_hs"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha5", name = "plot_qmd_all_hs"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha6", name = "plot_snagden_hs"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha7", name = "plot_treeden_all_hs"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha8", name = "plot_understory_vol"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha9", name = "tree_all_diversity"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha10", name = "focalpatch_pcnt"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha11", name = "cw_edge_density"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha12", name = "prop_abund_5"))
+# Assemble occurrence covariate data
+if (param_set_HS_RS_HR == "HS") {
+  param_alpha_names = c(
+    "elev",
+    "plot_downvol_hs",
+    "plot_ht_cv_hs",
+    "plot_lcr_hs",
+    "plot_qmd_all_hs",
+    "plot_snagden_hs",
+    "plot_tree_all_diversity",
+    "plot_treeden_gt10cmDbh_hs",
+    "plot_treeden_lt10cmDbh_hs",
+    "plot_understory_vol"
+  )
+} else if (param_set_HS_RS_HR == "RS") {
+  param_alpha_names = c(
+    # TODO
+  )
+} else if (param_set_HS_RS_HR == "HR") {
+  param_alpha_names = c(
+  # TODO: Only HR
+  # [1] "cover_forest_diversity"        "density_edge_cw"               "density_roads_paved"           "density_streams_major"        
+  # [5] "focalpatch_area_homeange_pcnt" "focalpatch_isolation"          "prop_abund_comthin"            "prop_abund_lsog"              
+  # [9] "shape_idx" 
+  )
 } else {
-  x_alpha1_scaled = scale(occ_data$plot_elev_rs)
-  x_alpha2_scaled = scale(occ_data$homerange_downvol_mean)
-  x_alpha3_scaled = scale(occ_data$homerange_htmax_cv)
-  x_alpha4_scaled = scale(occ_data$shape_idx)
-  x_alpha5_scaled = scale(occ_data$homerange_qmd_mean)
-  x_alpha6_scaled = scale(occ_data$prop_abund_4)
-  x_alpha7_scaled = scale(occ_data$homerange_treeden_all_mean)
-  x_alpha8_scaled = scale(occ_data$density_roads_paved)
-  x_alpha9_scaled = scale(occ_data$density_streams_major)
-  x_alpha10_scaled = scale(occ_data$focalpatch_pcnt)
-  x_alpha11_scaled = scale(occ_data$cw_edge_density)
-  x_alpha12_scaled = scale(occ_data$prop_abund_5)
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha1", name = "plot_elev_rs"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha2", name = "homerange_downvol_mean"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha3", name = "homerange_htmax_cv"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha4", name = "shape_idx"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha5", name = "homerange_qmd_mean"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha6", name = "prop_abund_4"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha7", name = "homerange_treeden_all_mean"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha8", name = "density_roads_paved"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha9", name = "density_streams_major"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha10", name = "focalpatch_pcnt"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha11", name = "cw_edge_density"))
-  params_alpha_names = rbind(params_alpha_names, data.frame(param = "alpha12", name = "prop_abund_5"))
+  param_alpha_names = c(
+  # TODO
+  # [1] "cover_forest_diversity"        "density_edge_cw"               "density_roads_paved"           "density_streams_major"        
+  # [5] "focalpatch_area_homeange_pcnt" "focalpatch_isolation"          "homerange_downvol_mean"        "homerange_htmax_cv"           
+  # [9] "homerange_qmd_mean"            "homerange_treeden_all_mean"    "prop_abund_comthin"            "prop_abund_lsog"              
+  # [13] "shape_idx"  
+  )
 }
+# Store alpha parameter ID, variable name, and standardize data to have mean 0, standard deviation 1
+param_alpha_data = tibble(param = paste0("alpha", 1:length(param_alpha_names)), name  = param_alpha_names)
+param_alpha_data = param_alpha_data %>% rowwise() %>% mutate(scaled = list(scale(occ_data[[name]]))) %>% ungroup()
+n_alpha_params = nrow(param_alpha_data)
 
-# Standardize detection covariate data to z-scale (mean 0, standard deviation 1)
-params_beta_names = data.frame()
-x_beta1_scaled = scale(as.vector(x_yday))
-x_beta2_scaled = scale(as.vector(x_prcp))
-x_beta3_scaled = scale(as.vector(x_tmax))
-params_beta_names = rbind(params_beta_names, data.frame(param = "beta1", name = "yday"))
-params_beta_names = rbind(params_beta_names, data.frame(param = "beta2", name = "prcp_mm_day"))
-params_beta_names = rbind(params_beta_names, data.frame(param = "beta3", name = "tmax_deg_c"))
+# Assemble detection covariate data
+detect_data = list(
+  yday        = x_yday,
+  prcp_mm_day = x_prcp,
+  tmax_deg_c  = x_tmax
+)
+# Store beta parameter ID, variable name, and standardize data to have mean 0, standard deviation 1
+param_beta_data = tibble(param = paste0("beta", seq_along(detect_data)), name = names(detect_data))
+param_beta_data = param_beta_data %>% rowwise() %>% mutate(scaled = list(scale(as.vector(detect_data[[name]])))) %>% ungroup()
+n_beta_params = nrow(param_beta_data)
 
-# Initialize latent occupancy state z[i] as 1 if a detection occurred at unit i, and 0 otherwise
+# Initialize latent occupancy state z[i] as 1 if a detection occurred at site i, and 0 otherwise
 z = matrix(data = NA, nrow = length(sites), ncol = length(species), dimnames = list(sites, species))
 for (i in 1:length(sites)) {
   for (sp in 1:length(species)) { z[i,sp] = sum(y[i, , sp], na.rm = TRUE) }
@@ -346,37 +390,25 @@ for (i in 1:length(sites)) {
 z = (z > 0) * 1
 
 # Prepare all data for the model
-n_alpha_params = 12
-n_beta_params = 3
 I = length(species)
 J = length(sites)
+K = as.vector(n_surveys_per_site)
 msom_data = list(
-  # Observed data
-  y = y,                             # detection-nondetection matrix
-  I = I,                             # number of species observed
-  J = J,                             # number of sites sampled
-  K = as.vector(n_surveys_per_site), # number of sampling periods (surveys) per site
-  # Occupancy covariates
-  x_alpha1   = x_alpha1_scaled[,1],
-  x_alpha2   = x_alpha2_scaled[,1],
-  x_alpha3   = x_alpha3_scaled[,1],
-  x_alpha4   = x_alpha4_scaled[,1],
-  x_alpha5   = x_alpha5_scaled[,1],
-  x_alpha6   = x_alpha6_scaled[,1],
-  x_alpha7   = x_alpha7_scaled[,1],
-  x_alpha8   = x_alpha8_scaled[,1],
-  x_alpha9   = x_alpha9_scaled[,1],
-  x_alpha10   = x_alpha10_scaled[,1],
-  x_alpha11   = x_alpha11_scaled[,1],
-  x_alpha12   = x_alpha12_scaled[,1],
-  # Detection covariates
-  x_beta1 = array(x_beta1_scaled, dim = dim(x_yday)),
-  x_beta2 = array(x_beta2_scaled, dim = dim(x_prcp)),
-  x_beta3 = array(x_beta3_scaled, dim = dim(x_tmax))
+  y = y, # observed (detection-nondetection) data matrix
+  I = I, # number of species observed
+  J = J, # number of sites sampled
+  K = K  # number of sampling periods (surveys) per site
 )
+for (a in seq_len(n_alpha_params)) { # Add occupancy covariates
+  msom_data[[paste0("x_", param_alpha_data$param[a])]] <- as.vector(param_alpha_data$scaled[[a]])
+}
+for (b in seq_len(n_beta_params)) { # Add detection covariates
+  mat_dim <- dim(detect_data[[param_beta_data$name[b]]])
+  msom_data[[paste0("x_", param_beta_data$param[b])]] <- array(param_beta_data$scaled[[b]], dim = mat_dim)
+}
 str(msom_data)
 
-# Specify hierarhical model and write to file
+# Specify hierarchical model and write to file
 # Following:
 # - https://besjournals.onlinelibrary.wiley.com/doi/10.1111/j.1365-2664.2009.01664.x
 # - https://esajournals.onlinelibrary.wiley.com/doi/10.1002/eap.2293
@@ -424,12 +456,12 @@ model{
   mu.alpha10     ~ dnorm(0,0.01)
   sigma.alpha10  ~ dunif(0,5)
   tau.alpha10   <- pow(sigma.alpha10,-2)
-  mu.alpha11     ~ dnorm(0,0.01)
-  sigma.alpha11  ~ dunif(0,5)
-  tau.alpha11   <- pow(sigma.alpha11,-2)
-  mu.alpha12     ~ dnorm(0,0.01)
-  sigma.alpha12  ~ dunif(0,5)
-  tau.alpha12   <- pow(sigma.alpha12,-2)
+  # mu.alpha11     ~ dnorm(0,0.01)
+  # sigma.alpha11  ~ dunif(0,5)
+  # tau.alpha11   <- pow(sigma.alpha11,-2)
+  # mu.alpha12     ~ dnorm(0,0.01)
+  # sigma.alpha12  ~ dunif(0,5)
+  # tau.alpha12   <- pow(sigma.alpha12,-2)
   
   # Community mean detection
   p.mean  ~ dunif(0,1)                 # probability scale
@@ -462,8 +494,8 @@ model{
       alpha8[i] ~ dnorm(mu.alpha8,tau.alpha8)
       alpha9[i] ~ dnorm(mu.alpha9,tau.alpha9)
       alpha10[i] ~ dnorm(mu.alpha10,tau.alpha10)
-      alpha11[i] ~ dnorm(mu.alpha11,tau.alpha11)
-      alpha12[i] ~ dnorm(mu.alpha12,tau.alpha12)
+      # alpha11[i] ~ dnorm(mu.alpha11,tau.alpha11)
+      # alpha12[i] ~ dnorm(mu.alpha12,tau.alpha12)
   
       # Species level priors for detection coefficients
       v[i] ~ dnorm(mu.v, tau.v)
@@ -474,7 +506,7 @@ model{
       for (j in 1:J) { # for each site
         
           # Ecological process model for latent occurrence z
-          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + alpha5[i]*x_alpha5[j] + alpha6[i]*x_alpha6[j] + alpha7[i]*x_alpha7[j] + alpha8[i]*x_alpha8[j] + alpha9[i]*x_alpha9[j] + alpha10[i]*x_alpha10[j] + alpha11[i]*x_alpha11[j] + alpha12[i]*x_alpha12[j]
+          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + alpha5[i]*x_alpha5[j] + alpha6[i]*x_alpha6[j] + alpha7[i]*x_alpha7[j] + alpha8[i]*x_alpha8[j] + alpha9[i]*x_alpha9[j] + alpha10[i]*x_alpha10[j] # + alpha11[i]*x_alpha11[j] + alpha12[i]*x_alpha12[j]
           z[j,i] ~ dbern(psi[j,i])
           
           for (k in 1:K[j]) { # for each sampling period (survey) at site j
@@ -523,7 +555,7 @@ msom = jags(data = msom_data,
               "p.dobs", "p.dsim",
               "Nsite", "Nocc",
               paste0("mu.alpha", 1:n_alpha_params), paste0("sigma.alpha", 1:n_alpha_params), paste0("alpha", 1:n_alpha_params),
-              paste0("mu.beta", 1:n_beta_params), paste0("sigma.beta", 1:n_beta_params), paste0("beta", 1:n_beta_params)
+              paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params)
             ),
             model.file = model_file,
             n.chains = 3, n.adapt = 100, n.iter = 3000, n.burnin = 1000, n.thin = 1,
@@ -540,7 +572,7 @@ msom_summary = msom_summary %>% as_tibble() %>%
   mutate(param = rownames(summary(msom)), overlap0 = as.factor(overlap0)) %>% relocate(param, .before = 1) %>%
   mutate(prob = plogis(mean), prob_lower95 = plogis(`2.5%`), prob_upper95 = plogis(`97.5%`))
 rhat_threshold = 1.1
-suspected_nonconvergence = msom_summary %>% filter(Rhat >= rhat_threshold) %>% filter(!str_starts(param, "z\\["))
+suspected_nonconvergence = msom_summary %>% filter(Rhat >= rhat_threshold) %>% filter(!str_starts(param, "z\\[") & !str_starts(param, "psi\\["))
 if (nrow(suspected_nonconvergence) > 1) {
   message("The following ", nrow(suspected_nonconvergence), " parameters may not have converged:")
   print(suspected_nonconvergence)
@@ -639,8 +671,8 @@ auc_species = data.frame(
   upper95_nocc = nocc_bci["97.5%", ]
 )
 
-message("Species-specific mean AUC: ", round(mean(auc_species$mean_auc),3),
-        " (range ",  round(min(auc_species$mean_auc),3), "–", round(max(auc_species$mean_auc),3), ")")
+message("Species-specific mean AUC: ", round(mean(auc_species$mean_auc, na.rm = TRUE),3),
+        " (range ",  round(min(auc_species$mean_auc, na.rm = TRUE),3), "–", round(max(auc_species$mean_auc, na.rm = TRUE),3), ")")
 print(auc_species)
 ggplot(auc_species, aes(x = mean_nocc, y = mean_auc)) +
   geom_hline(yintercept = 0.5, linetype = "dashed", color = "red") +
@@ -655,6 +687,8 @@ ggplot(auc_species, aes(x = mean_nocc, y = mean_auc)) +
   )
 
 # "We concluded a statistically significant difference between posterior distributions when the 95% BCI (2.5th to 97.5th percentile of the posterior distribution) for one posterior excluded the BCI of the opposing posterior."
+
+# TODO: STORE RESULTS
 
 ## Explore model parameters and covariate effects
 
@@ -710,15 +744,17 @@ ggplot(detection_prob, aes(x = as.factor(plot_order), y = prob)) +
 # Community-level summaries of the hyper-parameters for the detection and occupancy covariates
 # mu is the community response (mean across species) to a given covariate and sd is the standard deviation (among species). Thus, the hyper-parameters are simply the mean and variance for each covariate as measured across species (Kéry & Royle 2009)
 message("Community-level summaries of hyper-parameters for occurrence and detection covariates:")
-(occurrence_coeff_summary = msom_summary %>%
+occurrence_coeff_summary = msom_summary %>%
     filter(str_detect(param, "^mu\\.alpha|^sigma\\.alpha")) %>% arrange(param) %>%
-    select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0))
-(detection_coeff_summary = msom_summary %>%
+    select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0)
+detection_coeff_summary = msom_summary %>%
     filter(str_detect(param, "^mu\\.beta|^sigma\\.beta")) %>% arrange(param) %>%
-    select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0))
+    select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0)
+print(occurrence_coeff_summary)
+print(detection_coeff_summary)
 
 # Compare community level effect sizes for occurrence coefficients
-occurrence_effect_sizes = full_join(occurrence_coeff_summary %>% filter(str_starts(param, "mu")), params_alpha_names %>% mutate(param = paste0("mu.", param)), by='param')
+occurrence_effect_sizes = full_join(occurrence_coeff_summary %>% filter(str_starts(param, "mu")), param_alpha_data %>% mutate(param = paste0("mu.", param)), by='param')
 plt = ggplot(occurrence_effect_sizes, aes(x = mean, y = as.factor(name))) +
   geom_vline(xintercept = 0, color = "gray") +
   geom_point(aes(color = overlap0)) +
@@ -728,8 +764,8 @@ plt = ggplot(occurrence_effect_sizes, aes(x = mean, y = as.factor(name))) +
   labs(title = "Community level effect sizes for occurrence covariates", x = "Coefficient estimate", y = "Parameter"); print(plt)
 
 # Compare species level effects of each covariate on occurrence
-for (alpha_param in params_alpha_names$param) {
-  alpha_name = params_alpha_names %>% filter(param == alpha_param) %>% pull(name)
+for (alpha_param in param_alpha_data$param) {
+  alpha_name = param_alpha_data %>% filter(param == alpha_param) %>% pull(name)
   alpha_coef = msom_summary %>% filter(str_detect(param, paste0("^", alpha_param, "(?!\\d)", "\\["))) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
     mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
   mu_alpha_summary = msom_summary %>% filter(param == paste0("mu.", alpha_param)) %>% select(mean, `2.5%`, `97.5%`)
@@ -749,7 +785,7 @@ for (alpha_param in params_alpha_names$param) {
 }
 
 # Compare community level effect sizes for detection coefficients
-detection_effect_sizes = full_join(detection_coeff_summary %>% filter(str_starts(param, "mu")), params_beta_names %>% mutate(param = paste0("mu.", param)), by='param')
+detection_effect_sizes = full_join(detection_coeff_summary %>% filter(str_starts(param, "mu")), param_beta_data %>% mutate(param = paste0("mu.", param)), by='param')
 plt = ggplot(detection_effect_sizes, aes(x = mean, y = as.factor(name))) +
   geom_vline(xintercept = 0, color = "gray") +
   geom_point(aes(color = overlap0)) +
@@ -759,8 +795,8 @@ plt = ggplot(detection_effect_sizes, aes(x = mean, y = as.factor(name))) +
   labs(title = "Community level effect sizes for detection covariates", x = "Coefficient estimate", y = "Parameter"); print(plt)
 
 # Compare species level effects of each covariate on detection
-for (beta_param in params_beta_names$param) {
-  beta_name = params_beta_names %>% filter(param == beta_param) %>% pull(name)
+for (beta_param in param_beta_data$param) {
+  beta_name = param_beta_data %>% filter(param == beta_param) %>% pull(name)
   beta_coef = msom_summary %>% filter(str_detect(param, paste0("^", beta_param, "(?!\\d)", "\\["))) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
     mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
   mu_beta_summary = msom_summary %>% filter(param == paste0("mu.", beta_param)) %>% select(mean, `2.5%`, `97.5%`)
