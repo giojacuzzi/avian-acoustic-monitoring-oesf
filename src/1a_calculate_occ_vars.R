@@ -650,16 +650,27 @@ if (overwrite_data_plot_scale_cache) {
     labs(title = "Tree species density by stage") +
     theme_minimal()
   
-  # Distance to water (type 1-3 and all types) [m]
-  dist_watercourses_major = st_distance(data_plot_scale, boundary_watercourses)
-  dist_watercourses_major = apply(dist_watercourses_major, 1, min)
-  data_plot_scale$dist_watercourses_major = dist_watercourses_major
-  mapview(data_plot_scale, zcol = "dist_watercourses_major") + mapview(boundary_watercourses)
+  # Distance to roads
+  dist_road_paved = st_distance(data_plot_scale, paved_primary_roads)
+  dist_road_paved = apply(dist_road_paved, 1, min)
+  data_plot_scale$dist_road_paved = dist_road_paved
+  mapview(data_plot_scale, zcol = "dist_road_paved") + mapview(paved_primary_roads)
   
-  dist_watercourses_all = st_distance(data_plot_scale, watercourses)
-  dist_watercourses_all = apply(dist_watercourses_all, 1, min)
-  data_plot_scale$dist_watercourses_all = dist_watercourses_all
-  mapview(data_plot_scale, zcol = "dist_watercourses_all") + mapview(watercourses)
+  dist_roads_all = st_distance(data_plot_scale, roads)
+  dist_roads_all = apply(dist_roads_all, 1, min)
+  data_plot_scale$dist_roads_all = dist_roads_all
+  mapview(data_plot_scale, zcol = "dist_roads_all") + mapview(paved_primary_roads)
+  
+  # Distance to water (type 1-3 and all types) [m]
+  dist_watercourse_major = st_distance(data_plot_scale, boundary_watercourses)
+  dist_watercourse_major = apply(dist_watercourse_major, 1, min)
+  data_plot_scale$dist_watercourse_major = dist_watercourse_major
+  mapview(data_plot_scale, zcol = "dist_watercourse_major") + mapview(boundary_watercourses)
+  
+  dist_watercourse_all = st_distance(data_plot_scale, watercourses)
+  dist_watercourse_all = apply(dist_watercourse_all, 1, min)
+  data_plot_scale$dist_watercourse_all = dist_watercourse_all
+  mapview(data_plot_scale, zcol = "dist_watercourse_all") + mapview(watercourses)
   
   # # Distance to nearest edge [m]
   # # For each site, find its patch, then find the distance to the nearest non-patch cell
@@ -700,21 +711,21 @@ if (overwrite_data_homerange_scale_cache) {
   data_homerange_scale = list()
   
   homeranges = species_trait_data %>% select(common_name, home_range_radius_m)
-  message("Homerange buffer median: ", min(homeranges$home_range_radius_m))
+  message("Homerange buffer min: ",    min(homeranges$home_range_radius_m))
   message("Homerange buffer median: ", buff_median <- round(median(homeranges$home_range_radius_m),0))
   message("Homerange buffer mean: ",   buff_mean <- round(mean(homeranges$home_range_radius_m),0))
   message("Homerange buffer max: ",    buff_max <- round(max(homeranges$home_range_radius_m),0))
   homeranges = rbind(data.frame(
-    common_name = c("min", "median", "mean", "max"),
+    common_name = c("plot", "median", "mean", "max"),
     home_range_radius_m = c(100, buff_median, buff_mean, buff_max)
   ), homeranges %>% mutate(home_range_radius_m = round(home_range_radius_m, 0)))
   
   # DEBUG
   # Overwrite homeranges with the median and mean range only for now
-  homeranges = data.frame(
-    common_name = c("min", "median", "mean", "max"),
-    home_range_radius_m = c(100, buff_median, buff_mean, buff_max)
-  )
+  # homeranges = data.frame(
+  #   common_name = c("min", "median", "mean", "max"),
+  #   home_range_radius_m = c(100, buff_median, buff_mean, buff_max)
+  # )
   # DEBUG
   
   ## Load forest structure rasters
