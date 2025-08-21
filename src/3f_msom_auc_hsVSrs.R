@@ -12,34 +12,35 @@
 # - https://wildlife.onlinelibrary.wiley.com/doi/10.1002/jwmg.442
 #
 # INPUT:
-param_set_HS_RS_HR = "HS" # "HS" habitat survey local or "RS" remote sensing local or "HR" homerange
+model_name = "RSHR" # "HS" habitat survey local or "RS" remote sensing local or "HR" homerange
 # Naive conversion from continuous score prediction to binary detection-nondetection
 naive_threshold = NA # set to NA to use probabilistic threshold from 1c_calculate_species_thresholds.R
-#
+generate_diagnostic_plots = FALSE
+####################################################################################
+
 path_community_survey_data = "data/cache/1_derive_community_survey_data/community_survey_data_2025-08-15.rds"
 path_species_thresholds    = "data/cache/1_calculate_species_thresholds/species_thresholds_manual_selection.csv"
 path_plot_scale_data       = "data/cache/occurrence_covariates/data_plot_scale.rds"
 path_homerange_scale_data  = "data/cache/occurrence_covariates/data_homerange_scale.rds"
-####################################################################################
-
-generate_diagnostic_plots = FALSE
+path_out = paste0("data/cache/models/msom_", model_name, "_", format(Sys.Date(), "%Y-%m-%d"), ".rds")
 
 library(progress)
 library(car)
 library(tidyverse)
 library(jagsUI)
 library(MCMCvis)
+library(glue)
 library(ggplot2)
 library(ggrepel)
 theme_set(theme_classic())
 
 # Get occurrence data (local plot and homerange scales)
 occ_data_plot_shared = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site, hs, elev, dist_watercourses_major
+  site, hs, elev, dist_watercourse_major
 )
 
-occ_data_rs_shared = readRDS(path_homerange_scale_data)[['min']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site, homerange_canopy_cover_mean
+occ_data_rs_shared = readRDS(path_homerange_scale_data)[['plot']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
+  site, homerange_canopy_cover_mean, homerange_canopy_cover_cv
 )
 
 occ_data_plot_hs = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
@@ -48,8 +49,8 @@ occ_data_plot_hs = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% 
   plot_treeden_all_hs, plot_treeden_gt10cmDbh_hs, plot_treeden_lt10cmDbh_hs, plot_understory_vol
 )
 
-occ_data_plot_rs = readRDS(path_homerange_scale_data)[['min']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site, homerange_downvol_mean, homerange_htmax_cv, homerange_qmd_mean, homerange_treeden_all_mean
+occ_data_plot_rs = readRDS(path_homerange_scale_data)[['plot']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
+  site, homerange_downvol_mean, homerange_htmax_cv, homerange_qmd_mean, homerange_treeden_all_mean, homerange_treeden_gt4in_dbh_mean, homerange_ba_mean
 )
 
 occ_data_homerange = readRDS(path_homerange_scale_data)[['median']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
@@ -59,25 +60,26 @@ occ_data_homerange = readRDS(path_homerange_scale_data)[['median']] %>% arrange(
 
 occ_data_hs = occ_data_plot_shared %>%
   left_join(occ_data_rs_shared, by = "site") %>%
-  left_join(occ_data_plot_hs, by = "site") %>%
-  filter(hs == TRUE)
+  left_join(occ_data_plot_hs, by = "site")
 
 occ_data_rs = occ_data_plot_shared %>%
   left_join(occ_data_rs_shared, by = "site") %>%
-  left_join(occ_data_plot_rs, by = "site") %>%
-  filter(hs == TRUE)
+  left_join(occ_data_plot_rs, by = "site")
 
 occ_data_hr = occ_data_plot_shared %>%
   left_join(occ_data_rs_shared, by = "site") %>%
-  left_join(occ_data_homerange, by = "site") %>%
-  filter(hs == TRUE)
+  left_join(occ_data_homerange, by = "site")
 
-if (param_set_HS_RS_HR == "HS") {
-  occ_data = occ_data_hs
-} else if (param_set_HS_RS_HR == "RS") {
-  occ_data = occ_data_rs
-} else if (param_set_HS_RS_HR == "HR") {
-  occ_data = occ_data_hr
+if (model_name == "HS") {
+  occ_data = occ_data_hs %>% select(
+    -homerange_canopy_cover_mean, -homerange_canopy_cover_cv
+  ) %>% filter(hs == TRUE)
+} else if (model_name == "RS") {
+  occ_data = occ_data_rs %>% filter(hs == TRUE)
+} else if (model_name == "HR") {
+  occ_data = occ_data_hr %>% filter(hs == TRUE)
+} else if (model_name == "RSHR") {
+  occ_data = full_join(occ_data_rs, occ_data_hr)
 }
 occ_data = occ_data %>% mutate(across(where(~ !is.character(.) & !is.logical(.)), as.numeric))
 
@@ -91,21 +93,34 @@ if (nrow(collinearity_candidates) > 0) {
 }
 
 # Remove correlated variable(s)
-if (param_set_HS_RS_HR == "HS") {
+if (model_name == "HS") {
   occ_data = occ_data %>% select(
-    -plot_treeden_all_hs, -plot_ht_hs
+    -plot_treeden_all_hs
   )
-} else {
-  # occ_data = occ_data %>% select(
-  #   -prop_abund_standinit,   # homerange_qmd_mean @ 100m
-  # )
+} else if (model_name == "RS") {
+  occ_data = occ_data %>% select(
+    -homerange_canopy_cover_mean, -homerange_treeden_gt4in_dbh_mean
+  )
+} else if (model_name == "HR") {
+  occ_data = occ_data %>% select(
+    -homerange_canopy_cover_mean
+  )
+} else if (model_name == "RSHR") {
+  occ_data = occ_data %>% select(
+    -homerange_canopy_cover_mean, # ~ homerange_htmax_cv, homerange_qmd_mean, homerange_treeden_gt4in_dbh_mean, density_edge_cw
+    -homerange_canopy_cover_cv, # TODO: swap for homerange_htmax_cv?
+    -homerange_treeden_gt4in_dbh_mean, # ~ homerange_htmax_cv
+    -prop_abund_standinit, # ~ homerange_ba_mean, homerange_qmd_mean
+    -homerange_ba_mean,
+    -dist_watercourse_major
+  )
 }
 vif_model = lm(rep(1, nrow(occ_data)) ~ ., data = occ_data %>% select(where(is.numeric)))
 vif_results = sort(vif(vif_model))
 if (max(vif_results) > 10) {
   message(crayon::yellow("WARNING: covariates with high multi-collinearity"))
-  print(vif_results)
 }
+print(vif_results)
 
 # Season `t`
 t = "2020"
@@ -333,7 +348,7 @@ occ_data = occ_data %>% filter(site %in% dimnames(y)$site) # discard data for ir
 stopifnot(dimnames(y)$site == occ_data$site) # check that covariate data are aligned with observation matrix by site
 
 # Assemble occurrence covariate data
-if (param_set_HS_RS_HR == "HS") {
+if (model_name == "HS") {
   param_alpha_names = c(
     "elev",
     "plot_downvol_hs",
@@ -346,24 +361,41 @@ if (param_set_HS_RS_HR == "HS") {
     "plot_treeden_lt10cmDbh_hs",
     "plot_understory_vol"
   )
-} else if (param_set_HS_RS_HR == "RS") {
+} else if (model_name == "RS") {
   param_alpha_names = c(
-    # TODO
+    "elev",
+    "homerange_downvol_mean",
+    "homerange_htmax_cv",
+    "homerange_treeden_all_mean",
+    "homerange_qmd_mean"
   )
-} else if (param_set_HS_RS_HR == "HR") {
+} else if (model_name == "HR") {
   param_alpha_names = c(
-  # TODO: Only HR
-  # [1] "cover_forest_diversity"        "density_edge_cw"               "density_roads_paved"           "density_streams_major"        
-  # [5] "focalpatch_area_homeange_pcnt" "focalpatch_isolation"          "prop_abund_comthin"            "prop_abund_lsog"              
-  # [9] "shape_idx" 
+    "elev",
+    "cover_forest_diversity",
+    "density_edge_cw",
+    "density_roads_paved",
+    "density_streams_major",
+    "focalpatch_area_homeange_pcnt",
+    "prop_abund_comthin",
+    "prop_abund_lsog",
+    "prop_abund_standinit",
+    "shape_idx"
   )
-} else {
+} else if (model_name == "RSHR") {
   param_alpha_names = c(
-  # TODO
-  # [1] "cover_forest_diversity"        "density_edge_cw"               "density_roads_paved"           "density_streams_major"        
-  # [5] "focalpatch_area_homeange_pcnt" "focalpatch_isolation"          "homerange_downvol_mean"        "homerange_htmax_cv"           
-  # [9] "homerange_qmd_mean"            "homerange_treeden_all_mean"    "prop_abund_comthin"            "prop_abund_lsog"              
-  # [13] "shape_idx"  
+    "elev",
+    "cover_forest_diversity",
+    "density_edge_cw",
+    "density_roads_paved",
+    "density_streams_major",
+    "focalpatch_area_homeange_pcnt",
+    "homerange_htmax_cv",
+    "homerange_qmd_mean",
+    "homerange_treeden_all_mean",
+    "prop_abund_comthin",
+    "prop_abund_lsog",
+    "shape_idx"
   )
 }
 # Store alpha parameter ID, variable name, and standardize data to have mean 0, standard deviation 1
@@ -413,8 +445,7 @@ str(msom_data)
 # - https://besjournals.onlinelibrary.wiley.com/doi/10.1111/j.1365-2664.2009.01664.x
 # - https://esajournals.onlinelibrary.wiley.com/doi/10.1002/eap.2293
 # - https://www.sciencedirect.com/science/article/abs/pii/S0006320709004819
-model_file = tempfile()
-writeLines("
+model_template = "
 model{
 
   ## Community level hyperpriors
@@ -426,42 +457,7 @@ model{
   tau.u <- pow(sigma.u,-2)                # precision
   
   # Covariate effects on occurrence
-  mu.alpha1     ~ dnorm(0,0.01)
-  sigma.alpha1  ~ dunif(0,5)
-  tau.alpha1   <- pow(sigma.alpha1,-2)
-  mu.alpha2     ~ dnorm(0,0.01)
-  sigma.alpha2  ~ dunif(0,5)
-  tau.alpha2   <- pow(sigma.alpha2,-2)
-  mu.alpha3     ~ dnorm(0,0.01)
-  sigma.alpha3  ~ dunif(0,5)
-  tau.alpha3   <- pow(sigma.alpha3,-2)
-  mu.alpha4     ~ dnorm(0,0.01)
-  sigma.alpha4  ~ dunif(0,5)
-  tau.alpha4   <- pow(sigma.alpha4,-2)
-  mu.alpha5     ~ dnorm(0,0.01)
-  sigma.alpha5  ~ dunif(0,5)
-  tau.alpha5   <- pow(sigma.alpha5,-2)
-  mu.alpha6     ~ dnorm(0,0.01)
-  sigma.alpha6  ~ dunif(0,5)
-  tau.alpha6   <- pow(sigma.alpha6,-2)
-  mu.alpha7     ~ dnorm(0,0.01)
-  sigma.alpha7  ~ dunif(0,5)
-  tau.alpha7   <- pow(sigma.alpha7,-2)
-  mu.alpha8     ~ dnorm(0,0.01)
-  sigma.alpha8  ~ dunif(0,5)
-  tau.alpha8   <- pow(sigma.alpha8,-2)
-  mu.alpha9     ~ dnorm(0,0.01)
-  sigma.alpha9  ~ dunif(0,5)
-  tau.alpha9   <- pow(sigma.alpha9,-2)
-  mu.alpha10     ~ dnorm(0,0.01)
-  sigma.alpha10  ~ dunif(0,5)
-  tau.alpha10   <- pow(sigma.alpha10,-2)
-  # mu.alpha11     ~ dnorm(0,0.01)
-  # sigma.alpha11  ~ dunif(0,5)
-  # tau.alpha11   <- pow(sigma.alpha11,-2)
-  # mu.alpha12     ~ dnorm(0,0.01)
-  # sigma.alpha12  ~ dunif(0,5)
-  # tau.alpha12   <- pow(sigma.alpha12,-2)
+  __OCCURRENCE_HYPERPRIORS__
   
   # Community mean detection
   p.mean  ~ dunif(0,1)                 # probability scale
@@ -484,18 +480,7 @@ model{
   
       # Species level priors for occupancy coefficients (note that dnorm in JAGS is parametrized with precision [tau], not sd [sigma])
       u[i] ~ dnorm(mu.u, tau.u)
-      alpha1[i] ~ dnorm(mu.alpha1,tau.alpha1)
-      alpha2[i] ~ dnorm(mu.alpha2,tau.alpha2)
-      alpha3[i] ~ dnorm(mu.alpha3,tau.alpha3)
-      alpha4[i] ~ dnorm(mu.alpha4,tau.alpha4)
-      alpha5[i] ~ dnorm(mu.alpha5,tau.alpha5)
-      alpha6[i] ~ dnorm(mu.alpha6,tau.alpha6)
-      alpha7[i] ~ dnorm(mu.alpha7,tau.alpha7)
-      alpha8[i] ~ dnorm(mu.alpha8,tau.alpha8)
-      alpha9[i] ~ dnorm(mu.alpha9,tau.alpha9)
-      alpha10[i] ~ dnorm(mu.alpha10,tau.alpha10)
-      # alpha11[i] ~ dnorm(mu.alpha11,tau.alpha11)
-      # alpha12[i] ~ dnorm(mu.alpha12,tau.alpha12)
+      __SPECIES_OCCURRENCE_PRIORS__
   
       # Species level priors for detection coefficients
       v[i] ~ dnorm(mu.v, tau.v)
@@ -506,7 +491,7 @@ model{
       for (j in 1:J) { # for each site
         
           # Ecological process model for latent occurrence z
-          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + alpha5[i]*x_alpha5[j] + alpha6[i]*x_alpha6[j] + alpha7[i]*x_alpha7[j] + alpha8[i]*x_alpha8[j] + alpha9[i]*x_alpha9[j] + alpha10[i]*x_alpha10[j] # + alpha11[i]*x_alpha11[j] + alpha12[i]*x_alpha12[j]
+          logit(psi[j,i]) <- u[i] __OCCURRENCE_COVARIATE_EQ__
           z[j,i] ~ dbern(psi[j,i])
           
           for (k in 1:K[j]) { # for each sampling period (survey) at site j
@@ -542,7 +527,30 @@ model{
     Nsite[j] <- sum(z[j, ])
   }
 }
-", con = model_file)
+"
+# Dynamically generate model specs for alpha parameters
+p_alpha = param_alpha_data$param
+occurrence_hyperpriors = paste(paste0(
+  "mu.",    p_alpha, " ~ dnorm(0,0.01)\n",
+  "sigma.", p_alpha, " ~ dunif(0,5)\n",
+  "tau.",   p_alpha, " <- pow(sigma.", p_alpha, ",-2)\n"
+), collapse = "")
+species_occurrence_priors = paste(paste0(
+  p_alpha, "[i] ~ dnorm(mu.", p_alpha, ",tau.", p_alpha, ")\n"
+), collapse = "")
+occurrence_covariate_eq = paste(paste0(
+  " + ", p_alpha, "[i]*x_", p_alpha, "[j]"
+), collapse = "")
+
+model_spec = model_template
+model_spec = gsub("__OCCURRENCE_HYPERPRIORS__", occurrence_hyperpriors, model_spec)
+model_spec = gsub("__SPECIES_OCCURRENCE_PRIORS__", species_occurrence_priors, model_spec)
+model_spec = gsub("__OCCURRENCE_COVARIATE_EQ__", occurrence_covariate_eq, model_spec)
+
+cat(strsplit(model_spec, "\n")[[1]], sep = "\n") # Print model specification to console
+
+model_file = tempfile()
+writeLines(model_spec, con = model_file)
 
 message("Running JAGS (current time ", time_start <- Sys.time(), ")")
 
@@ -635,6 +643,11 @@ for (s in 1:n_samples) {
 }
 auc_combined_mean = round(mean(auc_combined, na.rm=TRUE), 3)
 auc_combined_bci  = round(quantile(auc_combined, probs=c(0.025, 0.975), na.rm=TRUE), 3)
+auc_combined = data.frame(
+  mean_auc = auc_combined_mean,
+  lower95_auc = auc_combined_bci[[1]],
+  upper95_auc = auc_combined_bci[[2]]
+)
 
 message("Combined mean AUC: ", auc_combined_mean, " (95% BCI ", auc_combined_bci[1], "–", auc_combined_bci[2], ")")
 
@@ -688,7 +701,21 @@ ggplot(auc_species, aes(x = mean_nocc, y = mean_auc)) +
 
 # "We concluded a statistically significant difference between posterior distributions when the 95% BCI (2.5th to 97.5th percentile of the posterior distribution) for one posterior excluded the BCI of the opposing posterior."
 
-# TODO: STORE RESULTS
+# Write results to cache
+msom_results = list(
+  msom_summary = msom_summary,
+  p_val        = p_val,
+  auc_combined = auc_combined,
+  auc_species  = auc_species,
+  param_alpha_data = param_alpha_data,
+  param_beta_data = param_beta_data,
+  sites = sites,
+  species = species
+)
+path_out = paste0("data/cache/models/msom_", model_name, "_", format(Sys.Date(), "%Y-%m-%d"), ".rds")
+if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
+saveRDS(msom_results, file = path_out)
+message(crayon::green("Cached model and results to ", path_out))
 
 ## Explore model parameters and covariate effects
 
@@ -803,7 +830,7 @@ for (beta_param in param_beta_data$param) {
   plt = ggplot(beta_coef, aes(x = as.factor(plot_order), y = mean)) +
     geom_hline(yintercept = 0, color = "gray") +
     geom_point(aes(color = overlap0)) +
-    geom_errorbar(aes(ymin = `25%`,  ymax = `75%`,   color = overlap0), width = 0, size = 1) +
+    geom_errorbar(aes(ymin = `25%`,  ymax = `75%`,   color = overlap0), width = 0, linewidth = 1) +
     geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`, color = overlap0), width = 0) +
     geom_hline(yintercept = mu_beta_summary$mean,    linetype = "solid",  color = "blue") +
     geom_hline(yintercept = mu_beta_summary$`2.5%`,  linetype = "dashed", color = "blue") +
@@ -814,3 +841,8 @@ for (beta_param in param_beta_data$param) {
     coord_flip() +
     theme(legend.position = "none"); print(plt)
 }
+
+# TODO: Save results
+# plots.dir.path <- list.files(tempdir(), pattern="rs-graphics", full.names = TRUE)
+# plots.png.paths <- list.files(plots.dir.path, pattern=".png", full.names = TRUE)
+# file.copy(from=plots.png.paths, to="data/temp")
