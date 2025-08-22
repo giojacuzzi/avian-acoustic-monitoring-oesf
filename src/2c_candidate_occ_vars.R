@@ -277,12 +277,11 @@ print(var_candidates_rs_combined)
 ###########################################################################################
 ### Collinearity analysis - plot scale (remote sensing) plus species-specific homerange scales
 
-# TODO: pairwise r and VIF for each species, keep track of which variables are correlated
-
 # Start with collinearity among species-specific homerange scales
-names(data_homerange_scale) = tolower(names(data_homerange_scale))
+dhs = data_homerange_scale
+names(dhs) = tolower(names(dhs))
 
-plot_data_homerange_scale = data_homerange_scale[['plot']] # default minimum at 100m
+plot_data_homerange_scale = dhs[['plot']] # default minimum at 100m
 
 # Remove irrelevant species that are not included in the analysis
 species_to_keep = c(
@@ -349,8 +348,8 @@ species_to_keep = c(
   "yellow warbler",
   "yellow-rumped warbler"
 )
-data_homerange_scale = data_homerange_scale[species_to_keep]
-n_scales = length(names(data_homerange_scale))
+dhs = dhs[species_to_keep]
+n_scales = length(names(dhs))
 
 # A priori remove some vars
 candidates = c(
@@ -426,9 +425,9 @@ candidates = c(
 
 all_species_results = data.frame()
 for (i in 1:n_scales) {
-  scale = names(data_homerange_scale)[i]
+  scale = names(dhs)[i]
   print(scale)
-  species_homerange_data = data_homerange_scale[[scale]]
+  species_homerange_data = dhs[[scale]]
   buffer_radius_m = unique(species_homerange_data$buffer_radius_m)
   # if buffer_radius_m < 100m, set to 100m and pull data from "plot" scale
   if (buffer_radius_m < 100) {
@@ -459,7 +458,7 @@ pair_summary = aggregate(scale ~ pair, data = all_species_results, FUN = functio
 pair_summary$var1 = sub("#.*", "", pair_summary$pair)
 pair_summary$var2 = sub(".*#", "", pair_summary$pair)
 pair_summary = pair_summary[,c("var1","var2","scale")]
-pair_summary$pcnt_species = round(pair_summary$scale / length(unique(all_species_results$scale)), 2)
+pair_summary$pcnt_species = round(pair_summary$scale / n_scales, 2)
 pair_summary = pair_summary %>% arrange(desc(pcnt_species)) %>% rename(freq = scale)
 print(pair_summary)
 
@@ -480,9 +479,9 @@ candidates = candidates[!candidates %in% c(
 # VIF analysis
 all_species_vif_results = data.frame()
 for (i in 1:n_scales) {
-  scale = names(data_homerange_scale)[i]
+  scale = names(dhs)[i]
   print(scale)
-  species_homerange_data = data_homerange_scale[[scale]]
+  species_homerange_data = dhs[[scale]]
   buffer_radius_m = unique(species_homerange_data$buffer_radius_m)
   # if buffer_radius_m < 100m, set to 100m and pull data from "plot" scale
   if (buffer_radius_m < 100) {
@@ -505,12 +504,100 @@ freq = colSums(vif_values >= 10)
 vif_summary = data.frame(
   var  = names(freq),
   freq = freq,
-  pcnt_species = round( freq / nrow(vif_values), 2),
+  pcnt_species = round(freq / n_scales, 2),
   row.names = NULL
 )
 vif_summary = vif_summary %>% arrange(desc(pcnt_species))
 print(vif_summary)
 
 
-# TODO: Introduce plot scale (remote sensing) variables
+### Introduce plot scale (remote sensing) variables
 
+var_candidates_plotscale_rs = data_homerange_scale[['plot']] %>% select(site, all_of(var_candidates_plotscale_rs))
+
+all_species_all_candidates_results = data.frame()
+for (i in 1:n_scales) {
+  scale = names(dhs)[i]
+  print(scale)
+  species_homerange_data = dhs[[scale]]
+  buffer_radius_m = unique(species_homerange_data$buffer_radius_m)
+  # if buffer_radius_m < 100m, set to 100m and pull data from "plot" scale
+  if (buffer_radius_m < 100) {
+    species_homerange_data = plot_data_homerange_scale
+  }
+  
+  # Get candidate homerange vars
+  species_var_candidates_homerange = species_homerange_data %>% select(site, all_of(candidates))
+  # Join with candidate plot scale RS vars
+  all_species_var_candidates = full_join(species_var_candidates_homerange, var_candidates_plotscale_rs, by = 'site')
+  all_species_var_candidates = all_species_var_candidates %>% select(where(is.numeric))
+  
+  species_results = pairwise_collinearity(all_species_var_candidates) %>% mutate(scale = scale)
+  all_species_all_candidates_results = rbind(all_species_all_candidates_results, species_results)
+}
+# Make a consistent pair ID with a unique separator
+all_species_all_candidates_results$pair = apply(
+  all_species_all_candidates_results[,c("Var1","Var2")], 1,
+  function(x) paste(sort(x), collapse = "#")
+)
+# Count number of scales where each pair is flagged
+all_candidates_pair_summary = aggregate(scale ~ pair, data = all_species_all_candidates_results, FUN = function(x) length(unique(x)))
+all_candidates_pair_summary$var1 = sub("#.*", "", all_candidates_pair_summary$pair)
+all_candidates_pair_summary$var2 = sub(".*#", "", all_candidates_pair_summary$pair)
+all_candidates_pair_summary = all_candidates_pair_summary[,c("var1","var2","scale")]
+all_candidates_pair_summary$pcnt_species = round(all_candidates_pair_summary$scale / n_scales, 2)
+all_candidates_pair_summary = all_candidates_pair_summary %>% arrange(desc(pcnt_species)) %>% rename(freq = scale)
+print(all_candidates_pair_summary)
+
+# VIF analysis
+all_species_all_candidates_vif_results = data.frame()
+for (i in 1:n_scales) {
+  scale = names(dhs)[i]
+  print(scale)
+  species_homerange_data = dhs[[scale]]
+  buffer_radius_m = unique(species_homerange_data$buffer_radius_m)
+  # if buffer_radius_m < 100m, set to 100m and pull data from "plot" scale
+  if (buffer_radius_m < 100) {
+    species_homerange_data = plot_data_homerange_scale
+  }
+
+  # Get candidate homerange vars
+  species_var_candidates_homerange = species_homerange_data %>% select(site, all_of(candidates))
+  # Join with candidate plot scale RS vars
+  all_species_var_candidates = full_join(species_var_candidates_homerange, var_candidates_plotscale_rs, by = 'site')
+  all_species_var_candidates = all_species_var_candidates %>% select(where(is.numeric))
+  
+  model = lm(rep(1, nrow(all_species_var_candidates)) ~ ., data = all_species_var_candidates)
+  results = as.data.frame(t(vif(model)))
+  results = results %>% mutate (scale = scale)
+  all_species_all_candidates_vif_results = rbind(all_species_all_candidates_vif_results, results)
+}
+all_candidates_mean_vif = apply(all_species_all_candidates_vif_results[, -ncol(all_species_all_candidates_vif_results)], 2, mean)
+print(sort(all_candidates_mean_vif, decreasing = TRUE))
+
+# Count frequency of VIF >= 10 for each var across species scales
+all_candidates_vif_values = all_species_all_candidates_vif_results %>% select(-scale)
+all_candidates_freq = colSums(all_candidates_vif_values >= 10)
+all_candidates_vif_summary = data.frame(
+  var  = names(all_candidates_freq),
+  freq = all_candidates_freq,
+  pcnt_species = round(all_candidates_freq / n_scales, 2),
+  row.names = NULL
+)
+all_candidates_vif_summary = all_candidates_vif_summary %>% arrange(desc(pcnt_species))
+print(all_candidates_vif_summary)
+
+##### Summary results
+
+message("After eliminating variables with high multicollinearity, below are stats for the final candidate variable list:")
+
+message("Pairwise collinearity:")
+print(all_candidates_pair_summary)
+
+message("VIF analysis:")
+print(all_candidates_vif_summary)
+
+message("Species-specific scales that exhibit multicollinearity are small in size, less than 110m (brown creeper, pacific wren, etc.)")
+nz = all_species_all_candidates_vif_results %>% filter(if_any(-scale, ~ . >= 10)) %>% pull(scale)
+buffer_sizes = read.csv("data/cache/species_traits/species_traits.csv") %>% select(common_name, home_range_radius_m) %>% mutate(common_name = tolower(common_name))
+buffer_sizes %>% filter(common_name %in% nz)
