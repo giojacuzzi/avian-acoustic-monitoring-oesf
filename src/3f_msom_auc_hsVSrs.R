@@ -12,7 +12,7 @@
 # - https://wildlife.onlinelibrary.wiley.com/doi/10.1002/jwmg.442
 #
 # INPUT:
-model_name = "RSalt" # "HS" habitat survey local or "RS" remote sensing local or "HR" homerange or "RSHR"
+model_name = "RSHR" # "HS" habitat survey local or "RS" remote sensing local or "HR" homerange or "RSHR"
 # Naive conversion from continuous score prediction to binary detection-nondetection
 naive_threshold = NA # set to NA to use probabilistic threshold from 1c_calculate_species_thresholds.R
 generate_diagnostic_plots = FALSE
@@ -120,7 +120,9 @@ if (model_name == "HS") {
     -homerange_treeden_gt4in_dbh_mean, # ~ homerange_htmax_cv
     -prop_abund_standinit, # ~ homerange_ba_mean, homerange_qmd_mean
     -homerange_ba_mean,
-    -dist_watercourse_major
+    -homerange_snagden_gt15dbh_mean,
+    -dist_watercourse_major,
+    -homerange_downvol_mean
   )
 }
 vif_model = lm(rep(1, nrow(occ_data)) ~ ., data = occ_data %>% select(where(is.numeric)))
