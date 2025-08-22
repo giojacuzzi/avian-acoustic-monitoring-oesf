@@ -171,38 +171,13 @@ target_metrics = species_thresholds_target %>% select(species, auc_pr, recall_tp
 shared_metrics = inner_join(source_metrics, target_metrics, by = "species")
 
 # Compute delta performance values
-print(shared_metrics %>% mutate(delta_auc_pr = auc_pr_target - auc_pr_source, delta_recall_tp = recall_tp_target - recall_tp_source) %>%
-  select(species, delta_auc_pr, delta_recall_tp) %>% arrange(desc(delta_auc_pr)))
+print(shared_metrics %>% mutate(delta_auc_pr = auc_pr_target - auc_pr_source, delta_recall_tp = recall_tp_target - recall_tp_source) %>% select(species, delta_auc_pr, delta_recall_tp) %>% arrange(desc(delta_auc_pr)))
 
-# Manually choose model for specific species
-target_species = species_thresholds_target %>% filter(species %in% c(
-  "marbled murrelet", "western screech-owl", "sooty grouse", "northern pygmy-owl", "western wood-pewee", "red-breasted nuthatch",
-  "northern saw-whet owl", "white-crowned sparrow", "townsend's warbler", "dark-eyed junco", "hermit thrush", "golden-crowned kinglet",
-  "song sparrow", "band-tailed pigeon", "pileated woodpecker", "rufous hummingbird", "red crossbill"
-))
-source_species = species_thresholds_source %>% filter(species %in% c(
-  "ruby-crowned kinglet", "violet-green swallow", "american robin", "wilson's warbler", "spotted towhee", "purple finch",
-  "olive-sided flycatcher", "western tanager", "hutton's vireo", "black-throated gray warbler", "varied thrush", "pacific-slope flycatcher",
-  "pacific wren", "swainson's thrush", "barred owl", "belted kingfisher", "hairy woodpecker", "northern flicker",
-  "hammond's flycatcher", "common raven"
-))
-species_thresholds_manual_selection = rbind(species_only_in_source, source_species)
-species_thresholds_manual_selection = rbind(species_thresholds_manual_selection, target_species)
-stopifnot(nrow(species_thresholds_manual_selection) == length(species_thresholds_source$species))
-
-# Set minimum threshold to 0.5
-species_thresholds_manual_selection = species_thresholds_manual_selection %>%
-  mutate(
-    threshold = ifelse(n_pos == 0, NA, ifelse(t_conf_tp >= 0.5, t_conf_tp, 0.5)),
-    precision = ifelse(t_conf_tp >= 0.5, precision_tp, precision_0.5),
-    recall = ifelse(t_conf_tp >= 0.5, recall_tp, recall_0.5)
-  ) %>% select(species, model, threshold, precision, recall, auc_pr, auc_roc, n_pos, n_neg) %>% arrange(species)
-print(species_thresholds_manual_selection)
-
-path_out = paste0("data/cache/1_calculate_species_thresholds/species_thresholds_manual_selection.csv")
+species_thresholds = rbind(species_thresholds_target, species_thresholds_source)
+path_out = paste0("data/cache/1_calculate_species_thresholds/species_thresholds.csv")
 if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
-write.csv(species_thresholds_manual_selection, path_out, row.names = FALSE)
-message(crayon::green("Cached manual selection of species threshold data to ", path_out))
+write.csv(species_thresholds, path_out, row.names = FALSE)
+message(crayon::green("Cached species threshold data to ", path_out))
 
 message(crayon::green("Finished calculating species-specific thresholds and performance metrics (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " min )"))
 

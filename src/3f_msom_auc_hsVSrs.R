@@ -12,14 +12,14 @@
 # - https://wildlife.onlinelibrary.wiley.com/doi/10.1002/jwmg.442
 #
 # INPUT:
-model_name = "RSHR" # "HS" habitat survey local or "RS" remote sensing local or "HR" homerange
+model_name = "RSalt" # "HS" habitat survey local or "RS" remote sensing local or "HR" homerange or "RSHR"
 # Naive conversion from continuous score prediction to binary detection-nondetection
 naive_threshold = NA # set to NA to use probabilistic threshold from 1c_calculate_species_thresholds.R
 generate_diagnostic_plots = FALSE
 ####################################################################################
 
 path_community_survey_data = "data/cache/1_derive_community_survey_data/community_survey_data_2025-08-15.rds"
-path_species_thresholds    = "data/cache/1_calculate_species_thresholds/species_thresholds_manual_selection.csv"
+path_species_thresholds    = "data/cache/1_calculate_species_thresholds/species_thresholds.csv"
 path_plot_scale_data       = "data/cache/occurrence_covariates/data_plot_scale.rds"
 path_homerange_scale_data  = "data/cache/occurrence_covariates/data_homerange_scale.rds"
 path_out = paste0("data/cache/models/msom_", model_name, "_", format(Sys.Date(), "%Y-%m-%d"), ".rds")
@@ -50,7 +50,7 @@ occ_data_plot_hs = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% 
 )
 
 occ_data_plot_rs = readRDS(path_homerange_scale_data)[['plot']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site, homerange_downvol_mean, homerange_htmax_cv, homerange_qmd_mean, homerange_treeden_all_mean, homerange_treeden_gt4in_dbh_mean, homerange_ba_mean
+  site, homerange_downvol_mean, homerange_htmax_cv, homerange_qmd_mean, homerange_treeden_all_mean, homerange_treeden_gt4in_dbh_mean, homerange_ba_mean, homerange_snagden_gt15dbh_mean
 )
 
 occ_data_homerange = readRDS(path_homerange_scale_data)[['median']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
@@ -76,6 +76,8 @@ if (model_name == "HS") {
   ) %>% filter(hs == TRUE)
 } else if (model_name == "RS") {
   occ_data = occ_data_rs %>% filter(hs == TRUE)
+} else if (model_name == "RSalt") {
+  occ_data = occ_data_rs %>% filter(hs == TRUE)
 } else if (model_name == "HR") {
   occ_data = occ_data_hr %>% filter(hs == TRUE)
 } else if (model_name == "RSHR") {
@@ -99,7 +101,13 @@ if (model_name == "HS") {
   )
 } else if (model_name == "RS") {
   occ_data = occ_data %>% select(
-    -homerange_canopy_cover_mean, -homerange_treeden_gt4in_dbh_mean
+    -homerange_ba_mean, -homerange_canopy_cover_mean, -homerange_canopy_cover_cv, -homerange_treeden_all_mean, -homerange_htmax_cv, -dist_watercourse_major,
+    -homerange_snagden_gt15dbh_mean # ~ homerange_qmd_mean
+  )
+} else if (model_name == "RSalt") {
+  occ_data = occ_data %>% select(
+    -homerange_ba_mean, -homerange_canopy_cover_mean, -homerange_canopy_cover_cv, -homerange_treeden_gt4in_dbh_mean, -dist_watercourse_major,
+    -homerange_snagden_gt15dbh_mean # ~ homerange_qmd_mean
   )
 } else if (model_name == "HR") {
   occ_data = occ_data %>% select(
@@ -131,9 +139,73 @@ community_survey_data = readRDS(path_community_survey_data)
 community_survey_data = community_survey_data[, , t, ]
 dimnames(community_survey_data)
 
+####################################################################################
 # Load species-specific thresholds
 message("Loading species-specific thresholds")
 species_thresholds = read.csv(path_species_thresholds)
+species_thresholds_source = species_thresholds %>% filter(model == 'source')
+species_thresholds_target = species_thresholds %>% filter(model == 'target')
+
+# Identify species only supported by the source model
+species_only_in_source = species_thresholds_source %>% filter(!species %in% species_thresholds_target$species)
+
+# Manually choose model for specific species
+target_species = species_thresholds_target %>% filter(species %in% c(
+  "marbled murrelet",
+  "western screech-owl",
+  "sooty grouse",
+  "northern pygmy-owl",
+  "western wood-pewee",
+  "red-breasted nuthatch",
+  "northern saw-whet owl",
+  "white-crowned sparrow",
+  "townsend's warbler",
+  "dark-eyed junco",
+  "hermit thrush",
+  "golden-crowned kinglet",
+  "song sparrow",
+  "band-tailed pigeon",
+  "pileated woodpecker",
+  "rufous hummingbird",
+  "red crossbill"
+))
+source_species = species_thresholds_source %>% filter(model == 'source') %>% filter(species %in% c(
+  "ruby-crowned kinglet",
+  "violet-green swallow",
+  "american robin",
+  "wilson's warbler",
+  "spotted towhee",
+  "purple finch",
+  "olive-sided flycatcher",
+  "western tanager",
+  "hutton's vireo",
+  "black-throated gray warbler",
+  "varied thrush",
+  "pacific-slope flycatcher",
+  "pacific wren",
+  "swainson's thrush",
+  "barred owl",
+  "belted kingfisher",
+  "hairy woodpecker",
+  "northern flicker",
+  "hammond's flycatcher",
+  "common raven"
+))
+species_thresholds_manual_selection = rbind(species_only_in_source, source_species)
+species_thresholds_manual_selection = rbind(species_thresholds_manual_selection, target_species)
+stopifnot(nrow(species_thresholds_manual_selection) == length(species_thresholds_source$species))
+
+# Set minimum threshold to 0.5
+species_thresholds_manual_selection = species_thresholds_manual_selection %>%
+  mutate(
+    threshold = ifelse(n_pos == 0, NA, ifelse(t_conf_tp >= 0.5, t_conf_tp, 0.5)),
+    precision = ifelse(t_conf_tp >= 0.5, precision_tp, precision_0.5),
+    recall = ifelse(t_conf_tp >= 0.5, recall_tp, recall_0.5)
+  ) %>% select(species, model, threshold, precision, recall, auc_pr, auc_roc, n_pos, n_neg) %>% arrange(species)
+# print(species_thresholds_manual_selection)
+species_thresholds = species_thresholds_manual_selection
+
+####################################################################################
 
 # Derive putative observation and survey date matricies
 message("Deriving detection-nondetection and yday matricies for each species")
@@ -365,9 +437,16 @@ if (model_name == "HS") {
   param_alpha_names = c(
     "elev",
     "homerange_downvol_mean",
-    "homerange_htmax_cv",
-    "homerange_treeden_all_mean",
+    "homerange_treeden_gt4in_dbh_mean",
     "homerange_qmd_mean"
+  )
+} else if (model_name == "RSalt") {
+  param_alpha_names = c(
+    "elev",
+    "homerange_downvol_mean",
+    "homerange_htmax_cv",
+    "homerange_qmd_mean",
+    "homerange_treeden_all_mean"
   )
 } else if (model_name == "HR") {
   param_alpha_names = c(
