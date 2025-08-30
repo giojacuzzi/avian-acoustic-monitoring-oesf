@@ -492,16 +492,16 @@ model{
   for (i in 1:I) { # for each species
   
       # Species level priors for occupancy coefficients (note that dnorm in JAGS is parametrized with precision [tau], not sd [sigma])
-      u[i] ~ dnorm(mu.u, tau.u)
-      alpha1[i] ~ dnorm(mu.alpha1,tau.alpha1)
-      alpha2[i] ~ dnorm(mu.alpha2,tau.alpha2)
-      alpha3[i] ~ dnorm(mu.alpha3,tau.alpha3)
-      alpha4[i] ~ dnorm(mu.alpha4,tau.alpha4)
-      alpha5[i] ~ dnorm(mu.alpha5,tau.alpha5)
-      alpha6[i] ~ dnorm(mu.alpha6,tau.alpha6)
-      alpha7[i] ~ dnorm(mu.alpha7,tau.alpha7)
-      alpha8[i] ~ dnorm(mu.alpha8,tau.alpha8)
-      alpha9[i] ~ dnorm(mu.alpha9,tau.alpha9)
+      u[i]       ~ dnorm(mu.u, tau.u)
+      alpha1[i]  ~ dnorm(mu.alpha1,tau.alpha1)
+      alpha2[i]  ~ dnorm(mu.alpha2,tau.alpha2)
+      alpha3[i]  ~ dnorm(mu.alpha3,tau.alpha3)
+      alpha4[i]  ~ dnorm(mu.alpha4,tau.alpha4)
+      alpha5[i]  ~ dnorm(mu.alpha5,tau.alpha5)
+      alpha6[i]  ~ dnorm(mu.alpha6,tau.alpha6)
+      alpha7[i]  ~ dnorm(mu.alpha7,tau.alpha7)
+      alpha8[i]  ~ dnorm(mu.alpha8,tau.alpha8)
+      alpha9[i]  ~ dnorm(mu.alpha9,tau.alpha9)
       alpha10[i] ~ dnorm(mu.alpha10,tau.alpha10)
       alpha11[i] ~ dnorm(mu.alpha11,tau.alpha11)
       alpha12[i] ~ dnorm(mu.alpha12,tau.alpha12)
@@ -537,17 +537,17 @@ model{
               ## Create simulated dataset and calculate discrepancies to inform bayesian p-value
               y.sim[j,k,i] ~ dbern(p[j,k,i])
               
-              # Discrepancy 1: squared error (your original)
+              # Squared error
               d.obs.se[j,k,i] <- pow(y[j,k,i] - p[j,k,i], 2)
               d.sim.se[j,k,i] <- pow(y.sim[j,k,i] - p[j,k,i], 2)
               
-              # Discrepancy 2: Pearson residual squared
+              # Pearson residual squared
               # guard p away from 0/1 to avoid division by zero (add small epsilon)
               p.safe[j,k,i] <- max(min(p[j,k,i], 1 - eps), eps)
               d.obs.pearson[j,k,i] <- pow(y[j,k,i] - p.safe[j,k,i], 2) / (p.safe[j,k,i] * (1 - p.safe[j,k,i]))
               d.sim.pearson[j,k,i] <- pow(y.sim[j,k,i] - p.safe[j,k,i], 2) / (p.safe[j,k,i] * (1 - p.safe[j,k,i]))
               
-              # Discrepancy 3: Bernoulli deviance contribution
+              # Bernoulli deviance contribution
               # dev = -2 * ( y*log(p) + (1-y)*log(1-p) )
               d.obs.dev[j,k,i] <- -2 * ( y[j,k,i] * log(p.safe[j,k,i]) + (1 - y[j,k,i]) * log(1 - p.safe[j,k,i]) )
               d.sim.dev[j,k,i] <- -2 * ( y.sim[j,k,i] * log(p.safe[j,k,i]) + (1 - y.sim[j,k,i]) * log(1 - p.safe[j,k,i]) )
