@@ -1,20 +1,27 @@
 library(dplyr)
 library(ggplot2)
+library(patchwork)
 theme_set(theme_classic())
 
 model_paths = c(
-  "data/cache/models/msom_HS_2025-08-21.rds",
-  "data/cache/models/msom_RS_2025-08-21.rds",
-  "data/cache/models/msom_RSalt_2025-08-21.rds",
-  "data/cache/models/msom_HR_2025-08-21.rds",
-  "data/cache/models/msom_RSHR_2025-08-21.rds"
+  "data/cache/models/1_plot_hs.rds",
+  "data/cache/models/2_plot_rs.rds",
+  "data/cache/models/3_plot_rs_alt.rds",
+  "data/cache/models/4_homerange.rds",
+  "data/cache/models/5_both_hs.rds",
+  "data/cache/models/6_both_rs.rds",
+  "data/cache/models/7_both_rs_all.rds",
+  "data/cache/models/8_species.rds"
 )
 
 model_fits = data.frame()
+n_fig = 8
 for (path in model_paths) {
+  message("Evaluating model ", path)
   msom_results = readRDS(path)
   msom_summary = msom_results$msom_summary
   param_alpha_data = msom_results$param_alpha_data
+  param_delta_data = msom_results$param_delta_data
   param_beta_data = msom_results$param_beta_data
   sites = msom_results$sites
   species = msom_results$species
@@ -35,15 +42,18 @@ for (path in model_paths) {
   # mu is the community response (mean across species) to a given covariate and sd is the standard deviation (among species). Thus, the hyper-parameters are simply the mean and variance for each covariate as measured across species (Kéry & Royle 2009)
   message("Community-level summaries of hyper-parameters for occurrence and detection covariates:")
   occurrence_coeff_summary = msom_summary %>%
-    filter(str_detect(param, "^mu\\.alpha|^sigma\\.alpha")) %>% arrange(param) %>%
+    filter(str_detect(param, "^(mu|sigma)\\.(alpha|delta)")) %>% arrange(param) %>%
     select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0)
   detection_coeff_summary = msom_summary %>%
     filter(str_detect(param, "^mu\\.beta|^sigma\\.beta")) %>% arrange(param) %>%
     select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0)
-  print(occurrence_coeff_summary)
-  print(detection_coeff_summary)
+  print(occurrence_coeff_summary, n = Inf)
+  print(detection_coeff_summary, n = Inf)
   
   # Compare community level effect sizes for occurrence coefficients
+  if (!is.null(param_delta_data)) {
+    param_alpha_data = rbind(param_alpha_data %>% rename(data = scaled), param_delta_data)
+  }
   occurrence_effect_sizes = full_join(occurrence_coeff_summary %>% filter(str_starts(param, "mu")), param_alpha_data %>% mutate(param = paste0("mu.", param)), by='param')
   plt = ggplot(occurrence_effect_sizes, aes(x = mean, y = as.factor(name))) +
     geom_vline(xintercept = 0, color = "gray") +
@@ -53,40 +63,52 @@ for (path in model_paths) {
     scale_color_manual(values = c("black", "gray")) +
     labs(title = "Community level effect sizes for occurrence covariates",
          subtitle = tools::file_path_sans_ext(basename(path)),
-         x = "Coefficient estimate", y = "Parameter"); print(plt)
+         x = "Coefficient estimate", y = "Parameter")
+  print(plt + plot_annotation(title = paste("Fig", n_fig)))
+  n_fig = n_fig + 1
 }
 model_fits = model_fits %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
 
 theme_set(theme_bw())
+
+message("Comparing model fits and predictive performance")
 
 plt = ggplot(model_fits, aes(x = model, y = p_val)) +
   geom_point(size = 2) +
   geom_hline(yintercept = 0.5, color = "gray50") +
   geom_hline(yintercept = c(0.25, 0.75), color = "red", linetype = "dashed") +
   ylim(0.0, 1) +
-  labs(title = "Bayesian p-value"); print(plt)
+  labs(title = "Bayesian p-value"); print(plt + plot_annotation(title = "Fig 5"))
 
 plt = ggplot(model_fits, aes(x = model, y = mean_auc)) +
   geom_errorbar(aes(ymin = lower95_auc, ymax = upper95_auc), width = 0.1) +
   geom_point(size = 2) +
   ylim(0.9, 1) +
-  labs(title = "Combined ROC AUC (95% BCI)"); print(plt)
+  labs(title = "Combined ROC AUC (95% BCI)"); print(plt + plot_annotation(title = "Fig 6"))
 
 plt = ggplot(model_fits, aes(x = model, y = species_mean_auc)) +
   geom_errorbar(aes(ymin = species_min_auc, ymax = species_max_auc), width = 0.1) +
   geom_point(size = 2) +
   ylim(0.5, 1) +
-  labs(title = "Species-specific ROC AUC (range)"); print(plt)
+  labs(title = "Species-specific ROC AUC (range)"); print(plt + plot_annotation(title = "Fig 7"))
 
-stop("Read interpretation below")
+stop("Read interpretations below")
 
-# >>> Remote sensing data, despite exhibiting measurement error and a restricted set of candidate variables for modeling (due to collinearity among variables), can nevertheless serve as a practical surrogate for field-measured data for our purposes, as they capture complementary signals for the strongest effects of local-scale forest structure on bird occurrence and have virtually equivalent model fit and predictive performance.
+# - Bayesian p-value: All models suggest fine goodness-of-fit (with number of occurrence covariates ranging from ). The minor difference in p-values occurs between models fit with ~100 sites versus the model fit with 203 sites (i.e. the latter is less prone to over-fit the data).
 
-# >>> The context of the surrounding landscape provides comparable, if not more, explanatory power than local-scale forest structure.
+# - Combined ROC AUC: All models have comparable predictive performance at the combined level, though models incorporating covariates at both local and homerange scales have slightly higher point estimates.
 
-# >>> Local fine-scale habitat features are important in influencing patterns of species occurrence, but accounting for the context of the surrounding landscape reveals that community-level habitat use is more strongly structured by landscape configuration and composition –– namely patch area, edge density, and forest heterogeneity. The effect of fine-scale structure may be subsumed by landscape context, at least in driving habitat use at the community level. This is consistent with the idea that occurrence depends on the multi-scale resource requirements of birds across their home range, rather than only at the local point of sampling.
+# - Species-specific ROC AUC: Models incorporating covariates at both scales tend to have slightly higher species-specific predictive performance with less variation.
 
-# >>> Structural and compositional heterogeneity drives metacommunity assembly. Strong positive influences of disturbance and edge-related metrics at the community level, and no discernible effect of late-successional or old-growth abundance, may reflect how forest management practices foster a metacommunity biased towards generalist and early seral adapted species, disadvantaging interior and mature-forest specialists. As such, these specialists are underrepresented in the aggregate effects (and MSOM groupings by guild should be explored). This highlights a potential trade-off between managing for high occurrence (i.e. occupancy) across the community and conserving sufficient habitat for mature forest specialists.
+# - (Model 1 vs 2 and 3) Remote sensing data, despite exhibiting measurement error and a restricted set of candidate variables for modeling (due to collinearity among variables), can nevertheless serve as a practical surrogate for field-measured data for our purposes, as they capture complementary signals for the strongest effects of local-scale forest structure on bird occurrence and have virtually equivalent model fit and predictive performance.
+
+#- (Model 4) The context of the surrounding landscape provides comparable, if not more, explanatory power than local-scale forest structure.
+
+# - (Models 5, 6, and 7) Local fine-scale habitat features are important in influencing patterns of species occurrence, but accounting for the context of the surrounding landscape reveals that community-level habitat use is more strongly structured by landscape configuration and composition –– namely patch area, edge density, and forest heterogeneity. The effect of fine-scale structure may be subsumed by landscape context, at least in driving habitat use at the community level. This is consistent with the idea that occurrence depends on the multi-scale resource requirements of birds across their home range, rather than only at the local point of sampling.
+
+# - (Model 6 vs 7) Including all sites, while sacrificing the plot-scale measurement accuracy of field-measured data, substantially increased statistical power and precision of parameter estimates. Shifts in mean estimates suggest that the added sites contribute important missing information and that previous models were uninformed.
+
+# - (Model 7) Structural and compositional heterogeneity drives metacommunity assembly. Strong positive influences of disturbance and edge-related metrics at the community level, and no discernible effect of late-successional or old-growth abundance, may reflect how forest management practices foster a metacommunity biased towards generalist and early seral adapted species, disadvantaging interior and mature-forest specialists. As such, these specialists are underrepresented in the aggregate effects (and MSOM groupings by guild should be explored to quantify differences among groups within the community). This highlights a potential trade-off between managing for high occurrence (i.e. occupancy) across the community and conserving sufficient habitat for mature forest specialists..
 
 # NOTES:
 # It could be the case that some mature-forest obligates are missing from LSOG patches because of a combination of limited patch area and high landscape fragmentation, reducing connectivity and increasing edge.
@@ -94,6 +116,17 @@ stop("Read interpretation below")
 # Conventional management strategy may foster high taxonomic diversity and overall bird occurrence, but at the expense of mature-forest specialists.
 
 ############################################################################################################
+
+msom_results = readRDS("data/cache/models/8_species.rds")
+msom_summary = msom_results$msom_summary
+param_alpha_data = msom_results$param_alpha_data
+param_delta_data = msom_results$param_delta_data
+param_beta_data = msom_results$param_beta_data
+sites = msom_results$sites
+species = msom_results$species
+if (!is.null(param_delta_data)) {
+  param_alpha_data = rbind(param_alpha_data, param_delta_data %>% rename(scaled = data))
+}
 
 # Visualize estimated number of species per site
 Nsite_posterior = msom_summary %>% filter(stringr::str_starts(param, "Nsite")) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
@@ -145,6 +178,7 @@ ggplot(detection_prob, aes(x = as.factor(plot_order), y = prob)) +
   coord_flip()
 
 # Compare species level effects of each covariate on occurrence
+i = 1
 for (alpha_param in param_alpha_data$param) {
   alpha_name = param_alpha_data %>% filter(param == alpha_param) %>% pull(name)
   alpha_coef = msom_summary %>% filter(str_detect(param, paste0("^", alpha_param, "(?!\\d)", "\\["))) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
@@ -162,7 +196,8 @@ for (alpha_param in param_alpha_data$param) {
     scale_x_discrete(labels = alpha_coef$species_name) +
     scale_color_manual(values = c("0" = "black", "1" = "gray")) +
     coord_flip() +
-    theme(legend.position = "none"); print(plt)
+    theme(legend.position = "none"); print(plt + plot_annotation(title = paste0("Fig 16", LETTERS[i])))
+  i = i + 1
 }
 
 # Compare community level effect sizes for detection coefficients

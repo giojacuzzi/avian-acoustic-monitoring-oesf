@@ -12,7 +12,7 @@
 # - https://wildlife.onlinelibrary.wiley.com/doi/10.1002/jwmg.442
 #
 # INPUT:
-model_name = "RSHR" # "HS" habitat survey local or "RS" remote sensing local or "HR" homerange or "RSHR"
+model_name = "speciesRSHR" # "HS" habitat survey local or "RS" remote sensing local or "HR" homerange or "RSHR"
 # Naive conversion from continuous score prediction to binary detection-nondetection
 naive_threshold = NA # set to NA to use probabilistic threshold from 1c_calculate_species_thresholds.R
 generate_diagnostic_plots = FALSE
@@ -53,10 +53,26 @@ occ_data_plot_rs = readRDS(path_homerange_scale_data)[['plot']] %>% arrange(site
   site, homerange_downvol_mean, homerange_htmax_cv, homerange_qmd_mean, homerange_treeden_all_mean, homerange_treeden_gt4in_dbh_mean, homerange_ba_mean, homerange_snagden_gt15dbh_mean
 )
 
-occ_data_homerange = readRDS(path_homerange_scale_data)[['median']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site, cover_forest_diversity, density_edge_cw, density_roads_paved, density_streams_major,
-  focalpatch_area_homeange_pcnt, prop_abund_standinit, prop_abund_lsog, prop_abund_comthin, shape_idx
+occ_data_homerange = readRDS(path_homerange_scale_data)
+occ_data_homerange = map(occ_data_homerange, ~
+                            .x %>%
+                            arrange(site) %>%
+                            mutate(site = tolower(site)) %>%
+                            select(
+                              buffer_radius_m,
+                              site,
+                              cover_forest_diversity,
+                              density_edge_cw,
+                              density_roads_paved,
+                              density_streams_major,
+                              focalpatch_area_homeange_pcnt,
+                              prop_abund_standinit,
+                              prop_abund_lsog,
+                              prop_abund_comthin,
+                              shape_idx
+                            )
 )
+names(occ_data_homerange) = tolower(names(occ_data_homerange))
 
 occ_data_hs = occ_data_plot_shared %>%
   left_join(occ_data_rs_shared, by = "site") %>%
@@ -66,29 +82,30 @@ occ_data_rs = occ_data_plot_shared %>%
   left_join(occ_data_rs_shared, by = "site") %>%
   left_join(occ_data_plot_rs, by = "site")
 
-occ_data_hr = occ_data_plot_shared %>%
-  left_join(occ_data_rs_shared, by = "site") %>%
-  left_join(occ_data_homerange, by = "site")
+# occ_data_hr = occ_data_plot_shared %>%
+#   left_join(occ_data_rs_shared, by = "site") %>%
+#   left_join(occ_data_homerange, by = "site")
 
 if (model_name == "HS") {
-  occ_data = occ_data_hs %>% select(
-    -homerange_canopy_cover_mean, -homerange_canopy_cover_cv
-  ) %>% filter(hs == TRUE)
+  # occ_data_plot = occ_data_hs %>% select(
+  #   -homerange_canopy_cover_mean, -homerange_canopy_cover_cv
+  # ) %>% filter(hs == TRUE)
 } else if (model_name == "RS") {
-  occ_data = occ_data_rs %>% filter(hs == TRUE)
+  # occ_data_plot = occ_data_rs %>% filter(hs == TRUE)
 } else if (model_name == "RSalt") {
-  occ_data = occ_data_rs %>% filter(hs == TRUE)
+  # occ_data_plot = occ_data_rs %>% filter(hs == TRUE)
 } else if (model_name == "HR") {
-  occ_data = occ_data_hr %>% filter(hs == TRUE)
+  # occ_data_plot = occ_data_hr %>% filter(hs == TRUE)
 } else if (model_name == "HSHR") {
-  occ_data = full_join(occ_data_hs, occ_data_hr) %>% filter(hs == TRUE)
-} else if (model_name == "RSHR") {
-  occ_data = full_join(occ_data_rs, occ_data_hr) %>% filter(hs == TRUE)
+  # occ_data_plot = full_join(occ_data_hs, occ_data_hr) %>% filter(hs == TRUE)
+} else if (model_name == "speciesRSHR") {
+  occ_data_plot = occ_data_plot_shared %>%
+    full_join(occ_data_plot_rs, by = "site")
 }
-occ_data = occ_data %>% mutate(across(where(~ !is.character(.) & !is.logical(.)), as.numeric))
+occ_data_plot = occ_data_plot %>% mutate(across(where(~ !is.character(.) & !is.logical(.)), as.numeric))
 
 # Check for multicollinearity via pairwise correlation and VIF
-cor_matrix = cor(occ_data %>% select(where(is.numeric)), use = "pairwise.complete.obs", method = "pearson")
+cor_matrix = cor(occ_data_plot %>% select(where(is.numeric)), use = "pairwise.complete.obs", method = "pearson")
 cor_matrix[lower.tri(cor_matrix, diag = TRUE)] = NA
 collinearity_candidates = subset(as.data.frame(as.table(cor_matrix)), !is.na(Freq) & abs(Freq) >= 0.8)
 if (nrow(collinearity_candidates) > 0) {
@@ -98,43 +115,36 @@ if (nrow(collinearity_candidates) > 0) {
 
 # Remove correlated variable(s)
 if (model_name == "HS") {
-  occ_data = occ_data %>% select(
+  occ_data_plot = occ_data_plot %>% select(
     -plot_treeden_all_hs
   )
 } else if (model_name == "RS") {
-  occ_data = occ_data %>% select(
+  occ_data_plot = occ_data_plot %>% select(
     -homerange_ba_mean, -homerange_canopy_cover_mean, -homerange_canopy_cover_cv, -homerange_treeden_all_mean, -homerange_htmax_cv, -dist_watercourse_major,
     -homerange_snagden_gt15dbh_mean # ~ homerange_qmd_mean
   )
 } else if (model_name == "RSalt") {
-  occ_data = occ_data %>% select(
+  occ_data_plot = occ_data_plot %>% select(
     -homerange_ba_mean, -homerange_canopy_cover_mean, -homerange_canopy_cover_cv, -homerange_treeden_gt4in_dbh_mean, -dist_watercourse_major,
     -homerange_snagden_gt15dbh_mean # ~ homerange_qmd_mean
   )
 } else if (model_name == "HR") {
-  occ_data = occ_data %>% select(
+  occ_data_plot = occ_data_plot %>% select(
     -homerange_canopy_cover_mean
   )
 } else if (model_name == "HSHR") {
-  occ_data = occ_data %>% select(
+  occ_data_plot = occ_data_plot %>% select(
     -homerange_canopy_cover_mean,
     -homerange_canopy_cover_cv, 
     -plot_treeden_all_hs,
     -prop_abund_standinit
   )
-} else if (model_name == "RSHR") {
-  occ_data = occ_data %>% select(
-    -homerange_canopy_cover_mean, # ~ homerange_htmax_cv, homerange_qmd_mean, homerange_treeden_gt4in_dbh_mean, density_edge_cw
-    -homerange_canopy_cover_cv, # TODO: swap for homerange_htmax_cv?
-    -homerange_treeden_gt4in_dbh_mean, # ~ homerange_htmax_cv
-    -prop_abund_standinit, # ~ homerange_ba_mean, homerange_qmd_mean
-    -homerange_ba_mean,
-    -homerange_snagden_gt15dbh_mean,
-    -dist_watercourse_major,
-    -homerange_downvol_mean
+} else if (model_name == "speciesRSHR") {
+  occ_data_plot = occ_data_plot %>% select(
+    site, elev, homerange_treeden_all_mean, homerange_qmd_mean, homerange_htmax_cv
   )
 }
-vif_model = lm(rep(1, nrow(occ_data)) ~ ., data = occ_data %>% select(where(is.numeric)))
+vif_model = lm(rep(1, nrow(occ_data_plot)) ~ ., data = occ_data_plot %>% select(where(is.numeric)))
 vif_results = sort(vif(vif_model))
 if (max(vif_results) > 10) {
   message(crayon::yellow("WARNING: covariates with high multi-collinearity"))
@@ -277,19 +287,17 @@ x_yday = matrix(
 )
 
 # Discard sites with no environmental data
-sites_missing_environmental_data = setdiff(dimnames(community_survey_data)$site, occ_data$site)
+sites_missing_environmental_data = setdiff(dimnames(community_survey_data)$site, occ_data_plot$site)
 if (length(sites_missing_environmental_data) > 0) {
   message("Discarding ", length(sites_missing_environmental_data), " sites with missing environmental data")
-  print(sites_missing_environmental_data)
   ylist = lapply(ylist, function(mat) { mat[!(rownames(mat) %in% sites_missing_environmental_data), , drop = FALSE] })
   
   x_yday = x_yday[!rownames(x_yday) %in% sites_missing_environmental_data, ]
 }
 # Discard sites with no observations
-sites_with_environmental_data_missing_observations = setdiff(occ_data$site, dimnames(community_survey_data)$site)
+sites_with_environmental_data_missing_observations = setdiff(occ_data_plot$site, dimnames(community_survey_data)$site)
 if (length(sites_with_environmental_data_missing_observations) > 0) {
   message("Discarding ", length(sites_with_environmental_data_missing_observations), " sites with missing observations")
-  print(sites_with_environmental_data_missing_observations)
   ylist = lapply(ylist, function(mat) { mat[!(rownames(mat) %in% sites_with_environmental_data_missing_observations), , drop = FALSE] })
   
   x_yday = x_yday[!rownames(x_yday) %in% sites_with_environmental_data_missing_observations, ]
@@ -429,8 +437,8 @@ get_var_matrix = function(variable) {
 x_tmax = get_var_matrix("tmax_deg_c")
 x_prcp = get_var_matrix("prcp_mm_day")
 
-occ_data = occ_data %>% filter(site %in% dimnames(y)$site) # discard data for irrelevant sites
-stopifnot(dimnames(y)$site == occ_data$site) # check that covariate data are aligned with observation matrix by site
+occ_data_plot = occ_data_plot %>% filter(site %in% dimnames(y)$site) # discard data for irrelevant sites
+stopifnot(dimnames(y)$site == occ_data_plot$site) # check that covariate data are aligned with observation matrix by site
 
 # Assemble occurrence covariate data
 if (model_name == "HS") {
@@ -492,17 +500,19 @@ if (model_name == "HS") {
     "prop_abund_lsog",
     "shape_idx"
   )
-} else if (model_name == "RSHR") {
+} else if (model_name == "speciesRSHR") {
   param_alpha_names = c(
     "elev",
+    "homerange_htmax_cv",
+    "homerange_qmd_mean",
+    "homerange_treeden_all_mean"
+  )
+  param_delta_names = c(
     "cover_forest_diversity",
     "density_edge_cw",
     "density_roads_paved",
     "density_streams_major",
     "focalpatch_area_homeange_pcnt",
-    "homerange_htmax_cv",
-    "homerange_qmd_mean",
-    "homerange_treeden_all_mean",
     "prop_abund_comthin",
     "prop_abund_lsog",
     "shape_idx"
@@ -510,8 +520,43 @@ if (model_name == "HS") {
 }
 # Store alpha parameter ID, variable name, and standardize data to have mean 0, standard deviation 1
 param_alpha_data = tibble(param = paste0("alpha", 1:length(param_alpha_names)), name  = param_alpha_names)
-param_alpha_data = param_alpha_data %>% rowwise() %>% mutate(scaled = list(scale(occ_data[[name]]))) %>% ungroup()
+param_alpha_data = param_alpha_data %>% rowwise() %>% mutate(scaled = list(scale(occ_data_plot[[name]]))) %>% ungroup()
 n_alpha_params = nrow(param_alpha_data)
+
+# Standardize species names of occ homerange data
+names(occ_data_homerange)[names(occ_data_homerange) == "western flycatcher"] = "pacific-slope flycatcher"
+
+# Store minimum (i.e. floor) plot homerange data for those species who have smaller estimated home range sizes
+occ_data_homerange_floor = occ_data_homerange[['plot']] %>% filter(site %in% dimnames(y)$site)
+stopifnot(dimnames(y)$site == occ_data_homerange_floor$site)
+
+# TODO: Store delta parameter ID, variable name, and standardized data in species-specific matricies
+delta_data = setNames(vector('list', length(param_delta_names)), param_delta_names)
+for (param in param_delta_names) {
+  message(param)
+  
+  species_delta_data = setNames(vector('list', length(species)), species)
+  
+  for (i in 1:length(species)) {
+    species_name = species[i]
+    message(i, " ", species_name)
+    # discard data for irrelevant sites
+    species_occ_data = occ_data_homerange[[species_name]] %>% filter(site %in% dimnames(y)$site)
+    # check that data are aligned with observation matrix by site
+    stopifnot(dimnames(y)$site == species_occ_data$site)
+    if (unique(species_occ_data %>% pull(buffer_radius_m)) >= 100) {
+      param_data = species_occ_data %>% select(site, all_of(param))
+    } else {
+      print("FLOOR!")
+      param_data = occ_data_homerange_floor %>% select(site, all_of(param))
+    }
+    species_delta_data[[species_name]] = scale(param_data[[param]])
+  }
+  delta_data[[param]] = species_delta_data
+}
+param_delta_data = tibble(param = paste0("delta", 1:length(param_delta_names)), name  = param_delta_names)
+param_delta_data = param_delta_data %>% rowwise() %>% mutate(data = list(delta_data[[name]])) %>% ungroup()
+n_delta_params = nrow(param_delta_data)
 
 # Assemble detection covariate data
 detect_data = list(
@@ -541,8 +586,14 @@ msom_data = list(
   J = J, # number of sites sampled
   K = K  # number of sampling periods (surveys) per site
 )
-for (a in seq_len(n_alpha_params)) { # Add occupancy covariates
+for (a in seq_len(n_alpha_params)) { # Add alpha covariates
   msom_data[[paste0("x_", param_alpha_data$param[a])]] <- as.vector(param_alpha_data$scaled[[a]])
+}
+for (d in seq_len(n_delta_params)) { # Add delta covariates
+  param_data_new = do.call(cbind, param_delta_data %>% filter(name == param_delta_data$name[d]) %>% pull(data) %>% .[[1]])
+  msom_data[[paste0("x_", param_delta_data$param[d])]] = param_data_new
+  # param_data = do.call(cbind, delta_data[[param_delta_names[d]]])
+  # msom_data[[paste0("x_delta", d)]] = param_data
 }
 for (b in seq_len(n_beta_params)) { # Add detection covariates
   mat_dim <- dim(detect_data[[param_beta_data$name[b]]])
@@ -567,7 +618,8 @@ model{
   tau.u <- pow(sigma.u,-2)                # precision
   
   # Covariate effects on occurrence
-  __OCCURRENCE_HYPERPRIORS__
+  __ALPHA_HYPERPRIORS__
+  __DELTA_HYPERPRIORS__
   
   # Community mean detection
   p.mean  ~ dunif(0,1)                 # probability scale
@@ -590,7 +642,8 @@ model{
   
       # Species level priors for occupancy coefficients (note that dnorm in JAGS is parametrized with precision [tau], not sd [sigma])
       u[i] ~ dnorm(mu.u, tau.u)
-      __SPECIES_OCCURRENCE_PRIORS__
+      __ALPHA_SPECIES_PRIORS__
+      __DELTA_SPECIES_PRIORS__
   
       # Species level priors for detection coefficients
       v[i] ~ dnorm(mu.v, tau.v)
@@ -638,23 +691,40 @@ model{
   }
 }
 "
-# Dynamically generate model specs for alpha parameters
+# Dynamically generate model specs for alpha and delta parameters
 p_alpha = param_alpha_data$param
-occurrence_hyperpriors = paste(paste0(
+alpha_hyperpriors = paste(paste0(
   "mu.",    p_alpha, " ~ dnorm(0,0.01)\n",
   "sigma.", p_alpha, " ~ dunif(0,5)\n",
   "tau.",   p_alpha, " <- pow(sigma.", p_alpha, ",-2)\n"
 ), collapse = "")
-species_occurrence_priors = paste(paste0(
+alpha_species_priors = paste(paste0(
   p_alpha, "[i] ~ dnorm(mu.", p_alpha, ",tau.", p_alpha, ")\n"
 ), collapse = "")
-occurrence_covariate_eq = paste(paste0(
-  " + ", p_alpha, "[i]*x_", p_alpha, "[j]"
+
+p_delta = param_delta_data$param
+delta_hyperpriors = paste(paste0(
+  "mu.",    p_delta, " ~ dnorm(0,0.01)\n",
+  "sigma.", p_delta, " ~ dunif(0,5)\n",
+  "tau.",   p_delta, " <- pow(sigma.", p_delta, ",-2)\n"
+), collapse = "")
+delta_species_priors = paste(paste0(
+  p_delta, "[i] ~ dnorm(mu.", p_delta, ",tau.", p_delta, ")\n"
 ), collapse = "")
 
+alpha_covariate_eq = paste(
+  paste0(" + ", p_alpha, "[i]*x_", p_alpha, "[j]"),
+  collapse = "")
+delta_covariate_eq = paste(
+  paste0(" + ", p_delta, "[i]*x_", p_delta, "[j,i]"),
+  collapse = "")
+occurrence_covariate_eq = paste0(alpha_covariate_eq, delta_covariate_eq, collapse = "")
+
 model_spec = model_template
-model_spec = gsub("__OCCURRENCE_HYPERPRIORS__", occurrence_hyperpriors, model_spec)
-model_spec = gsub("__SPECIES_OCCURRENCE_PRIORS__", species_occurrence_priors, model_spec)
+model_spec = gsub("__ALPHA_HYPERPRIORS__", alpha_hyperpriors, model_spec)
+model_spec = gsub("__ALPHA_SPECIES_PRIORS__", alpha_species_priors, model_spec)
+model_spec = gsub("__DELTA_HYPERPRIORS__", delta_hyperpriors, model_spec)
+model_spec = gsub("__DELTA_SPECIES_PRIORS__", delta_species_priors, model_spec)
 model_spec = gsub("__OCCURRENCE_COVARIATE_EQ__", occurrence_covariate_eq, model_spec)
 
 cat(strsplit(model_spec, "\n")[[1]], sep = "\n") # Print model specification to console
@@ -673,6 +743,7 @@ msom = jags(data = msom_data,
               "p.dobs", "p.dsim",
               "Nsite", "Nocc",
               paste0("mu.alpha", 1:n_alpha_params), paste0("sigma.alpha", 1:n_alpha_params), paste0("alpha", 1:n_alpha_params),
+              paste0("mu.delta", 1:n_delta_params), paste0("sigma.delta", 1:n_delta_params), paste0("delta", 1:n_delta_params),
               paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params)
             ),
             model.file = model_file,
@@ -818,6 +889,7 @@ msom_results = list(
   auc_combined = auc_combined,
   auc_species  = auc_species,
   param_alpha_data = param_alpha_data,
+  param_delta_data = param_delta_data,
   param_beta_data = param_beta_data,
   sites = sites,
   species = species

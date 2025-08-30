@@ -7,6 +7,7 @@ data_homerange_scale = readRDS(path_homerange_scale_data)
 library(tidyr)
 library(sf)
 library(ggrepel)
+library(patchwork)
 theme_set(theme_minimal())
 
 #############################################################################################################
@@ -15,39 +16,85 @@ theme_set(theme_minimal())
 data_total = full_join(st_drop_geometry(data_plot_scale), data_homerange_scale[['plot']], by = 'site')
 
 comparison_plot = function(x, y, s, title, x_lab = "Habitat survey", y_lab = "Remote sensing") {
-  r = cor(x, y, use = "complete.obs", method = "pearson")
+  r =   cor(x, y, use = "complete.obs", method = "pearson")
+  rho = cor(x, y, use = "complete.obs", method = "spearman")
   ggplot() +
     geom_abline(slope = 1, color = "gray") +
-    geom_point(aes(x = x, y = y)) +
+    geom_point(aes(x = x, y = y), shape = 1) +
     geom_text_repel(aes(x = x, y = y, label = s), size = 2) +
     xlim(0, max(x, y, na.rm = TRUE)) +
     ylim(0, max(x, y, na.rm = TRUE)) +
     labs(
-      title = title, subtitle = paste0("(Pearson r = ", round(r, 2), ")"),
+      title = title, subtitle = paste0("(r = ", round(r, 2), ", rho = ", round(rho, 2), ")"),
       x = x_lab, y = y_lab
     )
 }
 
-comparison_plot(data_total$plot_ba_hs, data_total$homerange_ba_mean, data_total$site, "Basal area [m2/ha]")
+p_ba = comparison_plot(data_total$plot_ba_hs, data_total$homerange_ba_mean, data_total$site, "Basal area [m2/ha]")
 
-comparison_plot(data_total$plot_treeden_gt10cmDbh_hs, data_total$homerange_treeden_gt4in_dbh_mean, data_total$site, "Density (large trees, DBH > 10 cm) [# trees/ha]")
+p_tdl = comparison_plot((data_total$plot_treeden_gt10cmDbh_hs), (data_total$homerange_treeden_gt4in_dbh_mean), data_total$site, "Density (DBH > 10 cm) [#/ha]")
 
-comparison_plot(data_total$plot_treeden_all_hs, data_total$homerange_treeden_all_mean, data_total$site, "Density (all tree sizes) [# trees/ha]")
+p_tda = comparison_plot(data_total$plot_treeden_all_hs, data_total$homerange_treeden_all_mean, data_total$site, "Density (all) [#/ha]")
 
-comparison_plot(data_total$plot_qmd_all_hs, data_total$homerange_qmd_mean, data_total$site, "Quadratic mean diameter [cm]")
+p_qmd = comparison_plot(data_total$plot_qmd_all_hs, data_total$homerange_qmd_mean, data_total$site, "Quadratic mean diameter [cm]")
 
-comparison_plot(data_total$plot_ht_hs, data_total$homerange_htmax_mean, data_total$site, "Height mean [cm]")
+p_h = comparison_plot(data_total$plot_ht_hs, data_total$homerange_htmax_mean, data_total$site, "Height mean [cm]")
 
 # TODO: plot_ht_cv_hs appears erroneous?
-comparison_plot(data_total$plot_ht_cv_hs, data_total$homerange_htmax_cv, data_total$site, "Height CV [cm]")
+data_total$plot_ht_cv_hs = data_total$plot_ht_cv_hs/100
+p_hcv = comparison_plot(data_total$plot_ht_cv_hs, data_total$homerange_htmax_cv, data_total$site, "Height CV [cm]")
 
-comparison_plot(data_total$plot_snagden_hs, data_total$homerange_snagden_gt15dbh_mean, data_total$site, "Snag density [cm]")
+p_ds = comparison_plot(data_total$plot_snagden_hs, data_total$homerange_snagden_gt15dbh_mean, data_total$site, "Snag density [#/ha]")
 
-comparison_plot(data_total$plot_downvol_hs, data_total$homerange_downvol_mean, data_total$site, "Downed wood volume [m3/ha]")
+p_dwv = comparison_plot(data_total$plot_downvol_hs, data_total$homerange_downvol_mean, data_total$site, "Downed wood volume [m3/ha]")
 
-# Inspect specific variables by stage or stratum
-ggplot(data_total, aes(x = stage, y = homerange_canopy_layers_mean)) +
-  geom_boxplot()
+p_1to1_HsRs = (p_ba  | p_tdl | p_tda) /
+              (p_qmd | p_h   | p_hcv) /
+              (p_ds  | p_dwv | plot_spacer()) + plot_annotation(title = "Fig 2")
+p_1to1_HsRs
+
+# Correlation heatmaps
+
+survey_vars <- data_total %>%
+  select(plot_ba_hs, plot_treeden_gt10cmDbh_hs, plot_treeden_all_hs, plot_qmd_all_hs, plot_ht_hs, plot_ht_cv_hs, plot_snagden_hs, plot_downvol_hs) #%>% log1p()
+
+rs_vars <- data_total %>%
+  select(homerange_ba_mean, homerange_treeden_gt4in_dbh_mean, homerange_treeden_all_mean, homerange_qmd_mean, homerange_htmax_mean, homerange_htmax_cv, homerange_snagden_gt15dbh_mean, homerange_downvol_mean) #%>% log1p()
+
+method = "spearman"
+cor_mat <- cor(survey_vars, rs_vars, method = method, use = "pairwise.complete.obs")
+
+# Step 3: Reshape for ggplot heatmap
+cor_df <- as.data.frame(as.table(cor_mat))
+names(cor_df) <- c("HS", "RS", "correlation")
+
+# Step 4: Add a flag for matched pairs
+cor_df <- cor_df %>%
+  mutate(Matched = case_when(
+    HS == "plot_ba_hs" & RS == "homerange_ba_mean" ~ TRUE,
+    HS == "plot_treeden_gt10cmDbh_hs" & RS == "homerange_treeden_gt4in_dbh_mean" ~ TRUE,
+    HS == "plot_treeden_all_hs" & RS == "homerange_treeden_all_mean" ~ TRUE,
+    HS == "plot_qmd_all_hs" & RS == "homerange_qmd_mean" ~ TRUE,
+    HS == "plot_ht_hs" & RS == "homerange_htmax_mean" ~ TRUE,
+    HS == "plot_ht_cv_hs" & RS == "homerange_htmax_cv" ~ TRUE,
+    HS == "plot_snagden_hs" & RS == "homerange_snagden_gt15dbh_mean" ~ TRUE,
+    HS == "plot_downvol_hs" & RS == "homerange_downvol_mean" ~ TRUE,
+    TRUE ~ FALSE
+  ))
+
+# Step 5: Plot heatmap
+ggplot(cor_df, aes(x = HS, y = RS, fill = correlation)) +
+  geom_tile(color = "white") +
+  geom_tile(data = subset(cor_df, Matched), color = "black", size = 1.2, fill = NA) + # outline matched pairs
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", 
+                       midpoint = 0, limit = c(-1, 1), space = "Lab") +
+  geom_text(aes(label = round(correlation, 2)), color = "black", size = 4) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = paste(method, "correlation"),
+       y = "Remote sensing",
+       x = "Habitat survey") +
+  plot_annotation(title = "Fig 4")
 
 #############################################################################################################
 # Investigate plot-scale variables across strata
@@ -99,82 +146,94 @@ ggplot(dps_long, aes(x = species, y = density, fill = species)) +
   labs(title = "Tree species density by stage") +
   theme_minimal()
 
-ggplot(data_total, aes(x = stratum, y = homerange_age_mean)) +
+p_age = ggplot(data_total, aes(x = stratum, y = homerange_age_mean, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Stand age')
+  labs(subtitle = 'Stand age')
 
-ggplot(data_total, aes(x = stratum, y = plot_ba_hs)) +
+p_ba = ggplot(data_total, aes(x = stratum, y = plot_ba_hs, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Basal area (all live trees) [m2/ha]')
+  labs(subtitle = 'Basal area [m2/ha]')
 
-ggplot(data_total, aes(x = stratum, y = plot_treeden_gt10cmDbh_hs)) +
+p_tdl = ggplot(data_total, aes(x = stratum, y = plot_treeden_gt10cmDbh_hs, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Tree density (all live trees large, dbh > 10 cm) [# trees/ha]')
-ggplot(data_total, aes(x = stratum, y = plot_treeden_lt10cmDbh_hs)) +
+  labs(subtitle = 'Density (DBH > 10 cm) [# trees/ha]')
+p_tds =ggplot(data_total, aes(x = stratum, y = plot_treeden_lt10cmDbh_hs, fill = stratum)) +
   geom_boxplot() +
   coord_cartesian(ylim = c(0, 3000)) + # TODO: check outliers
-  labs(title = 'Tree density (all live trees small, dbh < 10 cm) [# trees/ha]')
-ggplot(data_total, aes(x = stratum, y = plot_treeden_all_hs)) +
+  labs(subtitle = 'Density (DBH < 10 cm) [# trees/ha]')
+p_tda = ggplot(data_total, aes(x = stratum, y = plot_treeden_all_hs, fill = stratum)) +
   geom_boxplot() +
   coord_cartesian(ylim = c(0, 3500)) + # TODO: check outliers
-  labs(title = 'Total tree density (all sizes) [# trees/ha]')
+  labs(subtitle = 'Density (all) [# trees/ha]')
 
-ggplot(data_total, aes(x = stratum, y = plot_qmd_gt10cmDbh_hs)) +
+p_qmdl = ggplot(data_total, aes(x = stratum, y = plot_qmd_gt10cmDbh_hs, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Tree quadratic mean diameter (large, dbh > 10cm) [cm]')
-ggplot(data_total, aes(x = stratum, y = plot_qmd_lt10cmDbh_hs)) +
+  labs(subtitle = 'QMD (DBH > 10cm) [cm]')
+p_qmds = ggplot(data_total, aes(x = stratum, y = plot_qmd_lt10cmDbh_hs, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Tree quadratic mean diameter (small, dbh < 10 cm) [cm]')
-ggplot(data_total, aes(x = stratum, y = plot_qmd_all_hs)) +
+  labs(subtitle = 'QMD (DBH < 10 cm) [cm]')
+p_qmda = ggplot(data_total, aes(x = stratum, y = plot_qmd_all_hs, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Tree quadratic mean diameter (all) [cm]')
+  labs(subtitle = 'QMD (all) [cm]')
 
-ggplot(data_total, aes(x = stratum, y = plot_ht_hs)) +
+p_h = ggplot(data_total, aes(x = stratum, y = plot_ht_hs, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Tree height (mean) [m]')
-ggplot(data_total, aes(x = stratum, y = plot_ht_cv_hs)) +
+  labs(subtitle = 'Height (mean) [m]')
+p_hcv = ggplot(data_total, aes(x = stratum, y = plot_ht_cv_hs, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Tree height (cv) [m]')
+  labs(subtitle = 'Height (cv) [m]')
 
-ggplot(data_total, aes(x = stratum, y = plot_hlc_hs)) +
+p_hlc = ggplot(data_total, aes(x = stratum, y = plot_hlc_hs, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Tree height to live crown [m]')
-ggplot(data_total, aes(x = stratum, y = plot_llc_hs)) +
+  labs(subtitle = 'Height to live crown [m]')
+p_llc = ggplot(data_total, aes(x = stratum, y = plot_llc_hs, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Tree length (depth) of live crown [m]')
-ggplot(data_total, aes(x = stratum, y = plot_lcr_hs)) +
+  labs(subtitle = 'Length live crown [m]')
+p_lcr = ggplot(data_total, aes(x = stratum, y = plot_lcr_hs, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Tree live crown ratio [#]')
+  labs(subtitle = 'Live crown ratio [#]')
 
-ggplot(data_total, aes(x = stratum, y = plot_snagden_hs)) +
+p_ds = ggplot(data_total, aes(x = stratum, y = plot_snagden_hs, fill = stratum)) +
   geom_boxplot() +
   coord_cartesian(ylim = c(0, 200)) + # TODO: check outliers
-  labs(title = 'Density of all snags [# snags/ha]')
+  labs(subtitle = 'Density all snags [# snags/ha]')
 
-ggplot(data_total, aes(x = stratum, y = plot_downvol_hs)) +
+p_dwv = ggplot(data_total, aes(x = stratum, y = plot_downvol_hs, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Downed wood volume [m3/ha]')
+  labs(subtitle = 'Downed wood vol [m3/ha]')
 
-ggplot(data_total, aes(x = stratum, y = plot_understory_cover)) +
+p_uvc = ggplot(data_total, aes(x = stratum, y = plot_understory_cover, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Understory vegetation cover [%]')
-ggplot(data_total, aes(x = stratum, y = plot_understory_vol)) +
+  labs(subtitle = 'Understory veg cover [%]')
+p_uvv = ggplot(data_total, aes(x = stratum, y = plot_understory_vol, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Understory vegetation volume [m3/ha]')
+  labs(subtitle = 'Understory veg vol [m3/ha]')
 
-ggplot(data_total, aes(x = stratum, y = homerange_canopy_cover_mean)) +
+p_cc = ggplot(data_total, aes(x = stratum, y = homerange_canopy_cover_mean, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Canopy cover (mean) [%]')
-ggplot(data_total, aes(x = age_mean, y = homerange_canopy_cover_mean)) +
+  labs(subtitle = 'Canopy cover (mean) [%]')
+ggplot(data_total, aes(x = age_mean, y = homerange_canopy_cover_mean, fill = stratum)) +
   geom_point() + geom_smooth() +
-  labs(title = 'Canopy cover (mean) [%]')
-ggplot(data_total, aes(x = stratum, y = homerange_canopy_cover_cv)) +
+  labs(subtitle = 'Canopy cover (mean) [%]')
+p_cccv = ggplot(data_total, aes(x = stratum, y = homerange_canopy_cover_cv, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Canopy cover (cv) [#]')
-ggplot(data_total, aes(x = age_mean, y = homerange_canopy_cover_cv)) +
+  labs(subtitle = 'Canopy cover (cv) [#]')
+ggplot(data_total, aes(x = age_mean, y = homerange_canopy_cover_cv, fill = stratum)) +
   geom_point() + geom_smooth() +
-  labs(title = 'Canopy cover (cv) [#]')
+  labs(subtitle = 'Canopy cover (cv) [#]')
 
-ggplot(data_total, aes(x = stratum, y = homerange_canopy_layers_mean)) +
+p_cl = ggplot(data_total, aes(x = stratum, y = homerange_canopy_layers_mean, fill = stratum)) +
   geom_boxplot() +
-  labs(title = 'Canopy layers (mean) [#]')
+  labs(subtitle = 'Canopy layers (mean) [#]')
+
+
+p_strata_structure = (p_age | p_ba | p_h | p_hcv) /
+                     (p_hlc | p_llc | p_lcr | p_cl) /
+                     (p_cc | p_cccv | p_tdl | p_tds) /
+                     (p_tda | p_qmdl | p_qmds | p_qmda) /
+                     (p_ds | p_dwv | p_uvc | p_uvv) + plot_annotation(title = "Fig 1")
+p_strata_structure + plot_layout(guides = "collect") &  # collect legends
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position = "bottom")
