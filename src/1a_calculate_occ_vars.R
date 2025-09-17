@@ -8,8 +8,8 @@
 # TODO: Ensure that aru site locations are correctly positioned within patches (i.e. not near edges so as to get incorrect covariate estimates)
 
 overwrite_rast_cover_cache = FALSE
-overwrite_data_plot_scale_cache = TRUE
-overwrite_data_homerange_scale_cache = TRUE
+overwrite_data_plot_scale_cache = FALSE
+overwrite_data_homerange_scale_cache = FALSE
 path_rast_cover_clean_out = "data/cache/occurrence_covariates/rast_cover_clean.tif"
 path_data_plot_scale_out = "data/cache/occurrence_covariates/data_plot_scale.rds"
 path_data_homerange_scale_out = "data/cache/occurrence_covariates/data_homerange_scale.rds"

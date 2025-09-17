@@ -3,9 +3,12 @@
 library(dplyr)
 library(ggplot2)
 library(PRROC)
+theme_set(theme_classic())
+
+path_predictions_cache = "/Users/giojacuzzi/repos/few-shot-transfer-learning-bioacoustics/data/cache"
 
 p_tp = 0.95 # Desired probability of true positive
-display_plots = FALSE
+display_plots = TRUE
 
 conf_to_logit = function(c) {
   # guard against undefined logit for exceptionally low/high scores beyond model rounding limits
@@ -25,7 +28,7 @@ for (model in models) {
   message("Calculating species-specific thresholds and performance metrics for model: ", model)
   
   results = data.frame()
-  path_in = paste0("data/debug/predictions_", model, ".parquet")
+  path_in = paste0(path_predictions_cache, "/predictions_", model, ".parquet")
   predictions = arrow::read_parquet(path_in) %>% arrange(file, label_predicted)
   labels = sort(unique(predictions$label_predicted))
   n_labels = length(labels)
@@ -61,11 +64,85 @@ for (model in models) {
     
     message("Classifier performance PR-AUC ", round(auc_pr,3), ", ROC-AUC ", round(auc_roc,3))
     
+    threshold_conf <- precision_tp <- recall_tp <- precision_0.5 <- recall_0.5 <- NA
+    
     # Perform platt scaling to determine threshold for desired probability of true positive
     model_warning = FALSE
     tryCatch(
       {
         regression = glm(label_truth ~ score, data, family = binomial(link = "logit"))
+        intercept   = as.numeric(coef(regression)[1])
+        coefficient = as.numeric(coef(regression)[2])
+        threshold_logit = (log(p_tp / (1 - p_tp)) - intercept) / coefficient # logit scale
+        threshold_conf = logit_to_conf(threshold_logit) # confidence scale
+        
+        message("Threshold to achieve TP probability ", p_tp, ": ", round(threshold_conf, 3))
+        
+        # Calculate estimated precision and recall at this threshold
+        # Predicted positive/negative based on threshold
+        calc_precision_recall = function(d, t_logit) {
+          predicted = ifelse(d$score >= t_logit, 1, 0)
+          TP = sum(predicted == 1 & d$label_truth == 1)
+          FP = sum(predicted == 1 & d$label_truth == 0)
+          FN = sum(predicted == 0 & d$label_truth == 1)
+          return(data.frame(
+            precision = TP / (TP + FP),
+            recall    = TP / (TP + FN)
+          ))
+        }
+        perf_t = calc_precision_recall(data, threshold_logit)
+        precision_tp  = perf_t$precision
+        recall_tp     = perf_t$recall
+        message("Performance at threshold ", round(threshold_conf,3), ": precision ", round(precision_tp,3), ", recall ", round(recall_tp,3))
+        # "For most false-positive models in our study, using a mid-range threshold of 0.50 or above generally yielded stable estimates." (Katsis et al. 2025)
+        perf_t0.5 = calc_precision_recall(data, conf_to_logit(0.5))
+        precision_0.5 = perf_t0.5$precision
+        recall_0.5    = perf_t0.5$recall
+        message("Performance at threshold 0.5: precision ", round(precision_0.5,3), ", recall ", round(recall_0.5,3))
+        
+        if (display_plots) {
+          
+          ## Visualize precision and recall performance as a function of score
+          data_sorted = data %>% mutate(score = logit_to_conf(score)) %>% arrange(desc(score))
+          n_pos = sum(data_sorted$label_truth == 1)
+          data_sorted = data_sorted %>% mutate(
+            tp = cumsum(label_truth == 1),
+            fp = cumsum(label_truth == 0),
+            recall = tp / n_pos,
+            precision = ifelse(tp + fp == 0, 1, tp / (tp + fp))  # handle division by zero
+          )
+          plt = ggplot(data_sorted, aes(x = score)) +
+            geom_line(aes(y = precision, color = "Precision")) +
+            geom_line(aes(y = recall, color = "Recall")) +
+            labs(title = paste0(label, " (", model, " model)"), x = "Score", y = "Performance", color = "Metric"); print(plt)
+          
+          ## Visualize the logistic regression and data
+          x_range = seq(min(data$score), max(data$score), length.out = 100)
+          
+          # Predict fitted values and calculate confidence intervals on probability scale
+          pred = predict(regression, newdata = data.frame(score = x_range), type = "link", se.fit = TRUE)
+          
+          # Calculate confidence intervals on probability scale
+          z = qnorm(0.975)  # 95% CI
+          upper  = logit_to_conf(pred$fit + z * pred$se.fit)
+          lower  = logit_to_conf(pred$fit - z * pred$se.fit)
+          y_pred = logit_to_conf(pred$fit)
+          
+          regression_df = data.frame(score = x_range, prob = y_pred, lower = lower, upper = upper, warning = model_warning)
+          plt = ggplot() +
+            geom_vline(xintercept = 0, color = "gray", linetype = "solid", linewidth = 0.5) +
+            geom_point(data = data, aes(x = score, y = label_truth), shape = 1, alpha = 0.5) +
+            geom_hline(yintercept = p_tp, color = "black", linetype = "dashed", linewidth = 0.5) +
+            geom_vline(xintercept = threshold_logit, color = "black", linetype = "dashed", linewidth = 0.5) +
+            geom_ribbon(data = regression_df, aes(x = score, ymin = lower, ymax = upper, fill = warning), alpha = 0.2) +
+            geom_line(data = regression_df, aes(x = score, y = prob, color = warning), linewidth = 1) +
+            scale_color_manual(values = c("FALSE" = "blue", "TRUE" = "red")) +
+            scale_fill_manual(values = c("FALSE" = "blue", "TRUE" = "red")) +
+            labs(
+              x = "Score (logit)", y = "True positive probability",
+              title = paste0(label, " (", model, " model)"), subtitle = paste0("Threshold p(TP) ≥ ", p_tp, " = ", round(threshold_conf, 3))
+            ); print(plt)
+        }
       },
       warning = function(w) {
         model_warning <<- TRUE
@@ -75,31 +152,6 @@ for (model in models) {
         stop(crayon::red("ERROR", conditionMessage(e)))
       }
     )
-    
-    intercept   = as.numeric(coef(regression)[1])
-    coefficient = as.numeric(coef(regression)[2])
-    threshold_logit = (log(p_tp / (1 - p_tp)) - intercept) / coefficient # logit scale
-    threshold_conf = logit_to_conf(threshold_logit) # confidence scale
-    
-    message("Threshold to achieve TP probability ", p_tp, ": ", round(threshold_conf, 3))
-    
-    # Calculate estimated precision and recall at this threshold
-    # Predicted positive/negative based on threshold
-    calc_precision_recall = function(d, t_logit) {
-      predicted = ifelse(d$score >= t_logit, 1, 0)
-      TP = sum(predicted == 1 & d$label_truth == 1)
-      FP = sum(predicted == 1 & d$label_truth == 0)
-      FN = sum(predicted == 0 & d$label_truth == 1)
-      return(data.frame(
-        precision = TP / (TP + FP),
-        recall    = TP / (TP + FN)
-      ))
-    }
-    perf_t = calc_precision_recall(data, threshold_logit)
-    message("Performance at threshold ", round(threshold_conf,3), ": precision ", round(perf_t$precision,3), ", recall ", round(perf_t$recall,3))
-    # "For most false-positive models in our study, using a mid-range threshold of 0.50 or above generally yielded stable estimates." (Katsis et al. 2025)
-    perf_t0.5 = calc_precision_recall(data, conf_to_logit(0.5))
-    message("Performance at threshold 0.5: precision ", round(perf_t0.5$precision,3), ", recall ", round(perf_t0.5$recall,3))
     
     results = rbind(results, data.frame(
       model         = model,
@@ -111,40 +163,11 @@ for (model in models) {
       warning       = model_warning,
       p_tp          = p_tp,
       t_conf_tp     = threshold_conf,
-      precision_tp  = perf_t$precision,
-      recall_tp     = perf_t$recall,
-      precision_0.5 = perf_t0.5$precision,
-      recall_0.5    = perf_t0.5$recall
+      precision_tp  = precision_tp,
+      recall_tp     = recall_tp,
+      precision_0.5 = precision_0.5,
+      recall_0.5    = recall_0.5
     ))
-    
-    if (display_plots) {
-      # Visualize the logistic regression and data
-      x_range = seq(min(data$score), max(data$score), length.out = 100)
-      
-      # Predict fitted values and calculate confidence intervals on probability scale
-      pred = predict(model, newdata = data.frame(score = x_range), type = "link", se.fit = TRUE)
-      
-      # Calculate confidence intervals on probability scale
-      z = qnorm(0.975)  # 95% CI
-      upper  = logit_to_conf(pred$fit + z * pred$se.fit)
-      lower  = logit_to_conf(pred$fit - z * pred$se.fit)
-      y_pred = logit_to_conf(pred$fit)
-      
-      regression_df = data.frame(score = x_range, prob = y_pred, lower = lower, upper = upper, warning = model_warning)
-      plt = ggplot() +
-        geom_vline(xintercept = 0, color = "gray", linetype = "solid", size = 0.5) +
-        geom_point(data = data, aes(x = score, y = label_truth), shape = 1, alpha = 0.5) +
-        geom_hline(yintercept = p_tp, color = "black", linetype = "dashed", size = 0.5) +
-        geom_vline(xintercept = threshold_logit, color = "black", linetype = "dashed", size = 0.5) +
-        geom_ribbon(data = regression_df, aes(x = score, ymin = lower, ymax = upper, fill = warning), alpha = 0.2) +
-        geom_line(data = regression_df, aes(x = score, y = prob, color = warning), size = 1) +
-        scale_color_manual(values = c("FALSE" = "blue", "TRUE" = "red")) +
-        scale_fill_manual(values = c("FALSE" = "blue", "TRUE" = "red")) +
-        labs(
-          x = "Score (logit)", y = "True positive probability",
-          title = paste0(label, " (", model, " model)"), subtitle = paste0("Threshold p(TP) ≥ ", p_tp, " = ", round(threshold_conf, 3))
-        ); print(plt)
-    }
   }
   
   print(results)

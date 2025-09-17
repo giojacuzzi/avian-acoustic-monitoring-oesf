@@ -1,5 +1,5 @@
 ####################################################################################
-# Compare sets of predictor variables among a shared number of sites:
+# Compare sets of predictor variables (species-specific homerange scales) among a shared number of sites:
 # - Local plot variables (measured by habitat survey)
 # - Local plot variables (measured by remote sensing)
 # - Homerange (i.e. neighborhood/landscape) variables
