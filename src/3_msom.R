@@ -152,7 +152,6 @@ for (sp in species) {
     sp_threshdata = species_thresholds %>% filter(species == sp)
     model     = sp_threshdata %>% pull(model)
     threshold = sp_threshdata %>% pull(threshold)
-    message()
     if (model == "source") {
       mat_obs = matrix(
         unlist(lapply(species_data, function(x) if (!is.null(x)) as.integer(any(x$confidence_source >= threshold, na.rm = TRUE)) else NA)),
@@ -303,101 +302,72 @@ x_yday_unaligned = x_yday
 x_yday = t(apply(x_yday_unaligned, 1, left_align_row))
 dimnames(x_yday) = dimnames(x_yday_unaligned)
 
-# TODO: Observed (certain) detection data, i.e. "site confirmation design"
-path_in = paste0("/Users/giojacuzzi/repos/few-shot-transfer-learning-bioacoustics/data/cache", "/predictions_", model, ".parquet")
-predictions = arrow::read_parquet(path_in) %>% arrange(file, label_predicted)
-predictions = predictions %>%
-  mutate(
-    serialno = str_extract(file, "SMA\\d+"),
-    yday = str_extract(file, "SMA\\d+_(\\d{8})") %>% str_remove("^SMA\\d+_") %>% as.Date(format = "%Y%m%d") %>% yday()
-  )
-path_site_key = "data/sites/site_key_long.csv"
-site_key = read.csv(path_site_key) %>% mutate(site = tolower(site), site_agg = tolower(site_agg), date = as.Date(date, format = "%m/%d/%y"))
-site_key$yday = yday(site_key$date)
-predictions = predictions %>%
-  left_join(
-    site_key %>% select(serialno, yday, site, site_agg),
-    by = c("serialno", "yday")
-  )
-predictions = predictions %>% select(label_truth, serialno, yday, site, site_agg)
-message("Number of certain detections per species:")
-print(table(predictions$label_truth))
-message("Number of unique site-yday certain detections per species:")
-predictions %>%
-  # Keep only unique site-yday-label_truth combinations
-  distinct(site_agg, yday, label_truth) %>%
-  # Count how many unique combinations per label
-  group_by(label_truth) %>%
-  summarise(count = n(), .groups = "drop") %>%
-  arrange(desc(count))
-
-# pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = nrow(predictions), clear = FALSE)
-# for (i in seq_len(nrow(predictions))) {
-#   pred <- predictions[i, ]
-#   
-#   sp <- pred$label_truth
-#   site <- pred$site_agg
-#   yday <- pred$yday
-#   
-#   # Skip if species label is "0" (no detection)
-#   if (sp == "0") next
-#   
-#   # Check if site exists in x_yday
-#   if (!site %in% rownames(x_yday)) next
-#   
-#   # Get survey column corresponding to this yday
-#   survey_col <- which(x_yday[site, ] == yday)
-#   
-#   # Skip if yday not found for the site
-#   if (length(survey_col) == 0) next
-#   survey_col <- survey_col[1]  # take first match
-#   sp_index <- match(sp, dimnames(y)[[3]])
-#   if (is.na(sp_index)) next
-#   
-#   # Set y to 2 (certain detection)
-#   y[site, survey_col, sp_index] <- 2
-#   pb$tick()
-# }
-
-# --- 1. Map site names to row indices in y ---
-site_idx <- match(predictions$site_agg, rownames(y))
-
-# --- 2. Map species names to species dimension indices in y ---
-species_idx <- match(predictions$label_truth, dimnames(y)[[3]])
-
-# --- 3. Map yday to survey column indices using x_yday ---
-survey_idx <- mapply(function(site_name, yday_val) {
-  # Skip if site not in x_yday
-  if (!site_name %in% rownames(x_yday)) return(NA)
+# Observed (certain) detection data, i.e. "site confirmation design"
+if (model_name == "fp_Miller") {
+  path_in = paste0("/Users/giojacuzzi/repos/few-shot-transfer-learning-bioacoustics/data/cache", "/predictions_", model, ".parquet")
+  predictions = arrow::read_parquet(path_in) %>% arrange(file, label_predicted)
+  predictions = predictions %>%
+    mutate(
+      serialno = str_extract(file, "SMA\\d+"),
+      yday = str_extract(file, "SMA\\d+_(\\d{8})") %>% str_remove("^SMA\\d+_") %>% as.Date(format = "%Y%m%d") %>% yday()
+    )
+  path_site_key = "data/sites/site_key_long.csv"
+  site_key = read.csv(path_site_key) %>% mutate(site = tolower(site), site_agg = tolower(site_agg), date = as.Date(date, format = "%m/%d/%y"))
+  site_key$yday = yday(site_key$date)
+  predictions = predictions %>%
+    left_join(
+      site_key %>% select(serialno, yday, site, site_agg),
+      by = c("serialno", "yday")
+    )
+  predictions = predictions %>% select(label_truth, serialno, yday, site, site_agg)
+  message("Number of certain detections per species:")
+  print(table(predictions$label_truth))
+  message("Number of unique site-yday certain detections per species:")
+  predictions %>%
+    distinct(site_agg, yday, label_truth) %>%
+    group_by(label_truth) %>%
+    summarise(count = n(), .groups = "drop") %>%
+    arrange(desc(count))
   
-  # Find survey columns matching this yday <-- TODO: CHECK THIS!
-  cols <- which(x_yday[site_name, ] == yday_val)
-  if (length(cols) == 0) return(NA)  # no match
-  cols[1]  # take first if multiple matches
-}, predictions$site_agg, predictions$yday)
+  # --- 1. Map site names to row indices in y ---
+  site_idx <- match(predictions$site_agg, rownames(y))
+  
+  # --- 2. Map species names to species dimension indices in y ---
+  species_idx <- match(predictions$label_truth, dimnames(y)[[3]])
+  
+  # --- 3. Map yday to survey column indices using x_yday ---
+  survey_idx <- mapply(function(site_name, yday_val) {
+    # Skip if site not in x_yday
+    if (!site_name %in% rownames(x_yday)) return(NA)
+    
+    # Find survey columns matching this yday
+    cols <- which(x_yday[site_name, ] == yday_val)
+    if (length(cols) == 0) return(NA)  # no match
+    cols[1]  # take first if multiple matches
+  }, predictions$site_agg, predictions$yday)
+  
+  # --- 4. Keep only valid rows ---
+  keep <- !is.na(site_idx) & !is.na(survey_idx) & !is.na(species_idx) & predictions$label_truth != "0"
+  
+  # --- 5. Vectorized assignment to y ---
+  y[cbind(site_idx[keep], survey_idx[keep], species_idx[keep])] <- 2
+  
+  counts_df <- data.frame(
+    species = species,
+    nondetection = integer(length(species)),
+    unconfirmed = integer(length(species)),
+    confirmed = integer(length(species))
+  )
+  
+  # Loop over species and count
+  for (i in seq_along(species)) {
+    vals <- as.vector(y[ , , i])       # flatten site x survey for this species
+    tab <- table(factor(vals, levels = 0:2))  # ensure all levels 0,1,2 are counted
+    counts_df[i, c("nondetection", "unconfirmed", "confirmed")] <- as.integer(tab)
+  }
+  counts_df
 
-# --- 4. Keep only valid rows ---
-keep <- !is.na(site_idx) & !is.na(survey_idx) & !is.na(species_idx) & predictions$label_truth != "0"
-
-# --- 5. Vectorized assignment to y ---
-y[cbind(site_idx[keep], survey_idx[keep], species_idx[keep])] <- 2
-
-
-
-counts_df <- data.frame(
-  species = species,
-  nondetection = integer(length(species)),
-  unconfirmed = integer(length(species)),
-  confirmed = integer(length(species))
-)
-
-# Loop over species and count
-for (i in seq_along(species)) {
-  vals <- as.vector(y[ , , i])       # flatten site x survey for this species
-  tab <- table(factor(vals, levels = 0:2))  # ensure all levels 0,1,2 are counted
-  counts_df[i, c("nondetection", "unconfirmed", "confirmed")] <- as.integer(tab)
 }
-counts_df
 
 # Get detection covariate data
 detection_data = readRDS("data/cache/detection_covariates/data_detection.rds") %>% filter(year == t)
@@ -441,7 +411,7 @@ param_alpha_names = c(
   "homerange_treeden_all_mean"
 )
 param_delta_names = c(
-  "cover_forest_diversity",
+  # "cover_forest_diversity",
   "density_roads_paved",
   "density_streams_major",
   "focalpatch_area_homeange_pcnt",
@@ -553,7 +523,7 @@ model{
 
   ## Community level hyperpriors
 
-  # Community mean occurrence
+  # Occurrence
   psi.mean ~ dunif(0,1)                   # probability scale
   mu.u <- log(psi.mean) - log(1-psi.mean) # logit scale
   sigma.u ~ dunif(0,5)                    # standard deviation
@@ -593,17 +563,14 @@ model{
   mu.delta7 ~ dnorm(0,0.01)
   sigma.delta7 ~ dunif(0,5)
   tau.delta7 <- pow(sigma.delta7,-2)
-  mu.delta8 ~ dnorm(0,0.01)
-  sigma.delta8 ~ dunif(0,5)
-  tau.delta8 <- pow(sigma.delta8,-2)
   
-  # Community hyperpriors for unconfirmed detection method (classifier)
-  v.mean  ~ dunif(0,1)                 # probability scale
-  mu.v  <- log(v.mean) - log(1-v.mean) # logit scale
-  sigma.v ~ dunif(0,5)                 # standard deviation
-  tau.v <- pow(sigma.v,-2)             # precision
+  # Detection (unconfirmed true-positive)
+  v.mean  ~ dunif(0,1)
+  mu.v  <- log(v.mean) - log(1-v.mean)
+  sigma.v ~ dunif(0,5)
+  tau.v <- pow(sigma.v,-2)
 
-  # Covariate effects on detection (unconfirmed classifier)
+  # Covariate effects on detection (unconfirmed true-positive)
   mu.beta1    ~ dnorm(0,0.01)
   sigma.beta1 ~ dunif(0,5)
   tau.beta1  <- pow(sigma.beta1,-2)
@@ -614,170 +581,141 @@ model{
   sigma.beta3 ~ dunif(0,5)
   tau.beta3  <- pow(sigma.beta3,-2)
   
-  # Hyperpriors for false-positive unconfirmed detection method (classifier)
+  # False-positive unconfirmed detection (Royle and Link 2006, Miller et al. 2011)
   mu.w ~ dnorm(0,0.01)
   sigma.w ~ dunif(0,5)
   tau.w <- pow(sigma.w,-2)
   
-  # Hyperpriors for Miller model 'certain classification' parameter b
+  # Confirmed true positive detection (Miller et al. 2011)
   mu.b ~ dnorm(0,0.01)
   sigma.b ~ dunif(0,5)
   tau.b <- pow(sigma.b,-2)
 
   for (i in 1:I) { # for each species
   
-      # Species level priors for occupancy coefficients (note that dnorm in JAGS is parametrized with precision [tau], not sd [sigma])
-      u[i]       ~ dnorm(mu.u, tau.u)
-      alpha1[i]  ~ dnorm(mu.alpha1,tau.alpha1)
-      alpha2[i]  ~ dnorm(mu.alpha2,tau.alpha2)
-      alpha3[i]  ~ dnorm(mu.alpha3,tau.alpha3)
-      alpha4[i]  ~ dnorm(mu.alpha4,tau.alpha4)
-      delta1[i]  ~ dnorm(mu.delta1,tau.delta1)
-      delta2[i]  ~ dnorm(mu.delta2,tau.delta2)
-      delta3[i]  ~ dnorm(mu.delta3,tau.delta3)
-      delta4[i]  ~ dnorm(mu.delta4,tau.delta4)
-      delta5[i]  ~ dnorm(mu.delta5,tau.delta5)
+      ## Species level priors
+      
+      # Occupancy
+      u[i]      ~ dnorm(mu.u, tau.u)
+      alpha1[i] ~ dnorm(mu.alpha1,tau.alpha1)
+      alpha2[i] ~ dnorm(mu.alpha2,tau.alpha2)
+      alpha3[i] ~ dnorm(mu.alpha3,tau.alpha3)
+      alpha4[i] ~ dnorm(mu.alpha4,tau.alpha4)
+      delta1[i] ~ dnorm(mu.delta1,tau.delta1)
+      delta2[i] ~ dnorm(mu.delta2,tau.delta2)
+      delta3[i] ~ dnorm(mu.delta3,tau.delta3)
+      delta4[i] ~ dnorm(mu.delta4,tau.delta4)
+      delta5[i] ~ dnorm(mu.delta5,tau.delta5)
       delta6[i] ~ dnorm(mu.delta6,tau.delta6)
       delta7[i] ~ dnorm(mu.delta7,tau.delta7)
-      delta8[i] ~ dnorm(mu.delta8,tau.delta8)
   
-      # Species level priors for unconfirmed detection covariates (classifier)
-      v[i] ~ dnorm(mu.v, tau.v)
+      # Unconfirmed true positive detection
+      v[i]     ~ dnorm(mu.v, tau.v)
       beta1[i] ~ dnorm(mu.beta1,tau.beta1)
       beta2[i] ~ dnorm(mu.beta2,tau.beta2)
       beta3[i] ~ dnorm(mu.beta3,tau.beta3)
       
-      # Species level prior for unconfirmed detection false-positive covariates (classifier)
+      # Unconfirmed false positive detection
       w[i] ~ dnorm(mu.w,tau.w)
       
-      # Species-level prior for Miller 'certain-classification' probability
+      # Confirmed true positive detection
       gamma[i] ~ dnorm(mu.b, tau.b)
       b[i] <- 1 / (1 + exp(-gamma[i]))
   
-      for (j in 1:J) { # for each site
+      for (j in 1:J) { # for each site j
         
           # Ecological process model for latent occurrence z
-          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + delta1[i]*x_delta1[j,i] + delta2[i]*x_delta2[j,i] + delta3[i]*x_delta3[j,i] + delta4[i]*x_delta4[j,i] + delta5[i]*x_delta5[j,i] + delta6[i]*x_delta6[j,i] + delta7[i]*x_delta7[j,i] + delta8[i]*x_delta8[j,i]
+          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + delta1[i]*x_delta1[j,i] + delta2[i]*x_delta2[j,i] + delta3[i]*x_delta3[j,i] + delta4[i]*x_delta4[j,i] + delta5[i]*x_delta5[j,i] + delta6[i]*x_delta6[j,i] + delta7[i]*x_delta7[j,i]
           z[j,i] ~ dbern(psi[j,i])
           
-          for (k in 1:K[j]) { # for each sampling period (survey) at site j
+          for (k in 1:K[j]) { # for each sampling period (survey) k at site j
 ",
 switch(model_name,
   nofp = "
-              ## Observation model for unconfirmed data y (assumming no false positives)
+              ## Observation model, assumming no false positives (e.g. Zipkin et al. 2009)
               
-              # p11 is true-positive detection probability given z=1
+              # p11 is true-positive detection probability given z = 1
               logit(p11[j,k,i]) <- v[i] + beta1[i]*x_beta1[j,k] + beta2[i]*x_beta2[j,k] + beta3[i]*x_beta3[j,k]
             
               p[j,k,i] <- z[j,i] * p11[j,k,i]
               
+              # Observed outcome
               y[j,k,i] ~ dbern(p[j,k,i])
               
-              ## Create simulated dataset and calculate posterior predictive checks (bayesian p-values)
+             # Simulated replicate for posterior predictive checks
               y.sim[j,k,i] ~ dbern(p[j,k,i])
               
               # Squared error (Zipkin et al. 2009)
-              # Does the model predict observed detections/non-detections about as well as it predicts replicated data under its own assumptions?
-              # Summing these gives a measure of average squared prediction error across all sites, surveys, and species. The Bayesian p-value is then the probability that the discrepancy for simulated data exceeds that for observed data.
-              d.obs.se[j,k,i] <- pow(y[j,k,i] - p[j,k,i], 2)
-              d.sim.se[j,k,i] <- pow(y.sim[j,k,i] - p[j,k,i], 2)
+              # d.obs.se[j,k,i] <- pow(y[j,k,i] - p[j,k,i], 2)
+              # d.sim.se[j,k,i] <- pow(y.sim[j,k,i] - p[j,k,i], 2)
               
-              # Bernoulli deviance contribution (Broms et al. 2016)
-              # Is the overall likelihood of the observed detection histories under the fitted model about the same as the likelihood of new data generated from that model?
-              # The Bayesian p-value is the proportion of iterations where the observed deviance is greater than the replicated deviance.
-              # dev = -2 * ( y*log(p) + (1-y)*log(1-p) )
-              # guard p away from 0/1 to avoid division by zero (add small epsilon)
-              p.safe[j,k,i] <- max(min(p[j,k,i], 1 - eps), eps)
-              d.obs.dev[j,k,i] <- -2 * ( y[j,k,i] * log(p.safe[j,k,i]) + (1 - y[j,k,i]) * log(1 - p.safe[j,k,i]) )
-              d.sim.dev[j,k,i] <- -2 * ( y.sim[j,k,i] * log(p.safe[j,k,i]) + (1 - y.sim[j,k,i]) * log(1 - p.safe[j,k,i]) )
+              # Deviance (Broms et al. 2016)
+              d.obs.dev[j,k,i] <- -2 * ( y[j,k,i] * log(p[j,k,i]) + (1 - y[j,k,i]) * log(1 - p[j,k,i]) )
+              d.sim.dev[j,k,i] <- -2 * ( y.sim[j,k,i] * log(p[j,k,i]) + (1 - y.sim[j,k,i]) * log(1 - p[j,k,i]) )
   ",
   fp_RoyleLink = "
-              ## Observation mixture model for unconfirmed data y (Royle and Link 2006)
+              ## Observation mixture model with false positives (Royle and Link 2006)
               
-              # p11 is true-positive detection probability given z=1
+              # p11 is true-positive detection probability given z = 1
               logit(p11[j,k,i]) <- v[i] + beta1[i]*x_beta1[j,k] + beta2[i]*x_beta2[j,k] + beta3[i]*x_beta3[j,k]
               
-              # p10 is false-positive detection probability given z=0
+              # p10 is false-positive detection probability given z = 0
               logit(p10[j,k,i]) <- w[i]
             
               p[j,k,i] <- z[j,i] * p11[j,k,i] + (1 - z[j,i]) * p10[j,k,i]
               
+              # Observed outcome
               y[j,k,i] ~ dbern(p[j,k,i])
               
-              ## Create simulated dataset and calculate posterior predictive checks (bayesian p-values)
+              # Simulated replicate for posterior predictive checks
               y.sim[j,k,i] ~ dbern(p[j,k,i])
               
               # Squared error (Zipkin et al. 2009)
-              # Does the model predict observed detections/non-detections about as well as it predicts replicated data under its own assumptions?
-              # Summing these gives a measure of average squared prediction error across all sites, surveys, and species. The Bayesian p-value is then the probability that the discrepancy for simulated data exceeds that for observed data.
-              d.obs.se[j,k,i] <- pow(y[j,k,i] - p[j,k,i], 2)
-              d.sim.se[j,k,i] <- pow(y.sim[j,k,i] - p[j,k,i], 2)
+              # d.obs.se[j,k,i] <- pow(y[j,k,i] - p[j,k,i], 2)
+              # d.sim.se[j,k,i] <- pow(y.sim[j,k,i] - p[j,k,i], 2)
               
-              # Bernoulli deviance contribution (Broms et al. 2016)
-              # Is the overall likelihood of the observed detection histories under the fitted model about the same as the likelihood of new data generated from that model?
-              # The Bayesian p-value is the proportion of iterations where the observed deviance is greater than the replicated deviance.
-              # dev = -2 * ( y*log(p) + (1-y)*log(1-p) )
-              # guard p away from 0/1 to avoid division by zero (add small epsilon)
-              p.safe[j,k,i] <- max(min(p[j,k,i], 1 - eps), eps)
-              d.obs.dev[j,k,i] <- -2 * ( y[j,k,i] * log(p.safe[j,k,i]) + (1 - y[j,k,i]) * log(1 - p.safe[j,k,i]) )
-              d.sim.dev[j,k,i] <- -2 * ( y.sim[j,k,i] * log(p.safe[j,k,i]) + (1 - y.sim[j,k,i]) * log(1 - p.safe[j,k,i]) )
+              # Deviance (Broms et al. 2016)
+              d.obs.dev[j,k,i] <- -2 * ( y[j,k,i] * log(p[j,k,i]) + (1 - y[j,k,i]) * log(1 - p[j,k,i]) )
+              d.sim.dev[j,k,i] <- -2 * ( y.sim[j,k,i] * log(p[j,k,i]) + (1 - y.sim[j,k,i]) * log(1 - p[j,k,i]) )
   ",
   fp_Miller = "
-              ## Multiple-detection-state model (Miller et al. 2011)
-              ## Observation states (JAGS categories): 1 = no detect, 2 = uncertain, 3 = certain
-              ## NOTE: your input y must be coded 1/2/3 accordingly (i.e., original 0/1/2 + 1)
-              
-              # p11 is true-positive detection probability given z=1
+              ## Multiple-detection-state observation model (Miller et al. 2011)
+              # States: 1 = nondetection, 2 = uncertain detection, 3 = certain detection
+  
+              # p11 is true-positive detection probability given z = 1
               logit(p11[j,k,i]) <- v[i] + beta1[i]*x_beta1[j,k] + beta2[i]*x_beta2[j,k] + beta3[i]*x_beta3[j,k]
               
-              # p10 is false-positive detection probability given z=0
+              # p10 is false-positive detection probability given z = 0
               logit(p10[j,k,i]) <- w[i]
               
-              # b[i] is prob a detection is classified as 'certain' given species was detected at an occupied site
-              # b[i] produced via species-level logistic random effect gamma[i]
-              # (mu.b, sigma.b hyperpriors defined above)
+              # b is the certainty confirmation probability given z = 1 and the species was detected
+              # (not a function of covariates)
               
-              # Define the probability vectors for each true state (z=0 and z=1)
-              # Indexing for dcat: 1 -> no detect, 2 -> uncertain, 3 -> certain
-              probs0[j,k,i,1] <- 1 - p10[j,k,i]
-              probs0[j,k,i,2] <- p10[j,k,i]
-              probs0[j,k,i,3] <- 0
+              # Nondetection
+              pi[j,k,i,1] <- z[j,i] * (1 - p11[j,k,i]) + (1 - z[j,i]) * (1 - p10[j,k,i])
+              # Uncertain detection
+              pi[j,k,i,2] <- z[j,i] * (1 - b[i]) * p11[j,k,i] + (1 - z[j,i]) * p10[j,k,i]
+              # Certain detection
+              pi[j,k,i,3] <- z[j,i] * b[i] * p11[j,k,i]
+
+              # Observed categorical outcome
+              y[j,k,i] ~ dcat(pi[j,k,i, ])
               
-              probs1[j,k,i,1] <- 1 - p11[j,k,i]
-              probs1[j,k,i,2] <- (1 - b[i]) * p11[j,k,i]
-              probs1[j,k,i,3] <- b[i] * p11[j,k,i]
-              
-              # Mix according to latent occupancy z
-              probs[j,k,i,1:3] <- z[j,i] * probs1[j,k,i,1:3] + (1 - z[j,i]) * probs0[j,k,i,1:3]
-              
-              # Observed categorical outcome (JAGS requires categories 1..L)
-              y[j,k,i] ~ dcat(probs[j,k,i,1:3])
-              
-              # Simulated replicate
-              # y.sim[j,k,i] ~ dcat(probs[j,k,i,1:3])
+              # Simulated replicate for posterior predictive checks
+              y.sim[j,k,i] ~ dcat(pi[j,k,i, ])
               
               ## Posterior predictive checks
               # p_obs is the model probability of the actually observed category
-              # p.obs_cat[j,k,i] <- probs[j,k,i,y[j,k,i]]
-              # p.sim_cat[j,k,i] <- probs[j,k,i,y.sim[j,k,i]]
+              p.obs_cat[j,k,i] <- pi[j,k,i, y[j,k,i]]
+              p.sim_cat[j,k,i] <- pi[j,k,i, y.sim[j,k,i]]
               
-              # guard p away from 0/1
-              # p.obs.safe[j,k,i] <- max(min(p.obs_cat[j,k,i], 1 - eps), eps)
-              # p.sim.safe[j,k,i] <- max(min(p.sim_cat[j,k,i], 1 - eps), eps)
-              
-              # Squared error: compare an indicator of the observed category to the model probability for that category
-              # Create indicator for observed category (1 if observed category==l else 0) — we implement using y_ind = 1 for observed category
-              # For squared-error we just use indicator 1 vs p.obs_cat (equivalently compute (1 - p_obs)^2)
-              # d.obs.se[j,k,i] <- pow(1 - p.obs_cat[j,k,i], 2) * 1    # when observed category exists, indicator=1
-              # d.sim.se[j,k,i] <- pow(1 - p.sim_cat[j,k,i], 2) * 1    # for the simulated draw
-              
-              # Categorical deviance contribution: -2 * log(p_obs)
-              # d.obs.dev[j,k,i] <- -2 * log(p.obs.safe[j,k,i])
-              # d.sim.dev[j,k,i] <- -2 * log(p.sim.safe[j,k,i])
+              # Deviance
+              d.obs.dev[j,k,i] <- -2 * log(p.obs_cat[j,k,i])
+              d.sim.dev[j,k,i] <- -2 * log(p.sim_cat[j,k,i])
   ",
 ""),
 "
-          }
+          } # K surveys
           
           ## Sums per site/species for each posterior predictive check
           
@@ -785,22 +723,23 @@ switch(model_name,
           # d.obs.se.sum[j,i] <- sum(d.obs.se[j,1:K[j],i])
           # d.sim.se.sum[j,i] <- sum(d.sim.se[j,1:K[j],i])
           
-          # Bernoulli deviance contribution
-          # d.obs.dev.sum[j,i] <- sum(d.obs.dev[j,1:K[j],i])
-          # d.sim.dev.sum[j,i] <- sum(d.sim.dev[j,1:K[j],i])
-      }
-  }
+          # Deviance
+          d.obs.dev.sum[j,i] <- sum(d.obs.dev[j,1:K[j],i])
+          d.sim.dev.sum[j,i] <- sum(d.sim.dev[j,1:K[j],i])
+
+      } # J sites
+  } # I species
   
   ## Derived quantities
   
   # Discrepancy measure between observed and simulated data is defined as mean(D.obs > D.sim)
   # D.obs.se <- sum(d.obs.se.sum[1:J,1:I])
   # D.sim.se <- sum(d.sim.se.sum[1:J,1:I])
-  # bayes.p.se <- step(D.sim.se - D.obs.se)  # note: at each iter this is 1 if sim>obs, 0 otherwise; average it later
+  # bayes.p.se <- step(D.sim.se - D.obs.se)  # 1 if sim > 0, 0 otherwise
   
-  # D.obs.dev <- sum(d.obs.dev.sum[1:J,1:I])
-  # D.sim.dev <- sum(d.sim.dev.sum[1:J,1:I])
-  # bayes.p.dev <- step(D.sim.dev - D.obs.dev)
+  D.obs.dev <- sum(d.obs.dev.sum[1:J,1:I])
+  D.sim.dev <- sum(d.sim.dev.sum[1:J,1:I])
+  bayes.p.dev <- step(D.sim.dev - D.obs.dev)
   
   # Estimated number of occuring sites per species (among the sampled population of sites)
   for (i in 1:I) {
@@ -821,6 +760,9 @@ writeLines(model_spec, con = model_file)
 ############################################################################################################################
 # Run JAGS
 
+message("\n", "System CPU: "); print(as.data.frame(t(benchmarkme::get_cpu())))
+message("System RAM: "); print(benchmarkme::get_ram())
+
 message("Running JAGS (current time ", time_start <- Sys.time(), ")")
 
 msom = jags(data = msom_data,
@@ -838,7 +780,8 @@ msom = jags(data = msom_data,
               paste0("mu.alpha", 1:n_alpha_params), paste0("sigma.alpha", 1:n_alpha_params), paste0("alpha", 1:n_alpha_params),
               paste0("mu.delta", 1:n_delta_params), paste0("sigma.delta", 1:n_delta_params), paste0("delta", 1:n_delta_params),
               paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params),
-              # "bayes.p.se", "bayes.p.dev",
+              # "bayes.p.se",
+              "bayes.p.dev",
               "Nsite", "Nocc"
             ),
             model.file = model_file,
