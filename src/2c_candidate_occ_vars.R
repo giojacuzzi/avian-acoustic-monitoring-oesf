@@ -196,7 +196,8 @@ var_candidates_homerangescale = var_candidates_homerangescale %>% select(-all_of
   'focalpatch_core_area_homeange_pcnt', 'aggregation_idx',
   'cover_forest_richness', 'cover_forest_evenness', # ~ cover_forest_diversity
   'prop_abund_undstryreinit', 'prop_abund_oldgrowth', # prop_abund_lsog = prop_abund_undstryreinit + prop_abund_oldgrowth
-  'prop_abund_standinit',  # ~ density_edge_cw
+  # 'prop_abund_standinit',  # ~ density_edge_cw
+  'density_edge_cw',
   # 'prop_abund_2',        # competitive exclusion
   'prop_abund_roads',      # ~ density_roads_paved
   'prop_abund_water'       # ~ density_streams_major
@@ -207,7 +208,8 @@ pairwise_collinearity(var_candidates_homerangescale)
 # VIF analysis for multicollinearity (consider dropping variable(s) with high VIF values (> 10))
 model = lm(rep(1, nrow(var_candidates_homerangescale)) ~ ., data = var_candidates_homerangescale)
 sort(vif(model))
-model = lm(rep(1, nrow(var_candidates_homerangescale)) ~ . -density_roads -prop_abund_stemexcl, data = var_candidates_homerangescale)
+# - prop_abund_stemexcl
+model = lm(rep(1, nrow(var_candidates_homerangescale)) ~ . -density_roads -focalpatch_isolation -cover_forest_diversity, data = var_candidates_homerangescale)
 sort(vif(model))
 
 # RESULT:
