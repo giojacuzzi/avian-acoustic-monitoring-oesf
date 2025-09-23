@@ -11,9 +11,9 @@ theme_set(theme_bw())
 species_metadata = read.csv("data/traits/species_metadata(included).csv", nrows = 107) %>% select(common_name, scientific_name, home_range_radius_m, residency, habitat_association, habitat_ebird) %>% mutate(species_name = tolower(common_name))
 
 model_paths = c(
-  "data/cache/models/nofp_2025-09-15.rds",
-  "data/cache/models/fp_RoyleLink_2025-09-15.rds",
-  "data/cache/models/fp_Miller_2025-09-17.rds"
+  "data/cache/models/nofp_2025-09-22.rds",
+  "data/cache/models/fp_RoyleLink_2025-09-22.rds",
+  "data/cache/models/fp_Miller_2025-09-19.rds"
 )
 
 model_data = list()
@@ -140,17 +140,17 @@ species_baselines %>% filter(startsWith(param, "u")) %>% group_by(model) %>% sum
   .groups = "drop"
 )
 
-# Aggregate min and max per species and model
-range_prob <- aggregate(prob ~ species + model, data = u_params, 
-                        FUN = function(x) c(min = min(x), max = max(x)))
-
-# Fix column names (aggregate creates a matrix in the column)
-range_prob <- data.frame(
-  species = range_prob$species,
-  model = range_prob$model,
-  prob_min = range_prob$prob[, "min"],
-  prob_max = range_prob$prob[, "max"]
-)
+# # Aggregate min and max per species and model
+# range_prob <- aggregate(prob ~ species + model, data = u_params, 
+#                         FUN = function(x) c(min = min(x), max = max(x)))
+# 
+# # Fix column names (aggregate creates a matrix in the column)
+# range_prob <- data.frame(
+#   species = range_prob$species,
+#   model = range_prob$model,
+#   prob_min = range_prob$prob[, "min"],
+#   prob_max = range_prob$prob[, "max"]
+# )
 
 ggplot(species_baselines %>% filter(startsWith(param, "u")), aes(x = prob, y = species_name, shape = model, color = model)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
@@ -179,6 +179,15 @@ ggplot(species_baselines %>% filter(startsWith(param, "b")), aes(x = prob, y = s
   labs(x = "Posterior probability", y = "Species index", shape = "Model", color = "Model",
        title = "Species-specific certain confirmation probability given detection `b` across models (mean and 95% BCI)"
   )
+
+message("Species false positive probability range:")
+species_baselines %>% filter(startsWith(param, "w")) %>% group_by(model) %>% summarise(
+  prob_min = min(prob),
+  species_min = species_name[which.min(prob)],
+  prob_max = max(prob),
+  species_max = species_name[which.max(prob)],
+  .groups = "drop"
+)
 
 
 ####################################################################################################################
