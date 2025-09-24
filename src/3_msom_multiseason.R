@@ -430,14 +430,7 @@ if (model_name == "fp_Miller") {
   message("By season:")
   print(table(predictions$season, predictions$label_truth))
   
-  # predictions = predictions %>% filter(season == "2020") # TODO: DEBUG!
-  
-  # message("Number of unique site-yday certain detections per species:")
-  # predictions %>%
-  #   distinct(site_agg, yday, label_truth) %>%
-  #   group_by(label_truth) %>%
-  #   summarise(count = n(), .groups = "drop") %>%
-  #   arrange(desc(count))
+  ## TODO: Miller model incorporation!
   
   # --- 1. Map site names to row indices in y ---
   site_idx <- match(predictions$site_agg, dimnames(y)[["site"]])
@@ -447,17 +440,6 @@ if (model_name == "fp_Miller") {
   
   # --- 3. Map seasons to season indices in y ---
   season_idx <- match(predictions$season, dimnames(y)[["season"]])
-  
-  # # --- 3. Map yday to survey column indices using x_yday ---
-  # survey_idx <- mapply(function(site_name, yday_val) {
-  #   # Skip if site not in x_yday
-  #   if (!site_name %in% sites) return(NA)
-  # 
-  #   # Find survey columns matching this yday
-  #   cols <- which(x_yday[[1]][site_name, ] == yday_val)
-  #   if (length(cols) == 0) return(NA)  # no match
-  #   cols[1]  # take first if multiple matches
-  # }, predictions %>% pull(site_agg), predictions %>% pull(yday))
   
   # --- 3. Map yday to survey column indices using x_yday (season-aware) ---
   survey_idx <- mapply(function(site_name, yday_val, season_val) {
@@ -477,10 +459,7 @@ if (model_name == "fp_Miller") {
   keep <- !is.na(site_idx) & !is.na(survey_idx) &
           !is.na(species_idx) & !is.na(season_idx) &
           predictions$label_truth != "0"
-  
-  # # --- 5. Vectorized assignment to y ---
-  # y[cbind(site_idx[keep], survey_idx[keep], species_idx[keep])] <- 2
-  
+
   # --- 5. Vectorized assignment into 4D y ---
   y[cbind(site_idx[keep], survey_idx[keep], season_idx[keep], species_idx[keep])] <- 2
   
@@ -490,6 +469,7 @@ if (model_name == "fp_Miller") {
     unconfirmed = integer(length(species)),
     confirmed = integer(length(species))
   )
+  
   
   # # Loop over species and count
   # for (i in seq_along(species)) {
@@ -678,25 +658,28 @@ n_beta_params = nrow(param_beta_data)
 ############################################################################################################################
 # Prepare all data for the model
 
-##### DEBUG TODO: BELOW IN PROGRESS
-
 # Initialize latent occupancy state z[i] as 1 if a detection occurred at site i, and 0 otherwise
-z = matrix(data = NA, nrow = length(sites), ncol = length(species), dimnames = list(sites, species))
-for (i in 1:length(sites)) {
-  for (sp in 1:length(species)) { z[i,sp] = sum(y[i, , sp], na.rm = TRUE) }
+z = array(NA, dim = c(length(sites), length(seasons), length(species)), dimnames = list(sites, seasons, species))
+for (j in seq_along(sites)) {
+  for (t in seq_along(seasons)) {
+    for (i in seq_along(species)) {
+      z[j, t, i] = (sum(y[j, , t, i], na.rm = TRUE) > 0) * 1
+    }
+  }
 }
-z = (z > 0) * 1
 
 # Model data constants and covariates
 I = length(species)
 J = length(sites)
-K = as.vector(n_surveys_per_site)
+K = as.matrix(as.data.frame(lapply(n_surveys_per_site, as.vector)))
+T = length(seasons)
 
 msom_data = list(
   y = y, # observed (detection-nondetection) data matrix
-  I = I, # number of species observed
   J = J, # number of sites sampled
-  K = K,  # number of sampling periods (surveys) per site
+  K = K, # number of secondary sampling periods (surveys) per site per season (site x season)
+  T = T, # number of primary sampling periods (seasons)
+  I = I, # number of species observed
   eps = 1e-6
 )
 for (a in seq_len(n_alpha_params)) { # Add alpha covariates
@@ -705,13 +688,34 @@ for (a in seq_len(n_alpha_params)) { # Add alpha covariates
 for (d in seq_len(n_delta_params)) { # Add delta covariates
   param_data_new = do.call(cbind, param_delta_data %>% filter(name == param_delta_data$name[d]) %>% pull(data) %>% .[[1]])
   msom_data[[paste0("x_", param_delta_data$param[d])]] = param_data_new
-  # param_data = do.call(cbind, delta_data[[param_delta_names[d]]])
-  # msom_data[[paste0("x_delta", d)]] = param_data
 }
-for (b in seq_len(n_beta_params)) { # Add detection covariates
-  mat_dim <- dim(detect_data[[param_beta_data$name[b]]])
-  msom_data[[paste0("x_", param_beta_data$param[b])]] <- array(param_beta_data$scaled[[b]], dim = mat_dim)
+##### DEBUG TODO: BELOW IN PROGRESS
+to_3d_array <- function(x) {
+  if (is.list(x)) {
+    # yday case: list of season-specific matrices
+    arr <- abind::abind(x, along = 3)
+    dimnames(arr)[[3]] <- names(x)  # keep season names
+    return(arr)
+  } else {
+    # already an array (prcp_mm_day, tmax_deg_c)
+    return(x)
+  }
 }
+
+# Loop over beta parameters
+for (b in seq_len(n_beta_params)) {
+  arr <- to_3d_array(detect_data[[param_beta_data$name[b]]])  # now always 3D
+  vec <- as.vector(param_beta_data$scaled[[b]])               # flatten to 1D
+  
+  stopifnot(length(vec) == prod(dim(arr)))  # safety check
+  
+  msom_data[[paste0("x_", param_beta_data$param[b])]] <- array(
+    vec,
+    dim = dim(arr),
+    dimnames = dimnames(arr)
+  )
+}
+
 str(msom_data)
 
 ############################################################################################################################
@@ -817,76 +821,80 @@ model{
       beta3[i] ~ dnorm(mu.beta3,tau.beta3)
       
       # Unconfirmed false positive detection
-      w[i] ~ dnorm(mu.w,tau.w)
+      # w[i] ~ dnorm(mu.w,tau.w)
       
       # Confirmed true positive detection
-      gamma[i] ~ dnorm(mu.b, tau.b)
-      b[i] <- 1 / (1 + exp(-gamma[i]))
+      # gamma[i] ~ dnorm(mu.b, tau.b)
+      # b[i] <- 1 / (1 + exp(-gamma[i]))
   
       for (j in 1:J) { # for each site j
-        
-          # Ecological process model for latent occurrence z
-          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + delta1[i]*x_delta1[j,i] + delta2[i]*x_delta2[j,i] + delta3[i]*x_delta3[j,i] + delta4[i]*x_delta4[j,i] + delta5[i]*x_delta5[j,i] + delta6[i]*x_delta6[j,i] + delta7[i]*x_delta7[j,i]
-          z[j,i] ~ dbern(psi[j,i])
+      
+          for (t in 1:T) { # for each season t
           
-          for (k in 1:K[j]) { # for each sampling period (survey) k at site j
-
-              ## Observation model, assumming no false positives (e.g. Zipkin et al. 2009)
+              # Ecological process model for latent occurrence z
+              logit(psi[j,t,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + delta1[i]*x_delta1[j,i] + delta2[i]*x_delta2[j,i] + delta3[i]*x_delta3[j,i] + delta4[i]*x_delta4[j,i] + delta5[i]*x_delta5[j,i] + delta6[i]*x_delta6[j,i] + delta7[i]*x_delta7[j,i]
+              z[j,t,i] ~ dbern(psi[j,t,i])
               
-              # p11 is true-positive detection probability given z = 1
-              logit(p11[j,k,i]) <- v[i] + beta1[i]*x_beta1[j,k] + beta2[i]*x_beta2[j,k] + beta3[i]*x_beta3[j,k]
-            
-              p[j,k,i] <- z[j,i] * p11[j,k,i]
+              for (k in 1:K[j,t]) { # for each sampling period (survey) k at site j during season t
+    
+                  ## Observation model, assumming no false positives (e.g. Zipkin et al. 2009)
+                  
+                  # p11 is true-positive detection probability given z = 1
+                  logit(p11[j,k,t,i]) <- v[i] + beta1[i]*x_beta1[j,k,t] + beta2[i]*x_beta2[j,k,t] + beta3[i]*x_beta3[j,k,t]
+                
+                  p[j,k,t,i] <- z[j,t,i] * p11[j,k,t,i]
+                  
+                  # Observed outcome
+                  y[j,k,t,i] ~ dbern(p[j,k,t,i])
+                  
+                  # # Simulated replicate for posterior predictive checks
+                  # y.sim[j,k,i] ~ dbern(p[j,k,i])
+                  # 
+                  # # Squared error (Zipkin et al. 2009)
+                  # d.obs.se[j,k,i] <- pow(y[j,k,i] - p[j,k,i], 2)
+                  # d.sim.se[j,k,i] <- pow(y.sim[j,k,i] - p[j,k,i], 2)
+                  # 
+                  # # Deviance (Broms et al. 2016)
+                  # # d.obs.dev[j,k,i] <- -2 * ( y[j,k,i] * log(p[j,k,i]) + (1 - y[j,k,i]) * log(1 - p[j,k,i]) )
+                  # # d.sim.dev[j,k,i] <- -2 * ( y.sim[j,k,i] * log(p[j,k,i]) + (1 - y.sim[j,k,i]) * log(1 - p[j,k,i]) )
+      
+              } # K surveys
               
-              # Observed outcome
-              y[j,k,i] ~ dbern(p[j,k,i])
-              
-             # Simulated replicate for posterior predictive checks
-              y.sim[j,k,i] ~ dbern(p[j,k,i])
-              
-              # Squared error (Zipkin et al. 2009)
-              d.obs.se[j,k,i] <- pow(y[j,k,i] - p[j,k,i], 2)
-              d.sim.se[j,k,i] <- pow(y.sim[j,k,i] - p[j,k,i], 2)
-              
-              # Deviance (Broms et al. 2016)
-              # d.obs.dev[j,k,i] <- -2 * ( y[j,k,i] * log(p[j,k,i]) + (1 - y[j,k,i]) * log(1 - p[j,k,i]) )
-              # d.sim.dev[j,k,i] <- -2 * ( y.sim[j,k,i] * log(p[j,k,i]) + (1 - y.sim[j,k,i]) * log(1 - p[j,k,i]) )
-  
-          } # K surveys
+              # ## Sums per site/species for each posterior predictive check
+              # 
+              # # Squared error
+              # d.obs.se.sum[j,i] <- sum(d.obs.se[j,1:K[j],i])
+              # d.sim.se.sum[j,i] <- sum(d.sim.se[j,1:K[j],i])
+              # 
+              # # Bernoulli deviance contribution
+              # # d.obs.dev.sum[j,i] <- sum(d.obs.dev[j,1:K[j],i])
+              # # d.sim.dev.sum[j,i] <- sum(d.sim.dev[j,1:K[j],i])
           
-          ## Sums per site/species for each posterior predictive check
-          
-          # Squared error
-          d.obs.se.sum[j,i] <- sum(d.obs.se[j,1:K[j],i])
-          d.sim.se.sum[j,i] <- sum(d.sim.se[j,1:K[j],i])
-          
-          # Bernoulli deviance contribution
-          # d.obs.dev.sum[j,i] <- sum(d.obs.dev[j,1:K[j],i])
-          # d.sim.dev.sum[j,i] <- sum(d.sim.dev[j,1:K[j],i])
+          } # T seasons
 
       } # J sites
   } # I species
   
   ## Derived quantities
   
-  # Discrepancy measure between observed and simulated data is defined as mean(D.obs > D.sim)
-  D.obs.se <- sum(d.obs.se.sum[1:J,1:I])
-  D.sim.se <- sum(d.sim.se.sum[1:J,1:I])
-  bayes.p.se <- step(D.sim.se - D.obs.se)  # 1 if sim > 0, 0 otherwise
+  # # Discrepancy measure between observed and simulated data is defined as mean(D.obs > D.sim)
+  # D.obs.se <- sum(d.obs.se.sum[1:J,1:I])
+  # D.sim.se <- sum(d.sim.se.sum[1:J,1:I])
+  # bayes.p.se <- step(D.sim.se - D.obs.se)  # 1 if sim > 0, 0 otherwise
+  # 
+  # # D.obs.dev <- sum(d.obs.dev.sum[1:J,1:I])
+  # # D.sim.dev <- sum(d.sim.dev.sum[1:J,1:I])
+  # # bayes.p.dev <- step(D.sim.dev - D.obs.dev)
   
-  # D.obs.dev <- sum(d.obs.dev.sum[1:J,1:I])
-  # D.sim.dev <- sum(d.sim.dev.sum[1:J,1:I])
-  # bayes.p.dev <- step(D.sim.dev - D.obs.dev)
-  
-  # Estimated number of occuring sites per species (among the sampled population of sites)
-  for (i in 1:I) {
-    Nocc[i] <- sum(z[ ,i])
-  }
-  
-  # Estimated number of occuring species per site (among the species that were detected anywhere)
-  for (j in 1:J) {
-    Nsite[j] <- sum(z[j, ])
-  }
+  # # Estimated number of occuring sites per species (among the sampled population of sites)
+  # for (i in 1:I) {
+  #   Nocc[i] <- sum(z[ ,i])
+  # }
+  # 
+  # # Estimated number of occuring species per site (among the species that were detected anywhere)
+  # for (j in 1:J) {
+  #   Nsite[j] <- sum(z[j, ])
+  # }
 }
 ")
 model_spec = model_template
@@ -954,27 +962,30 @@ if (nrow(suspected_nonconvergence) > 1) {
 # Does the model predict observed detections/non-detections about as well as it predicts data simulated under its own assumptions?
 # Summing these gives a measure of average squared prediction error across all sites, surveys, and species.
 # This Bayesian p-value is the probability (proportion of iterations) that the discrepancy for simulated data exceeds that for observed data.
+message("Baysian p-value (squared error):")
 print(mean(msom$sims.list$bayes.p.se))
 # Bernoulli deviance contribution (Broms et al. 2016)
 # Is the overall likelihood of the observed detection histories under the fitted model about the same as the likelihood of new data generated from that model?
 # This Bayesian p-value is the probability (proportion of iterations) that the simulated deviance is greater than the observed deviance.
+message("Baysian p-value (deviance residuals):")
 print(mean(msom$sims.list$bayes.p.dev))
 
 # Get posterior samples (i.e. MCMC simulated draws) for estimated occurrence psi and latent state z
 psi_samples = msom$sims.list$psi
 z_samples   = msom$sims.list$z
-# These should be of dimension: samples x sites x species
+# These should be of dimension: samples x sites x seasons x species
 n_samples = dim(psi_samples)[1]
-stopifnot(identical(J, dim(psi_samples)[2]))
-stopifnot(identical(I, dim(psi_samples)[3]))
-stopifnot(identical(J, dim(z_samples)[2]))
-stopifnot(identical(I, dim(z_samples)[3]))
+for (s in list(psi_samples, z_samples)) {
+  stopifnot(identical(dim(s)[2], J))
+  stopifnot(identical(dim(s)[3], T))
+  stopifnot(identical(dim(s)[4], I))
+}
 
 auc_combined = rep(NA, n_samples)
 pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = n_samples, clear = FALSE)
 for (s in 1:n_samples) {
-  psi_all = as.vector(psi_samples[s, , ]) # combine all species into a single vector
-  z_all   = as.vector(z_samples[s, , ])
+  psi_all = as.vector(psi_samples[s, , , ]) # combine all species into a single vector
+  z_all   = as.vector(z_samples[s, , , ])
   
   if (length(unique(z_all)) > 1) {
     auc_combined[s] = as.numeric(pROC::auc(pROC::roc(z_all, psi_all, quiet=TRUE)))
@@ -997,8 +1008,8 @@ auc_species = matrix(NA, nrow=n_samples, ncol=I)
 pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = n_samples, clear = FALSE)
 for (s in 1:n_samples) {
   for (i in 1:I) {
-    psi_vec = psi_samples[s, , i]
-    z_vec   = z_samples[s, , i]
+    psi_vec = as.vector(psi_samples[s, , , i])
+    z_vec   = as.vector(z_samples[s, , , i])
     
     if (length(unique(z_vec)) > 1) {
       auc_species[s, i] = as.numeric(pROC::auc(pROC::roc(z_vec, psi_vec, quiet=TRUE)))
@@ -1010,17 +1021,17 @@ for (s in 1:n_samples) {
 }
 auc_species_mean = round(apply(auc_species, 2, mean, na.rm=TRUE), 3)
 auc_species_bci  = round(apply(auc_species, 2, quantile, probs=c(0.025, 0.975), na.rm=TRUE), 3)
-nocc_samples = msom$sims.list$Nocc # posterior mean number of occupied sites (z=1) per species (i.e. effective positive sample size)
-nocc_mean = round(apply(nocc_samples, 2, mean),1)
-nocc_bci = apply(nocc_samples, 2, quantile, probs = c(0.025, 0.975))
+# nocc_samples = msom$sims.list$Nocc # posterior mean number of occupied sites (z=1) per species (i.e. effective positive sample size)
+# nocc_mean = round(apply(nocc_samples, 2, mean),1)
+# nocc_bci = apply(nocc_samples, 2, quantile, probs = c(0.025, 0.975))
 auc_species = data.frame(
   species = species[1:I],
   mean_auc = auc_species_mean,
   lower95_auc = auc_species_bci["2.5%", ],
-  upper95_auc = auc_species_bci["97.5%", ],
-  mean_nocc = nocc_mean,
-  lower95_nocc = nocc_bci["2.5%", ],
-  upper95_nocc = nocc_bci["97.5%", ]
+  upper95_auc = auc_species_bci["97.5%", ]
+  # mean_nocc = nocc_mean,
+  # lower95_nocc = nocc_bci["2.5%", ],
+  # upper95_nocc = nocc_bci["97.5%", ]
 )
 
 message("Species-specific mean AUC: ", round(mean(auc_species$mean_auc, na.rm = TRUE),3),

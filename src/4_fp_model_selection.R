@@ -12,8 +12,9 @@ species_metadata = read.csv("data/traits/species_metadata(included).csv", nrows 
 
 model_paths = c(
   "data/cache/models/nofp_2025-09-22.rds",
-  "data/cache/models/fp_RoyleLink_2025-09-22.rds",
-  "data/cache/models/fp_Miller_2025-09-19.rds"
+  # "data/cache/models/fp_RoyleLink_2025-09-22.rds",
+  # "data/cache/models/fp_Miller_2025-09-19.rds"
+  "data/cache/models/multiseason_2025-09-23.rds"
 )
 
 model_data = list()
