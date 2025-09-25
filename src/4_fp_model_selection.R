@@ -14,7 +14,7 @@ model_paths = c(
   "data/cache/models/nofp_2025-09-22.rds",
   # "data/cache/models/fp_RoyleLink_2025-09-22.rds",
   # "data/cache/models/fp_Miller_2025-09-19.rds"
-  "data/cache/models/multiseason_2025-09-23.rds"
+  "data/cache/models/multiseason_2025-09-24.rds"
 )
 
 model_data = list()
@@ -278,6 +278,11 @@ for (path in model_paths) {
       aes(x = coef_mean, y = name, label = species_name, color = habitat_association),
       size = 3, nudge_x = 0.05, direction = "y", hjust = 0.05
     ); print(plt)
+  
+  season_coef_summary = msom_summary %>%
+    filter(str_detect(param, "^(mu|sigma)\\.(season)")) %>% arrange(param) %>%
+    select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0)
+  
 }
 
 ####################################################################################################################
