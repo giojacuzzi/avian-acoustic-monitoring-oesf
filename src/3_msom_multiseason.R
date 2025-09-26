@@ -2,7 +2,7 @@
 # A standard single-season multi-species occupancy model assuming no false positives
 #
 generate_diagnostic_plots = FALSE
-model_file = "data/msom_multiseason_nofp.txt" # "data/msom_multiseason_nofp.txt" or "data/msom_multiseason_fp_Miller.txt"
+model_file = "data/msom_multiseason_fp_Miller.txt" # "data/msom_multiseason_nofp.txt" or "data/msom_multiseason_fp_Miller.txt"
 path_community_survey_data = "data/cache/1_derive_community_survey_data/community_survey_data_2025-08-15.rds"
 path_species_thresholds    = "data/cache/1_calculate_species_thresholds/species_thresholds.csv"
 path_plot_scale_data       = "data/cache/occurrence_covariates/data_plot_scale.rds"
@@ -487,7 +487,6 @@ if (model_name == "msom_multiseason_fp_Miller") {
     counts_df[i, c("nondetection", "unconfirmed", "confirmed")] <- as.integer(tab)
   }
   counts_df
-  
 }
 
 # Get detection covariate data
@@ -677,6 +676,10 @@ Kmax = max(K)
 T = length(seasons)
 I = length(species)
 
+if (model_name == "msom_multiseason_fp_Miller") {
+  y = y + 1 # "JAGS dcat() requires integer categories 1..L. Miller's paper uses y = 0 (no detect), 1 (uncertain), 2 (certain). You must recode your y input to JAGS so the values are 1=no detect, 2=uncertain, 3=certain. I will assume that mapping in the code below. If you prefer to keep 0/1/2 in R, transform before sending data to JAGS: y_jags <- y + 1."
+}
+
 msom_data = list(
   J = J,       # number of sites sampled
   K = K,       # number of secondary sampling periods (surveys) per site per season (site x season)
@@ -740,8 +743,8 @@ msom = jags(data = msom_data,
               paste0("mu.alpha", 1:n_alpha_params), paste0("sigma.alpha", 1:n_alpha_params), paste0("alpha", 1:n_alpha_params),
               paste0("mu.delta", 1:n_delta_params), paste0("sigma.delta", 1:n_delta_params), paste0("delta", 1:n_delta_params),
               paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params),
-              "mu.season", "sigma.season", "season",
-              "D_obs", "D_sim"
+              "mu.season", "sigma.season", "season"
+              # "D_obs", "D_sim"
             ),
             model.file = model_file,
             n.chains = 2, n.adapt = 100, n.iter = 1000, n.burnin = 100, n.thin = 1,
