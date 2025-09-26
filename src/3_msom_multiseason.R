@@ -593,7 +593,7 @@ param_alpha_names = c(
 )
 param_delta_names = c(
   # "cover_forest_diversity",
-  "density_roads_paved",
+  "density_roads_paved", # TODO: density_roads_all?
   "density_streams_major",
   "focalpatch_area_homeange_pcnt",
   "prop_abund_comthin",
@@ -681,8 +681,9 @@ msom_data = list(
   J = J, # number of sites sampled
   K = K, # number of secondary sampling periods (surveys) per site per season (site x season)
   T = T, # number of primary sampling periods (seasons)
-  I = I, # number of species observed
-  eps = 1e-6
+  I = I  # number of species observed
+  # Kmax = max(K),
+  # eps = 1e-6
 )
 for (a in seq_len(n_alpha_params)) { # Add alpha covariates
   msom_data[[paste0("x_", param_alpha_data$param[a])]] <- as.vector(param_alpha_data$scaled[[a]])
@@ -802,9 +803,8 @@ model{
   # sigma.b ~ dunif(0,5)
   # tau.b <- pow(sigma.b,-2)
 
-  for (i in 1:I) { # for each species
-  
-      ## Species level priors
+  ## Species level priors
+  for (i in 1:I) {
       
       # Occupancy
       u[i]      ~ dnorm(mu.u, tau.u)
@@ -833,9 +833,10 @@ model{
       # Confirmed true positive detection
       # gamma[i] ~ dnorm(mu.b, tau.b)
       # b[i] <- 1 / (1 + exp(-gamma[i]))
+  }
   
+  for (i in 1:I) { # for each species
       for (j in 1:J) { # for each site j
-      
           for (t in 1:T) { # for each season t
           
               # Ecological process model for latent occurrence z
@@ -855,20 +856,21 @@ model{
                   y[j,k,t,i] ~ dbern(p[j,k,t,i])
                   
                   # Simulated replicate for posterior predictive checks
-                  y.sim[j,k,t,i] ~ dbern(p[j,k,t,i])
+                  # y.sim[j,k,t,i] ~ dbern(p[j,k,t,i])
 
                   # Deviance (Broms et al. 2016)
-                  d.obs.dev[j,k,t,i] <- -2 * ( y[j,k,t,i] * log(p[j,k,t,i]) + (1 - y[j,k,t,i]) * log(1 - p[j,k,t,i]) )
-                  d.sim.dev[j,k,t,i] <- -2 * ( y.sim[j,k,t,i] * log(p[j,k,t,i]) + (1 - y.sim[j,k,t,i]) * log(1 - p[j,k,t,i]) )
+                  # d.obs.dev[j,k,t,i] <- y[j,k,t,i] * log(p[j,k,t,i]) + (1 - y[j,k,t,i]) * log(1 - p[j,k,t,i])
+                  # d.sim.dev[j,k,t,i] <- y.sim[j,k,t,i] * log(p[j,k,t,i]) + (1 - y.sim[j,k,t,i]) * log(1 - p[j,k,t,i])
       
               } # K surveys
-              
-              ## Sums per site/species for each posterior predictive check
-              # Bernoulli deviance contribution
-              d.obs.dev.sum[j,i] <- sum(d.obs.dev[j,1:K[j, ], ,i])
-              d.sim.dev.sum[j,i] <- sum(d.sim.dev[j,1:K[j, ], ,i])
-          
+              # d.obs.dev.tmp[j,t,i] <- sum(d.obs.dev[j,1:Kmax,t,i])
+              # d.sim.dev.tmp[j,t,i] <- sum(d.sim.dev[j,1:Kmax,t,i])
           } # T seasons
+          
+          ## Sums per site/species for each posterior predictive check
+          # Bernoulli deviance contribution
+          # d.obs.dev.sum[j,i] <- sum(d.obs.dev.tmp[j,1:T,i])
+          # d.sim.dev.sum[j,i] <- sum(d.sim.dev.tmp[j,1:T,i])
 
       } # J sites
   } # I species
@@ -876,23 +878,23 @@ model{
   ## Derived quantities
   
   # Discrepancy measure between observed and simulated data is defined as mean(D.obs > D.sim)
-  D.obs.dev <- sum(d.obs.dev.sum[1:J,1:I])
-  D.sim.dev <- sum(d.sim.dev.sum[1:J,1:I])
-  bayes.p.dev <- step(D.sim.dev - D.obs.dev)
+  # D.obs.dev <- -2 * sum(d.obs.dev.sum[1:J,1:I])
+  # D.sim.dev <- -2 * sum(d.sim.dev.sum[1:J,1:I])
+  # bayes.p.dev <- step(D.sim.dev - D.obs.dev)
 
-  # Estimated number of occuring sites per species per season (among the sampled population of sites)
-  for (i in 1:I) {
-    for (t in 1:T) {
-      Nocc[i,t] <- sum(z[ , t, i])
-    }
-  }
-
-  # Estimated number of occuring species per site per season (among the species that were detected anywhere)
-  for (j in 1:J) {
-    for (t in 1:T) {
-      Nsite[j,t] <- sum(z[j, t, ])
-    }
-  }
+  # # Estimated number of occuring sites per species per season (among the sampled population of sites)
+  # for (i in 1:I) {
+  #   for (t in 1:T) {
+  #     Nocc[i,t] <- sum(z[ , t, i])
+  #   }
+  # }
+  # 
+  # # Estimated number of occuring species per site per season (among the species that were detected anywhere)
+  # for (j in 1:J) {
+  #   for (t in 1:T) {
+  #     Nsite[j,t] <- sum(z[j, t, ])
+  #   }
+  # }
 }
 ")
 model_spec = model_template
@@ -910,12 +912,13 @@ message("Running JAGS (current time ", time_start <- Sys.time(), ")")
 
 msom = jags(data = msom_data,
             inits = function() { list( # initial values to avoid data/model conflicts
-              z = z,
-              v = rep(logit(0.70), length(species)),
-              w = rep(logit(0.05), length(species))
+              z = z
+              # ,
+              # v = rep(logit(0.70), length(species)),
+              # w = rep(logit(0.05), length(species))
             ) },
             parameters.to.save = c( # monitored parameters
-              "psi", "z",
+              # "psi", "z",
               "mu.u", "sigma.u", "u",
               "mu.v", "sigma.v", "v",
               # "mu.w", "sigma.w", "w",
@@ -923,13 +926,13 @@ msom = jags(data = msom_data,
               paste0("mu.alpha", 1:n_alpha_params), paste0("sigma.alpha", 1:n_alpha_params), paste0("alpha", 1:n_alpha_params),
               paste0("mu.delta", 1:n_delta_params), paste0("sigma.delta", 1:n_delta_params), paste0("delta", 1:n_delta_params),
               paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params),
-              "mu.season", "sigma.season", "season",
-              "d.obs.dev", "d.sim.dev", # "bayes.p.se",
-              "Nsite", "Nocc"
+              "mu.season", "sigma.season", "season"
+              # "d.obs.dev.sum", "d.sim.dev.sum", # "D.obs.dev", "D.sim.dev", #"bayes.p.dev", # # "bayes.p.se",
+              # "Nsite", "Nocc"
             ),
             model.file = model_file,
-            n.chains = 2, n.adapt = 100, n.iter = 2000, n.burnin = 1000, n.thin = 1,
-            parallel = TRUE, DIC = FALSE)
+            n.chains = 2, n.adapt = 100, n.iter = 1000, n.burnin = 100, n.thin = 1,
+            parallel = FALSE, DIC = FALSE, verbose=TRUE)
 
 message("Finished running JAGS (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)")
 
@@ -967,114 +970,118 @@ print(mean(msom$sims.list$bayes.p.se))
 # Is the overall likelihood of the observed detection histories under the fitted model about the same as the likelihood of new data generated from that model?
 # This Bayesian p-value is the probability (proportion of iterations) that the simulated deviance is greater than the observed deviance.
 message("Baysian p-value (deviance residuals):")
-print(mean(msom$sims.list$bayes.p.dev))
-{
-  # Extract the posterior samples
-  d.obs.dev <- msom$sims.list$d.obs.dev
-  d.sim.dev <- msom$sims.list$d.sim.dev
-  
-  # Get the dimensions
-  # Typically: sims x J x Kmax x T x I
-  dim(d.obs.dev)  # [n.sims, J, Kmax, T, I]
-  
-  n.sims <- dim(d.obs.dev)[1]
-  
-  # Suppose you have K[j,t] giving the number of surveys at site j, season t
-  # Compute D.obs.dev and D.sim.dev for each posterior sample
-  D.obs.dev <- numeric(n.sims)
-  D.sim.dev <- numeric(n.sims)
-  
-  for (s in 1:n.sims) {
-    total.obs <- 0
-    total.sim <- 0
-    for (j in 1:J) {
-      for (t in 1:T) {
-        Kjt <- K[j,t]
-        for (i in 1:I) {
-          total.obs <- total.obs + sum(d.obs.dev[s, j, 1:Kjt, t, i])
-          total.sim <- total.sim + sum(d.sim.dev[s, j, 1:Kjt, t, i])
-        }
-      }
-    }
-    D.obs.dev[s] <- total.obs
-    D.sim.dev[s] <- total.sim
-  }
-  
-  # Compute Bayesian p-value
-  # > 0.5, model underfit (simulated deviance larger than observed)
-  # < 0.5, model overfit  (observed deviance larger than simulated)
-  bayes.p.dev <- mean(D.sim.dev > D.obs.dev)
-  bayes.p.dev
-}
+# print(mean(msom$sims.list$bayes.p.dev))
+# {
+#   # Extract the posterior samples
+#   d.obs.dev <- msom$sims.list$d.obs.dev
+#   d.sim.dev <- msom$sims.list$d.sim.dev
+#   
+#   # Get the dimensions
+#   # Typically: sims x J x Kmax x T x I
+#   dim(d.obs.dev)  # [n.sims, J, Kmax, T, I]
+#   
+#   n.sims <- dim(d.obs.dev)[1]
+#   
+#   # Suppose you have K[j,t] giving the number of surveys at site j, season t
+#   # Compute D.obs.dev and D.sim.dev for each posterior sample
+#   D.obs.dev <- numeric(n.sims)
+#   D.sim.dev <- numeric(n.sims)
+#   
+#   for (s in 1:n.sims) {
+#     total.obs <- 0
+#     total.sim <- 0
+#     for (j in 1:J) {
+#       for (t in 1:T) {
+#         Kjt <- K[j,t]
+#         for (i in 1:I) {
+#           total.obs <- total.obs + sum(d.obs.dev[s, j, 1:Kjt, t, i])
+#           total.sim <- total.sim + sum(d.sim.dev[s, j, 1:Kjt, t, i])
+#         }
+#       }
+#     }
+#     D.obs.dev[s] <- total.obs
+#     D.sim.dev[s] <- total.sim
+#   }
+#   
+#   # Compute Bayesian p-value
+#   # > 0.5, model underfit (simulated deviance larger than observed)
+#   # < 0.5, model overfit  (observed deviance larger than simulated)
+#   bayes.p.dev <- mean(D.sim.dev > D.obs.dev)
+#   bayes.p.dev
+# }
 
 
-# Get posterior samples (i.e. MCMC simulated draws) for estimated occurrence psi and latent state z
-psi_samples = msom$sims.list$psi
-z_samples   = msom$sims.list$z
-# These should be of dimension: samples x sites x seasons x species
-n_samples = dim(psi_samples)[1]
-for (s in list(psi_samples, z_samples)) {
-  stopifnot(identical(dim(s)[2], J))
-  stopifnot(identical(dim(s)[3], T))
-  stopifnot(identical(dim(s)[4], I))
-}
+# # Get posterior samples (i.e. MCMC simulated draws) for estimated occurrence psi and latent state z
+# psi_samples = msom$sims.list$psi
+# z_samples   = msom$sims.list$z
+# # These should be of dimension: samples x sites x seasons x species
+# n_samples = dim(psi_samples)[1]
+# for (s in list(psi_samples, z_samples)) {
+#   stopifnot(identical(dim(s)[2], J))
+#   stopifnot(identical(dim(s)[3], T))
+#   stopifnot(identical(dim(s)[4], I))
+# }
+# 
+# auc_combined = rep(NA, n_samples)
+# pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = n_samples, clear = FALSE)
+# for (s in 1:n_samples) {
+#   psi_all = as.vector(psi_samples[s, , , ]) # combine all species into a single vector
+#   z_all   = as.vector(z_samples[s, , , ])
+#   
+#   if (length(unique(z_all)) > 1) {
+#     auc_combined[s] = as.numeric(pROC::auc(pROC::roc(z_all, psi_all, quiet=TRUE)))
+#   } else {
+#     stop("Cannot calculate ROC") # latent z states are identical for this sample, something is wrong
+#   }
+#   pb$tick()
+# }
+# auc_combined_mean = round(mean(auc_combined, na.rm=TRUE), 3)
+# auc_combined_bci  = round(quantile(auc_combined, probs=c(0.025, 0.975), na.rm=TRUE), 3)
+# auc_combined = data.frame(
+#   mean_auc = auc_combined_mean,
+#   lower95_auc = auc_combined_bci[[1]],
+#   upper95_auc = auc_combined_bci[[2]]
+# )
+# 
+# message("Combined mean AUC: ", auc_combined_mean, " (95% BCI ", auc_combined_bci[1], "–", auc_combined_bci[2], ")")
+# 
+# auc_species = matrix(NA, nrow=n_samples, ncol=I)
+# pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = n_samples, clear = FALSE)
+# for (s in 1:n_samples) {
+#   for (i in 1:I) {
+#     psi_vec = as.vector(psi_samples[s, , , i])
+#     z_vec   = as.vector(z_samples[s, , , i])
+#     
+#     if (length(unique(z_vec)) > 1) {
+#       auc_species[s, i] = as.numeric(pROC::auc(pROC::roc(z_vec, psi_vec, quiet=TRUE)))
+#     } else {
+#       # species[i] latent z state is identical at all sites for this sample, cannot calculate ROC
+#     }
+#   }
+#   pb$tick()
+# }
+# auc_species_mean = round(apply(auc_species, 2, mean, na.rm=TRUE), 3)
+# auc_species_bci  = round(apply(auc_species, 2, quantile, probs=c(0.025, 0.975), na.rm=TRUE), 3)
+# # nocc_samples = msom$sims.list$Nocc # posterior mean number of occupied sites (z=1) per species (i.e. effective positive sample size)
+# # nocc_mean = round(apply(nocc_samples, 2, mean),1)
+# # nocc_bci = apply(nocc_samples, 2, quantile, probs = c(0.025, 0.975))
+# auc_species = data.frame(
+#   species = species[1:I],
+#   mean_auc = auc_species_mean,
+#   lower95_auc = auc_species_bci["2.5%", ],
+#   upper95_auc = auc_species_bci["97.5%", ]
+#   # mean_nocc = nocc_mean,
+#   # lower95_nocc = nocc_bci["2.5%", ],
+#   # upper95_nocc = nocc_bci["97.5%", ]
+# )
+# 
+# message("Species-specific mean AUC: ", round(mean(auc_species$mean_auc, na.rm = TRUE),3),
+#         " (range ",  round(min(auc_species$mean_auc, na.rm = TRUE),3), "–", round(max(auc_species$mean_auc, na.rm = TRUE),3), ")")
+# print(auc_species)
 
-auc_combined = rep(NA, n_samples)
-pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = n_samples, clear = FALSE)
-for (s in 1:n_samples) {
-  psi_all = as.vector(psi_samples[s, , , ]) # combine all species into a single vector
-  z_all   = as.vector(z_samples[s, , , ])
-  
-  if (length(unique(z_all)) > 1) {
-    auc_combined[s] = as.numeric(pROC::auc(pROC::roc(z_all, psi_all, quiet=TRUE)))
-  } else {
-    stop("Cannot calculate ROC") # latent z states are identical for this sample, something is wrong
-  }
-  pb$tick()
-}
-auc_combined_mean = round(mean(auc_combined, na.rm=TRUE), 3)
-auc_combined_bci  = round(quantile(auc_combined, probs=c(0.025, 0.975), na.rm=TRUE), 3)
-auc_combined = data.frame(
-  mean_auc = auc_combined_mean,
-  lower95_auc = auc_combined_bci[[1]],
-  upper95_auc = auc_combined_bci[[2]]
-)
-
-message("Combined mean AUC: ", auc_combined_mean, " (95% BCI ", auc_combined_bci[1], "–", auc_combined_bci[2], ")")
-
-auc_species = matrix(NA, nrow=n_samples, ncol=I)
-pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = n_samples, clear = FALSE)
-for (s in 1:n_samples) {
-  for (i in 1:I) {
-    psi_vec = as.vector(psi_samples[s, , , i])
-    z_vec   = as.vector(z_samples[s, , , i])
-    
-    if (length(unique(z_vec)) > 1) {
-      auc_species[s, i] = as.numeric(pROC::auc(pROC::roc(z_vec, psi_vec, quiet=TRUE)))
-    } else {
-      # species[i] latent z state is identical at all sites for this sample, cannot calculate ROC
-    }
-  }
-  pb$tick()
-}
-auc_species_mean = round(apply(auc_species, 2, mean, na.rm=TRUE), 3)
-auc_species_bci  = round(apply(auc_species, 2, quantile, probs=c(0.025, 0.975), na.rm=TRUE), 3)
-# nocc_samples = msom$sims.list$Nocc # posterior mean number of occupied sites (z=1) per species (i.e. effective positive sample size)
-# nocc_mean = round(apply(nocc_samples, 2, mean),1)
-# nocc_bci = apply(nocc_samples, 2, quantile, probs = c(0.025, 0.975))
-auc_species = data.frame(
-  species = species[1:I],
-  mean_auc = auc_species_mean,
-  lower95_auc = auc_species_bci["2.5%", ],
-  upper95_auc = auc_species_bci["97.5%", ]
-  # mean_nocc = nocc_mean,
-  # lower95_nocc = nocc_bci["2.5%", ],
-  # upper95_nocc = nocc_bci["97.5%", ]
-)
-
-message("Species-specific mean AUC: ", round(mean(auc_species$mean_auc, na.rm = TRUE),3),
-        " (range ",  round(min(auc_species$mean_auc, na.rm = TRUE),3), "–", round(max(auc_species$mean_auc, na.rm = TRUE),3), ")")
-print(auc_species)
+# Quickly inspect the mean and 95% BCI of hyperparameter estimates
+whiskerplot(msom, c(paste0('mu.', param_alpha_data$param), paste0('mu.', param_delta_data$param), 'mu.season'))
+whiskerplot(msom, c(paste0('mu.', param_beta_data$param)))
 
 # Write results to cache
 msom_results = list(
