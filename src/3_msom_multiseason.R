@@ -1,16 +1,16 @@
 ############################################################################################################################
 # A standard single-season multi-species occupancy model assuming no false positives
 #
-model_name = "multiseason"
 generate_diagnostic_plots = FALSE
-############################################################################################################################
-
+model_file = "data/msom_multiseason_nofp.txt" # "data/msom_multiseason_nofp.txt" or "data/msom_multiseason_fp_Miller.txt"
 path_community_survey_data = "data/cache/1_derive_community_survey_data/community_survey_data_2025-08-15.rds"
 path_species_thresholds    = "data/cache/1_calculate_species_thresholds/species_thresholds.csv"
 path_plot_scale_data       = "data/cache/occurrence_covariates/data_plot_scale.rds"
 path_homerange_scale_data  = "data/cache/occurrence_covariates/data_homerange_scale.rds"
-path_out = paste0("data/cache/models/", model_name, "_", format(Sys.Date(), "%Y-%m-%d"), ".rds")
+############################################################################################################################
 
+model_name = tools::file_path_sans_ext(basename(model_file))
+path_out = paste0("data/cache/models/", model_name, "_", format(Sys.Date(), "%Y-%m-%d"), ".rds")
 pacman::p_load(progress, car, tidyverse, jagsUI, MCMCvis, glue, ggplot2, ggrepel)
 theme_set(theme_classic())
 
@@ -407,7 +407,7 @@ for (t in names(x_yday)) {
 }
 
 # Observed (certain) detection data, i.e. "site confirmation design"
-if (model_name == "fp_Miller") {
+if (model_name == "msom_multiseason_fp_Miller") {
   path_in = paste0("/Users/giojacuzzi/repos/few-shot-transfer-learning-bioacoustics/data/cache", "/predictions_", model, ".parquet")
   predictions = arrow::read_parquet(path_in) %>% arrange(file, label_predicted)
   predictions = predictions %>%
@@ -723,170 +723,6 @@ for (b in seq_len(n_beta_params)) {
 str(msom_data)
 
 ############################################################################################################################
-# Following:
-# - https://besjournals.onlinelibrary.wiley.com/doi/10.1111/j.1365-2664.2009.01664.x
-# - https://esajournals.onlinelibrary.wiley.com/doi/10.1002/eap.2293
-# - https://www.sciencedirect.com/science/article/abs/pii/S0006320709004819
-model_template = paste0("
-model{
-
-  ## Community level hyperpriors
-
-  # Occurrence
-  psi.mean ~ dunif(0,1)                   # probability scale
-  mu.u <- log(psi.mean) - log(1-psi.mean) # logit scale
-  sigma.u ~ dunif(0,5)                    # standard deviation
-  tau.u <- pow(sigma.u,-2)                # precision
-  
-  # Covariate effects on occurrence
-  mu.alpha1 ~ dnorm(0,0.01)
-  sigma.alpha1 ~ dunif(0,5)
-  tau.alpha1 <- pow(sigma.alpha1,-2)
-  mu.alpha2 ~ dnorm(0,0.01)
-  sigma.alpha2 ~ dunif(0,5)
-  tau.alpha2 <- pow(sigma.alpha2,-2)
-  mu.alpha3 ~ dnorm(0,0.01)
-  sigma.alpha3 ~ dunif(0,5)
-  tau.alpha3 <- pow(sigma.alpha3,-2)
-  mu.alpha4 ~ dnorm(0,0.01)
-  sigma.alpha4 ~ dunif(0,5)
-  tau.alpha4 <- pow(sigma.alpha4,-2)
-  mu.delta1 ~ dnorm(0,0.01)
-  sigma.delta1 ~ dunif(0,5)
-  tau.delta1 <- pow(sigma.delta1,-2)
-  mu.delta2 ~ dnorm(0,0.01)
-  sigma.delta2 ~ dunif(0,5)
-  tau.delta2 <- pow(sigma.delta2,-2)
-  mu.delta3 ~ dnorm(0,0.01)
-  sigma.delta3 ~ dunif(0,5)
-  tau.delta3 <- pow(sigma.delta3,-2)
-  mu.delta4 ~ dnorm(0,0.01)
-  sigma.delta4 ~ dunif(0,5)
-  tau.delta4 <- pow(sigma.delta4,-2)
-  mu.delta5 ~ dnorm(0,0.01)
-  sigma.delta5 ~ dunif(0,5)
-  tau.delta5 <- pow(sigma.delta5,-2)
-  mu.delta6 ~ dnorm(0,0.01)
-  sigma.delta6 ~ dunif(0,5)
-  tau.delta6 <- pow(sigma.delta6,-2)
-  mu.delta7 ~ dnorm(0,0.01)
-  sigma.delta7 ~ dunif(0,5)
-  tau.delta7 <- pow(sigma.delta7,-2)
-  mu.season ~ dnorm(0,0.01)
-  sigma.season ~ dunif(0,5)
-  tau.season <- pow(sigma.season,-2)
-  
-  # Detection (unconfirmed true-positive)
-  v.mean  ~ dunif(0,1)
-  mu.v  <- log(v.mean) - log(1-v.mean)
-  sigma.v ~ dunif(0,5)
-  tau.v <- pow(sigma.v,-2)
-
-  # Covariate effects on detection (unconfirmed true-positive)
-  mu.beta1    ~ dnorm(0,0.01)
-  sigma.beta1 ~ dunif(0,5)
-  tau.beta1  <- pow(sigma.beta1,-2)
-  mu.beta2    ~ dnorm(0,0.01)
-  sigma.beta2 ~ dunif(0,5)
-  tau.beta2  <- pow(sigma.beta2,-2)
-  mu.beta3    ~ dnorm(0,0.01)
-  sigma.beta3 ~ dunif(0,5)
-  tau.beta3  <- pow(sigma.beta3,-2)
-  
-  # False-positive unconfirmed detection (Royle and Link 2006, Miller et al. 2011)
-  # mu.w ~ dnorm(0,0.01)
-  # sigma.w ~ dunif(0,5)
-  # tau.w <- pow(sigma.w,-2)
-  
-  # Confirmed true positive detection (Miller et al. 2011)
-  # mu.b ~ dnorm(0,0.01)
-  # sigma.b ~ dunif(0,5)
-  # tau.b <- pow(sigma.b,-2)
-
-  ## Species level priors
-  for (i in 1:I) {
-      
-      # Occupancy
-      u[i]      ~ dnorm(mu.u, tau.u)
-      alpha1[i] ~ dnorm(mu.alpha1,tau.alpha1)
-      alpha2[i] ~ dnorm(mu.alpha2,tau.alpha2)
-      alpha3[i] ~ dnorm(mu.alpha3,tau.alpha3)
-      alpha4[i] ~ dnorm(mu.alpha4,tau.alpha4)
-      delta1[i] ~ dnorm(mu.delta1,tau.delta1)
-      delta2[i] ~ dnorm(mu.delta2,tau.delta2)
-      delta3[i] ~ dnorm(mu.delta3,tau.delta3)
-      delta4[i] ~ dnorm(mu.delta4,tau.delta4)
-      delta5[i] ~ dnorm(mu.delta5,tau.delta5)
-      delta6[i] ~ dnorm(mu.delta6,tau.delta6)
-      delta7[i] ~ dnorm(mu.delta7,tau.delta7)
-      season[i] ~ dnorm(mu.season,tau.season)
-  
-      # Unconfirmed true positive detection
-      v[i]     ~ dnorm(mu.v, tau.v)
-      beta1[i] ~ dnorm(mu.beta1,tau.beta1)
-      beta2[i] ~ dnorm(mu.beta2,tau.beta2)
-      beta3[i] ~ dnorm(mu.beta3,tau.beta3)
-      
-      # Unconfirmed false positive detection
-      # w[i] ~ dnorm(mu.w,tau.w)
-      
-      # Confirmed true positive detection
-      # gamma[i] ~ dnorm(mu.b, tau.b)
-      # b[i] <- 1 / (1 + exp(-gamma[i]))
-  }
-  
-  for (i in 1:I) { # for each species i
-      for (j in 1:J) { # for each site j
-          for (t in 1:T) { # for each season t
-          
-              # Ecological process model for latent occurrence z
-              logit(psi[j,t,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + delta1[i]*x_delta1[j,i] + delta2[i]*x_delta2[j,i] + delta3[i]*x_delta3[j,i] + delta4[i]*x_delta4[j,i] + delta5[i]*x_delta5[j,i] + delta6[i]*x_delta6[j,i] + delta7[i]*x_delta7[j,i] + season[i]*x_season[t]
-              z[j,t,i] ~ dbern(psi[j,t,i])
-              
-              for (k in 1:K[j,t]) { # for each survey k during season t at site j
-    
-                  ## Observation model, assumming no false positives (e.g. Zipkin et al. 2009)
-                  
-                  # p11 is true-positive detection probability given z = 1
-                  logit(p11[j,k,t,i]) <- v[i] + beta1[i]*x_beta1[j,k,t] + beta2[i]*x_beta2[j,k,t] + beta3[i]*x_beta3[j,k,t]
-                
-                  p[j,k,t,i] <- z[j,t,i] * p11[j,k,t,i]
-                  
-                  # Observed outcome
-                  y[j,k,t,i] ~ dbern(p[j,k,t,i])
-                  
-                  # Simulated replicate for posterior predictive checks
-                  y_sim[j,k,t,i] ~ dbern(p[j,k,t,i])
-
-                  # Deviance (Broms et al. 2016)
-                  d_obs[j,k,t,i] <- y[j,k,t,i] * log(p[j,k,t,i]) + (1 - y[j,k,t,i]) * log(1 - p[j,k,t,i])
-                  d_sim[j,k,t,i] <- y_sim[j,k,t,i] * log(p[j,k,t,i]) + (1 - y_sim[j,k,t,i]) * log(1 - p[j,k,t,i])
-      
-              } # K surveys
-              
-              # Pad jagged array of deviance values with zeros to enable sum below
-              for (k in (K[j,t]+1:Kmax)) {
-                  d_obs[j,k,t,i] <- 0
-                  d_sim[j,k,t,i] <- 0
-              }
-              
-          } # T seasons
-      } # J sites
-  } # I species
-  
-  ## Derived quantities
-  
-  # Deviance of simulated and observed data for posterior predictive check
-  D_obs <- -2 * sum(d_obs[1:J,1:Kmax,1:T,1:I])
-  D_sim <- -2 * sum(d_sim[1:J,1:Kmax,1:T,1:I])
-}
-")
-model_spec = model_template
-cat(strsplit(model_spec, "\n")[[1]], sep = "\n") # print model specification to console
-model_file = tempfile()
-writeLines(model_spec, con = model_file)
-
-############################################################################################################################
 # Run JAGS
 
 message("\n", "System CPU: "); print(as.data.frame(t(benchmarkme::get_cpu())))
@@ -949,15 +785,14 @@ whiskerplot(msom, c(paste0('mu.', param_beta_data$param)))
 
 # Write results to cache
 msom_results = list(
-  model_spec = model_spec,
-  msom_summary = msom_summary,
-  p_val        = p_val,
-  param_alpha_data = param_alpha_data,
-  param_delta_data = param_delta_data,
+  msom_summary      = msom_summary,
+  p_val             = p_val,
+  param_alpha_data  = param_alpha_data,
+  param_delta_data  = param_delta_data,
   param_season_data = param_season_data,
-  param_beta_data = param_beta_data,
-  sites = sites,
-  species = species
+  param_beta_data   = param_beta_data,
+  sites             = sites,
+  species           = species
 )
 if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
 saveRDS(msom_results, file = path_out)
