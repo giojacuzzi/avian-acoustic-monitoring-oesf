@@ -707,7 +707,7 @@ switch(model_name,
               ## Posterior predictive checks
               # p_obs is the model probability of the actually observed category
               p_obs_cat[j,k,i] <- pi[j,k,i, y[j,k,i]]
-              p_sim_cat[j,k,i] <- pi[j,k,i, y_sim[j,k,i]]
+              p_sim_cat[j,k,i] <- equals(y_sim[j,k,i],1) * pi[j,k,i,1] + equals(y_sim[j,k,i],2) * pi[j,k,i,2] + equals(y_sim[j,k,i],3) * pi[j,k,i,3]
               
               # Deviance
               d_obs[j,k,i] <- -2 * log(p_obs_cat[j,k,i])
@@ -733,14 +733,14 @@ switch(model_name,
   p_val <- step(D_sim - D_obs)
   
   # Estimated number of occuring sites per species (among the sampled population of sites)
-  for (i in 1:I) {
-    Nocc[i] <- sum(z[ ,i])
-  }
+  #for (i in 1:I) {
+  #  Nocc[i] <- sum(z[ ,i])
+  #}
   
   # Estimated number of occuring species per site (among the species that were detected anywhere)
-  for (j in 1:J) {
-    Nsite[j] <- sum(z[j, ])
-  }
+  #for (j in 1:J) {
+  #  Nsite[j] <- sum(z[j, ])
+  #}
 }
 ")
 model_spec = model_template
@@ -772,8 +772,8 @@ msom = jags(data = msom_data,
               paste0("mu.delta", 1:n_delta_params), paste0("sigma.delta", 1:n_delta_params), paste0("delta", 1:n_delta_params),
               paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params),
               # "bayes.p.se",
-              "p_val",
-              "Nsite", "Nocc"
+              "p_val"
+              # "Nsite", "Nocc"
             ),
             model.file = model_file,
             n.chains = 2, n.adapt = 100, n.iter = 2000, n.burnin = 1000, n.thin = 1,
