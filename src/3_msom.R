@@ -9,7 +9,7 @@ path_community_survey_data = "data/cache/1_derive_community_survey_data/communit
 path_species_thresholds    = "data/cache/1_calculate_species_thresholds/species_thresholds.csv"
 path_plot_scale_data       = "data/cache/occurrence_covariates/data_plot_scale.rds"
 path_homerange_scale_data  = "data/cache/occurrence_covariates/data_homerange_scale.rds"
-path_out = paste0("data/cache/models/", model_name, "_", format(Sys.Date(), "%Y-%m-%d"), ".rds")
+path_out = paste0("data/cache/models/", model_name, "_", format(Sys.time(), "%Y-%m-%d_%H:%M:%S"), ".rds")
 
 pacman::p_load(progress, car, tidyverse, jagsUI, MCMCvis, glue, ggplot2, ggrepel)
 theme_set(theme_classic())
@@ -19,13 +19,13 @@ theme_set(theme_classic())
 
 # local plot scale
 occ_data_plot_shared = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site, elev
+  site, elev, age_mean
 )
 occ_data_plot_rs = readRDS(path_homerange_scale_data)[['plot']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
   site, homerange_downvol_mean, homerange_htmax_cv, homerange_qmd_mean, homerange_treeden_all_mean, homerange_treeden_gt4in_dbh_mean, homerange_ba_mean, homerange_snagden_gt15dbh_mean
 )
 occ_data_plot = occ_data_plot_shared %>% full_join(occ_data_plot_rs, by = "site") %>% select(
-  site, elev, homerange_treeden_all_mean, homerange_qmd_mean, homerange_htmax_cv
+  site, elev, age_mean, homerange_treeden_all_mean, homerange_qmd_mean, homerange_htmax_cv
 )
 
 # species-specific homerange scales
@@ -246,19 +246,19 @@ message("Most commonly detected species:")
 print(naive_occurrence %>% slice_max(prob, n=1) %>% pull(species) %>% as.character())
 message("Least commonly detected species:")
 print(naive_occurrence %>% slice_min(prob, n=1) %>% pull(species) %>% as.character())
-p = ggplot(naive_occurrence, aes(x = nsites, y = species)) +
+ggplot(naive_occurrence, aes(x = nsites, y = species)) +
   geom_bar(stat = "identity") +
   geom_vline(xintercept = mean(naive_occurrence$nsites), color = "blue") +
-  labs(title = "Species occurrence across sites", x = "Number of sites detected as occurrence", y = ""); print(p)
+  labs(title = "Species occurrence across sites", x = "Number of sites detected as occurrence", y = "")
 
 # Naive species occurrence
 naive_occurrence = naive_occurrence %>% filter(species %in% names(ylist))
 message("Naive occurrence rate: mean ", round(mean(naive_occurrence$prob),2),
         ", min ", round(min(naive_occurrence$prob),2), ", max ", round(max(naive_occurrence$prob),2))
-p = ggplot(naive_occurrence, aes(x = prob, y = species)) +
+ggplot(naive_occurrence, aes(x = prob, y = species)) +
   geom_point(stat = "identity") +
   geom_vline(xintercept = mean(naive_occurrence$prob), color = "blue") +
-  labs(title = "Naive species occurrence", x = "Proportion of sites detected as occurrence", y = ""); print(p)
+  labs(title = "Naive species occurrence", x = "Proportion of sites detected as occurrence", y = "")
 
 # Naive species richness per site
 species_per_site = setNames(rep(0, length(sites)), sites)
@@ -269,10 +269,10 @@ for (sp in ylist) {
 species_per_site = data.frame(site = names(species_per_site), species_detected = as.vector(species_per_site))
 mean_species_detected = mean(species_per_site$species_detected)
 message("Naive species richness per site (assuming no false positive detections): mean ", round(mean(species_per_site$species_detected),2), ", range ", min(species_per_site$species_detected), "–", max(species_per_site$species_detected))
-p = ggplot(species_per_site, aes(x = species_detected)) +
+ggplot(species_per_site, aes(x = species_detected)) +
   geom_histogram(binwidth = 1) +
   geom_vline(xintercept = mean_species_detected, color = "blue") +
-  labs(title = "Naive species richness per site", x = "Number of species detected", y = "Number of sites"); print(p)
+  labs(title = "Naive species richness per site", x = "Number of species detected", y = "Number of sites")
 
 ############################################################################################################################
 # Format observation detection-nondetection and covariate data for modeling as 3D arrays (site × survey × species)
@@ -406,19 +406,19 @@ stopifnot(dimnames(y)$site == occ_data_plot$site) # check that covariate data ar
 
 param_alpha_names = c(
   "elev",
-  "homerange_htmax_cv",
+  # "homerange_htmax_cv",
   "homerange_qmd_mean",
   "homerange_treeden_all_mean"
 )
 param_delta_names = c(
   # "cover_forest_diversity",
+  # "shape_idx",
   "density_roads_paved",
   "density_streams_major",
   "focalpatch_area_homeange_pcnt",
   "prop_abund_comthin",
   "prop_abund_lsog",
-  "prop_abund_standinit",
-  "shape_idx"
+  "prop_abund_standinit"
 )
 
 # Store alpha parameter ID, variable name, and standardize data to have mean 0, standard deviation 1
@@ -442,7 +442,7 @@ for (param in param_delta_names) {
   
   for (i in 1:length(species)) {
     species_name = species[i]
-    message(i, " ", species_name)
+    # message(i, " ", species_name)
     # discard data for irrelevant sites
     species_occ_data = occ_data_homerange[[species_name]] %>% filter(site %in% dimnames(y)$site)
     # check that data are aligned with observation matrix by site
@@ -450,7 +450,7 @@ for (param in param_delta_names) {
     if (unique(species_occ_data %>% pull(buffer_radius_m)) >= 100) {
       param_data = species_occ_data %>% select(site, all_of(param))
     } else {
-      print("FLOOR!")
+      # print("FLOOR!")
       param_data = occ_data_homerange_floor %>% select(site, all_of(param))
     }
     species_delta_data[[species_name]] = scale(param_data[[param]])
@@ -471,6 +471,11 @@ detect_data = list(
 param_beta_data = tibble(param = paste0("beta", seq_along(detect_data)), name = names(detect_data))
 param_beta_data = param_beta_data %>% rowwise() %>% mutate(scaled = list(scale(as.vector(detect_data[[name]])))) %>% ungroup()
 n_beta_params = nrow(param_beta_data)
+
+# TODO: fp covariate
+param_wcov_data = tibble(param = "wcov1", name = "age")
+param_wcov_data$scaled = list(scale(occ_data_plot$age_mean))
+n_wcov_params = nrow(param_wcov_data)
 
 ############################################################################################################################
 # Prepare all data for the model
@@ -507,9 +512,12 @@ for (d in seq_len(n_delta_params)) { # Add delta covariates
   # param_data = do.call(cbind, delta_data[[param_delta_names[d]]])
   # msom_data[[paste0("x_delta", d)]] = param_data
 }
-for (b in seq_len(n_beta_params)) { # Add detection covariates
+for (b in seq_len(n_beta_params)) { # Add TP detection covariates
   mat_dim <- dim(detect_data[[param_beta_data$name[b]]])
   msom_data[[paste0("x_", param_beta_data$param[b])]] <- array(param_beta_data$scaled[[b]], dim = mat_dim)
+}
+for (w in seq_len(n_wcov_params)) { # Add FP detection covariates
+  # msom_data[[paste0("x_", param_wcov_data$param[w])]] <- as.vector(param_wcov_data$scaled[[w]])
 }
 str(msom_data)
 
@@ -539,9 +547,9 @@ model{
   mu.alpha3 ~ dnorm(0,0.01)
   sigma.alpha3 ~ dunif(0,5)
   tau.alpha3 <- pow(sigma.alpha3,-2)
-  mu.alpha4 ~ dnorm(0,0.01)
-  sigma.alpha4 ~ dunif(0,5)
-  tau.alpha4 <- pow(sigma.alpha4,-2)
+  # mu.alpha4 ~ dnorm(0,0.01)
+  # sigma.alpha4 ~ dunif(0,5)
+  # tau.alpha4 <- pow(sigma.alpha4,-2)
   mu.delta1 ~ dnorm(0,0.01)
   sigma.delta1 ~ dunif(0,5)
   tau.delta1 <- pow(sigma.delta1,-2)
@@ -560,9 +568,9 @@ model{
   mu.delta6 ~ dnorm(0,0.01)
   sigma.delta6 ~ dunif(0,5)
   tau.delta6 <- pow(sigma.delta6,-2)
-  mu.delta7 ~ dnorm(0,0.01)
-  sigma.delta7 ~ dunif(0,5)
-  tau.delta7 <- pow(sigma.delta7,-2)
+  # mu.delta7 ~ dnorm(0,0.01)
+  # sigma.delta7 ~ dunif(0,5)
+  # tau.delta7 <- pow(sigma.delta7,-2)
   
   # Detection (unconfirmed true-positive)
   v.mean  ~ dunif(0,1)
@@ -582,9 +590,14 @@ model{
   tau.beta3  <- pow(sigma.beta3,-2)
   
   # False-positive unconfirmed detection (Royle and Link 2006, Miller et al. 2011)
-  mu.w ~ dnorm(0,0.01)
-  sigma.w ~ dunif(0,5)
+  mu.w ~ dnorm(-2.9444389791664403, 1.0)  # weakly informative prior; mean = logit(0.05), sd = 1.0 -> tau = 1
+  sigma.w ~ dunif(0,2) # use half normal?
   tau.w <- pow(sigma.w,-2)
+  
+  # Covariate effects on detection (unconfirmed false-positive)
+  # mu.wcov1    ~ dnorm(0,0.01)
+  # sigma.wcov1 ~ dunif(0,5)
+  # tau.wcov1 <- pow(sigma.wcov1,-2)
   
   # Confirmed true positive detection (Miller et al. 2011)
   mu.b ~ dnorm(0,0.01)
@@ -600,14 +613,14 @@ model{
       alpha1[i] ~ dnorm(mu.alpha1,tau.alpha1)
       alpha2[i] ~ dnorm(mu.alpha2,tau.alpha2)
       alpha3[i] ~ dnorm(mu.alpha3,tau.alpha3)
-      alpha4[i] ~ dnorm(mu.alpha4,tau.alpha4)
+      # alpha4[i] ~ dnorm(mu.alpha4,tau.alpha4)
       delta1[i] ~ dnorm(mu.delta1,tau.delta1)
       delta2[i] ~ dnorm(mu.delta2,tau.delta2)
       delta3[i] ~ dnorm(mu.delta3,tau.delta3)
       delta4[i] ~ dnorm(mu.delta4,tau.delta4)
       delta5[i] ~ dnorm(mu.delta5,tau.delta5)
       delta6[i] ~ dnorm(mu.delta6,tau.delta6)
-      delta7[i] ~ dnorm(mu.delta7,tau.delta7)
+      # delta7[i] ~ dnorm(mu.delta7,tau.delta7)
   
       # Unconfirmed true positive detection
       v[i]     ~ dnorm(mu.v, tau.v)
@@ -617,6 +630,7 @@ model{
       
       # Unconfirmed false positive detection
       w[i] ~ dnorm(mu.w,tau.w)
+      # wcov1[i] ~ dnorm(mu.wcov1,tau.wcov1)
       
       # Confirmed true positive detection
       gamma[i] ~ dnorm(mu.b, tau.b)
@@ -625,7 +639,7 @@ model{
       for (j in 1:J) { # for each site j
         
           # Ecological process model for latent occurrence z
-          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + delta1[i]*x_delta1[j,i] + delta2[i]*x_delta2[j,i] + delta3[i]*x_delta3[j,i] + delta4[i]*x_delta4[j,i] + delta5[i]*x_delta5[j,i] + delta6[i]*x_delta6[j,i] + delta7[i]*x_delta7[j,i]
+          logit(psi[j,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + delta1[i]*x_delta1[j,i] + delta2[i]*x_delta2[j,i] + delta3[i]*x_delta3[j,i] + delta4[i]*x_delta4[j,i] + delta5[i]*x_delta5[j,i] + delta6[i]*x_delta6[j,i]
           z[j,i] ~ dbern(psi[j,i])
           
           for (k in 1:K[j]) { # for each sampling period (survey) k at site j
@@ -686,7 +700,7 @@ switch(model_name,
               logit(p11[j,k,i]) <- v[i] + beta1[i]*x_beta1[j,k] + beta2[i]*x_beta2[j,k] + beta3[i]*x_beta3[j,k]
               
               # p10 is false-positive detection probability given z = 0
-              logit(p10[j,k,i]) <- w[i]
+              logit(p10[j,k,i]) <- w[i] # + wcov1[i]*x_wcov1[j]
               
               # b is the certainty confirmation probability given z = 1 and the species was detected
               # (not a function of covariates)
@@ -733,14 +747,14 @@ switch(model_name,
   p_val <- step(D_sim - D_obs)
   
   # Estimated number of occuring sites per species (among the sampled population of sites)
-  #for (i in 1:I) {
-  #  Nocc[i] <- sum(z[ ,i])
-  #}
+  for (i in 1:I) {
+    Nocc[i] <- sum(z[ ,i])
+  }
   
   # Estimated number of occuring species per site (among the species that were detected anywhere)
-  #for (j in 1:J) {
-  #  Nsite[j] <- sum(z[j, ])
-  #}
+  for (j in 1:J) {
+    Nsite[j] <- sum(z[j, ])
+  }
 }
 ")
 model_spec = model_template
@@ -771,13 +785,15 @@ msom = jags(data = msom_data,
               paste0("mu.alpha", 1:n_alpha_params), paste0("sigma.alpha", 1:n_alpha_params), paste0("alpha", 1:n_alpha_params),
               paste0("mu.delta", 1:n_delta_params), paste0("sigma.delta", 1:n_delta_params), paste0("delta", 1:n_delta_params),
               paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params),
+              # paste0("mu.wcov",  1:n_wcov_params),  paste0("sigma.wcov",  1:n_wcov_params),  paste0("wcov",  1:n_wcov_params),
               # "bayes.p.se",
-              "p_val"
-              # "Nsite", "Nocc"
+              "p_val",
+              "Nsite", "Nocc"
             ),
             model.file = model_file,
-            n.chains = 2, n.adapt = 100, n.iter = 2000, n.burnin = 1000, n.thin = 1,
-            parallel = FALSE, DIC = FALSE)
+            n.chains = 3, n.adapt = 100, n.iter = 3000, n.burnin = 1000, n.thin = 1,
+            # n.chains = 3, n.adapt = 1000, n.iter = 10000, n.burnin = 3000, n.thin = 1,
+            parallel = TRUE, DIC = FALSE)
 
 message("Finished running JAGS (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)")
 
@@ -801,6 +817,8 @@ if (nrow(suspected_nonconvergence) > 1) {
 } else {
   message("All parameters appear to have converged (rhat < ", rhat_threshold, ")")
 }
+
+coda::traceplot(msom$samples[, "w[40]"])
 
 ## Posterior predictive checks
 # "If the observed data are consistent with the model in question, then the Bayesian p-value should be close to 0.5. In practice, a p-value close to 0 or 1 indicates that the model is inadequate in some way -- close to 0 suggests a lack of fit and close to 1 suggests that the model over-fits the data, which may occur when it is too complex." (MacKenzie et al. 2018)
@@ -886,6 +904,8 @@ message("Baysian p-value (deviance): ", round(p_val,3))
 # Inspect the mean and 95% BCI of hyperparameter estimates
 whiskerplot(msom, c(paste0('mu.', param_alpha_data$param), paste0('mu.', param_delta_data$param), 'mu.season'))
 whiskerplot(msom, c(paste0('mu.', param_beta_data$param)))
+# whiskerplot(msom, c(paste0('mu.', param_wcov_data$param)))
+whiskerplot(msom, paste0('w[', seq(1,length(species)), ']'))
 
 # Write results to cache
 msom_results = list(
