@@ -124,7 +124,7 @@ community_survey_data = readRDS(path_community_survey_data)
 dimnames(community_survey_data)
 
 message("Deriving detection-nondetection and yday matricies for each species")
-seasons = dimnames(community_survey_data)[["season"]][1] # DEBUG!
+seasons = dimnames(community_survey_data)[["season"]]
 species = dimnames(community_survey_data)[["common_name"]]
 ylist   = setNames(lapply(species, function(x) {
     setNames(vector("list", length(seasons)), seasons)
@@ -220,6 +220,7 @@ surveys_per_season = lapply(names(ylist[[1]]), function(season) {
 site_survey_counts = lapply(surveys_per_season, function(df) {
   rowSums(df, na.rm = TRUE)
 })
+site_survey_counts = rowSums(do.call(cbind, site_survey_counts)) # combine across years per site
 sites_not_surveyed = unlist(unique(lapply(site_survey_counts, function(site_counts) {
   names(site_counts)[site_counts == 0]
 })))
@@ -396,6 +397,7 @@ for (t in dimnames(y)[['season']]) {
 n_surveys_per_site = list()
 for (t in dimnames(y)[["season"]]) {
   # Count number of non-NA surveys per site
+  print(t)
   n_surveys_per_site[[t]] = apply(!is.na(y[, , t, 1]), 1, sum)
 }
 
@@ -718,7 +720,7 @@ for (d in seq_len(n_delta_params)) { # Add delta covariates
   param_data_new = do.call(cbind, param_delta_data %>% filter(name == param_delta_data$name[d]) %>% pull(data) %>% .[[1]])
   msom_data[[paste0("x_", param_delta_data$param[d])]] = param_data_new
 }
-# DEBUG: msom_data[["x_season"]] = as.vector(param_season_data$scaled[[1]])
+msom_data[["x_season"]] = as.vector(param_season_data$scaled[[1]])
 
 to_3d_array <- function(x) {
   if (is.list(x)) {
@@ -766,15 +768,17 @@ msom = jags(data = msom_data,
             parameters.to.save = c( # monitored parameters
               "mu.u", "sigma.u", "u",
               "mu.v", "sigma.v", "v",
+              "mu.w", "sigma.w", "w",
+              "mu.b", "sigma.b", "b",
               paste0("mu.alpha", 1:n_alpha_params), paste0("sigma.alpha", 1:n_alpha_params), paste0("alpha", 1:n_alpha_params),
               paste0("mu.delta", 1:n_delta_params), paste0("sigma.delta", 1:n_delta_params), paste0("delta", 1:n_delta_params),
               paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params),
-              # "mu.season", "sigma.season", "season"
+              "mu.season", "sigma.season", "season",
               "D_obs", "D_sim"
             ),
             model.file = model_file,
             n.chains = 3, n.adapt = 100, n.iter = 1000, n.burnin = 100, n.thin = 1,
-            parallel = TRUE, DIC = FALSE, verbose=TRUE)
+            parallel = FALSE, DIC = FALSE, verbose=TRUE)
 
 message("Finished running JAGS (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)")
 

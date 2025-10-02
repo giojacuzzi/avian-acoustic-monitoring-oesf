@@ -125,7 +125,8 @@ model{
                                    delta3[i]*x_delta3[j,i] +
                                    delta4[i]*x_delta4[j,i] +
                                    delta5[i]*x_delta5[j,i] +
-                                   delta6[i]*x_delta6[j,i]
+                                   delta6[i]*x_delta6[j,i] +
+                                   season[i]*x_season[t]
 
               z[j,t,i] ~ dbern(psi[j,t,i])
               
