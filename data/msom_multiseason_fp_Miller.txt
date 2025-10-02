@@ -112,11 +112,21 @@ model{
   }
   
   for (i in 1:I) { # for each species i
-      for (j in 1:J) { # for each site j
-          for (t in 1:T) { # for each season t
+      for (t in 1:T) { # for each season t
+          for (j in 1:J) { # for each site j
           
               # Ecological process model for latent occurrence z
-              logit(psi[j,t,i]) <- u[i] + alpha1[i]*x_alpha1[j] + alpha2[i]*x_alpha2[j] + alpha3[i]*x_alpha3[j] + alpha4[i]*x_alpha4[j] + delta1[i]*x_delta1[j,i] + delta2[i]*x_delta2[j,i] + delta3[i]*x_delta3[j,i] + delta4[i]*x_delta4[j,i] + delta5[i]*x_delta5[j,i] + delta6[i]*x_delta6[j,i] + delta7[i]*x_delta7[j,i] + season[i]*x_season[t]
+              logit(psi[j,t,i]) <- u[i] +
+                                   alpha1[i]*x_alpha1[j] +
+                                   alpha2[i]*x_alpha2[j] +
+                                   alpha3[i]*x_alpha3[j] +
+                                   delta1[i]*x_delta1[j,i] +
+                                   delta2[i]*x_delta2[j,i] +
+                                   delta3[i]*x_delta3[j,i] +
+                                   delta4[i]*x_delta4[j,i] +
+                                   delta5[i]*x_delta5[j,i] +
+                                   delta6[i]*x_delta6[j,i]
+
               z[j,t,i] ~ dbern(psi[j,t,i])
               
               for (k in 1:K[j,t]) { # for each survey k during season t at site j
@@ -125,7 +135,10 @@ model{
                   # States: 1 = nondetection, 2 = uncertain detection, 3 = certain detection
       
                   # p11 is true-positive detection probability given z = 1
-                  logit(p11[j,k,t,i]) <- v[i] + beta1[i]*x_beta1[j,k,t] + beta2[i]*x_beta2[j,k,t] + beta3[i]*x_beta3[j,k,t]
+                  logit(p11[j,k,t,i]) <- v[i] +
+                                         beta1[i]*x_beta1[j,k,t] +
+                                         beta2[i]*x_beta2[j,k,t] +
+                                         beta3[i]*x_beta3[j,k,t]
                   
                   # p10 is false-positive detection probability given z = 0
                   logit(p10[j,k,t,i]) <- w[i]
@@ -144,27 +157,33 @@ model{
                   y[j,k,t,i] ~ dcat(pi[j,k,t,i, ])
                   
                   # Simulated replicate for posterior predictive checks
-                  # y_sim[j,k,t,i] ~ dcat(pi[j,k,t,i, ])
+                  y_sim[j,k,t,i] ~ dcat(pi[j,k,t,i, ])
 
-                  # Deviance
-                  # d_obs[j,k,t,i] <- -2 * log(pi[j,k,t,i, y[j,k,t,i]])
-                  # d_sim[j,k,t,i] <- -2 * log(pi[j,k,t,i, y_sim[j,k,t,i]])
+                  # Posterior predictive check (deviance)
+                  p_obs_cat[j,k,t,i] <- equals(y[j,k,t,i],1) * pi[j,k,t,i,1] +
+                                        equals(y[j,k,t,i],2) * pi[j,k,t,i,2] +
+                                        equals(y[j,k,t,i],3) * pi[j,k,t,i,3]
+                  p_sim_cat[j,k,t,i] <- equals(y_sim[j,k,t,i],1) * pi[j,k,t,i,1] +
+                                        equals(y_sim[j,k,t,i],2) * pi[j,k,t,i,2] +
+                                        equals(y_sim[j,k,t,i],3) * pi[j,k,t,i,3]
+                  d_obs[j,k,t,i] <- log(p_obs_cat[j,k,t,i])
+                  d_sim[j,k,t,i] <- log(p_sim_cat[j,k,t,i])
       
               } # K surveys
               
               # Pad jagged array of deviance values with zeros to enable sum below
-              #for (k in (K[j,t]+1):Kmax) {
-              #    d_obs[j,k,t,i] <- 0
-              #    d_sim[j,k,t,i] <- 0
-              #}
+              for (k in (K[j,t]+1):Kmax) {
+                  d_obs[j,k,t,i] <- 0
+                  d_sim[j,k,t,i] <- 0
+              }
               
-          } # T seasons
-      } # J sites
+          } # J sites
+      } # T seasons
   } # I species
   
   ## Derived quantities
   
   # Deviance of simulated and observed data for posterior predictive check
-  #D_obs <- -2 * sum(d_obs[1:J,1:Kmax,1:T,1:I])
-  #D_sim <- -2 * sum(d_sim[1:J,1:Kmax,1:T,1:I])
+  D_obs <- -2 * sum(d_obs[1:J,1:Kmax,1:T,1:I])
+  D_sim <- -2 * sum(d_sim[1:J,1:Kmax,1:T,1:I])
 }

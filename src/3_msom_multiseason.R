@@ -10,7 +10,7 @@ path_homerange_scale_data  = "data/cache/occurrence_covariates/data_homerange_sc
 ############################################################################################################################
 
 model_name = tools::file_path_sans_ext(basename(model_file))
-path_out = paste0("data/cache/models/", model_name, "_", format(Sys.Date(), "%Y-%m-%d"), ".rds")
+path_out = paste0("data/cache/models/", model_name, "_", format(Sys.time(), "%Y-%m-%d_%H:%M:%S"), ".rds")
 pacman::p_load(progress, car, tidyverse, jagsUI, MCMCvis, glue, ggplot2, ggrepel)
 theme_set(theme_classic())
 
@@ -124,7 +124,7 @@ community_survey_data = readRDS(path_community_survey_data)
 dimnames(community_survey_data)
 
 message("Deriving detection-nondetection and yday matricies for each species")
-seasons = dimnames(community_survey_data)[["season"]]
+seasons = dimnames(community_survey_data)[["season"]][1] # DEBUG!
 species = dimnames(community_survey_data)[["common_name"]]
 ylist   = setNames(lapply(species, function(x) {
     setNames(vector("list", length(seasons)), seasons)
@@ -210,27 +210,34 @@ if (length(sites_with_environmental_data_missing_observations) > 0) {
   x_yday = lapply(x_yday, function(mat) { mat[!(rownames(mat) %in% sites_with_environmental_data_missing_observations), , drop = FALSE] })
 }
 
-# TODO: Discard sites with no survey observations and surveys with no site observations?
-# surveys_per_season = lapply(names(ylist[[1]]), function(season) {
-#   season_counts = sapply(ylist, function(species_list) {
-#     rowSums(!is.na(species_list[[season]]))
-#   })
-#   as.data.frame(season_counts)
-# })
-# site_survey_counts = lapply(surveys_per_season, function(df) {
-#   rowSums(df, na.rm = TRUE)
-# })
-# sites_not_surveyed = lapply(site_survey_counts, function(site_counts) {
-#   names(site_counts)[site_counts == 0]
-# })
-# 
+# Discard sites with no survey observations
+surveys_per_season = lapply(names(ylist[[1]]), function(season) {
+  season_counts = sapply(ylist, function(species_list) {
+    rowSums(!is.na(species_list[[season]]))
+  })
+  as.data.frame(season_counts)
+})
+site_survey_counts = lapply(surveys_per_season, function(df) {
+  rowSums(df, na.rm = TRUE)
+})
+sites_not_surveyed = unlist(unique(lapply(site_survey_counts, function(site_counts) {
+  names(site_counts)[site_counts == 0]
+})))
+if (length(sites_not_surveyed) > 0) {
+  message("Discarding ", length(sites_not_surveyed), " sites with no surveys")
+  ylist = lapply(ylist, function(species_mat_list) {
+    lapply(species_mat_list, function(mat) { mat[!(rownames(mat) %in% sites_not_surveyed), , drop = FALSE] })
+  })
+  x_yday = lapply(x_yday, function(mat) { mat[!(rownames(mat) %in% sites_not_surveyed), , drop = FALSE] })
+}
+
+# TODO: Discard surveys with no site observations?
 # survey_site_counts = lapply(surveys_per_season, function(df) {
 #   colSums(df, na.rm = TRUE)
 # })
-# sites_not_surveyed = lapply(site_survey_counts, function(site_counts) {
+# surveys_not_sited = lapply(survey_site_counts, function(site_counts) {
 #   names(site_counts)[site_counts == 0]
 # })
-# 
 # 
 # survey_site_counts = lapply(ylist, function(x) { colSums(!is.na(x))})
 # sites_per_survey = as.data.frame(t(do.call(rbind, survey_site_counts)))
@@ -586,19 +593,19 @@ stopifnot(dimnames(y)[["site"]] == occ_data_plot$site) # check that covariate da
 
 param_alpha_names = c(
   "elev",
-  "homerange_htmax_cv",
+  # "homerange_htmax_cv",
   "homerange_qmd_mean",
   "homerange_treeden_all_mean"
 )
 param_delta_names = c(
   # "cover_forest_diversity",
+  # "shape_idx",
   "density_roads_paved", # TODO: density_roads_all?
   "density_streams_major",
   "focalpatch_area_homeange_pcnt",
   "prop_abund_comthin",
   "prop_abund_lsog",
-  "prop_abund_standinit",
-  "shape_idx"
+  "prop_abund_standinit"
 )
 
 # Store alpha parameter ID, variable name, and standardize data to have mean 0, standard deviation 1
@@ -680,13 +687,29 @@ if (model_name == "msom_multiseason_fp_Miller") {
   y = y + 1 # "JAGS dcat() requires integer categories 1..L. Miller's paper uses y = 0 (no detect), 1 (uncertain), 2 (certain). You must recode your y input to JAGS so the values are 1=no detect, 2=uncertain, 3=certain. I will assume that mapping in the code below. If you prefer to keep 0/1/2 in R, transform before sending data to JAGS: y_jags <- y + 1."
 }
 
+# stop("Check here")
+{
+  # 1) Check K (matrix/array): any zeros or NA?
+  sum_zero_K <- sum(K == 0, na.rm = TRUE)
+  table_K_values <- table(as.vector(K), useNA = "ifany")
+  cat("Number of K==0:", sum_zero_K, "\n")
+  print(table_K_values)
+  
+  # 2) Check y values range and NA
+  yvec <- as.vector(y)
+  cat("y min, max (ignoring NA):", min(yvec, na.rm=TRUE), max(yvec, na.rm=TRUE), "\n")
+  cat("Any NA in y?:", any(is.na(yvec)), "\n")
+  cat("Counts of each integer value in y:\n")
+  print(table(yvec, useNA="ifany"))
+}
+
 msom_data = list(
   J = J,       # number of sites sampled
   K = K,       # number of secondary sampling periods (surveys) per site per season (site x season)
   Kmax = Kmax, # maximum number of surveys across all sites and seasons
   T = T,       # number of primary sampling periods (seasons)
   I = I,       # number of species observed
-  y = y        # observed (detection-nondetection) data matrix
+  y = y       # observed (detection-nondetection) data matrix
 )
 for (a in seq_len(n_alpha_params)) { # Add alpha covariates
   msom_data[[paste0("x_", param_alpha_data$param[a])]] <- as.vector(param_alpha_data$scaled[[a]])
@@ -695,7 +718,7 @@ for (d in seq_len(n_delta_params)) { # Add delta covariates
   param_data_new = do.call(cbind, param_delta_data %>% filter(name == param_delta_data$name[d]) %>% pull(data) %>% .[[1]])
   msom_data[[paste0("x_", param_delta_data$param[d])]] = param_data_new
 }
-msom_data[["x_season"]] = as.vector(param_season_data$scaled[[1]])
+# DEBUG: msom_data[["x_season"]] = as.vector(param_season_data$scaled[[1]])
 
 to_3d_array <- function(x) {
   if (is.list(x)) {
@@ -735,7 +758,10 @@ message("Running JAGS (current time ", time_start <- Sys.time(), ")")
 
 msom = jags(data = msom_data,
             inits = function() { list( # initial values to avoid data/model conflicts
-              z = z
+              z = z,
+              v = rep(logit(0.70), length(species)), # informative priors are necessary to avoid invalid PPC log(0) values
+              w = rep(logit(0.05), length(species)),
+              gamma = rep(logit(0.05), length(species))
             ) },
             parameters.to.save = c( # monitored parameters
               "mu.u", "sigma.u", "u",
@@ -743,12 +769,12 @@ msom = jags(data = msom_data,
               paste0("mu.alpha", 1:n_alpha_params), paste0("sigma.alpha", 1:n_alpha_params), paste0("alpha", 1:n_alpha_params),
               paste0("mu.delta", 1:n_delta_params), paste0("sigma.delta", 1:n_delta_params), paste0("delta", 1:n_delta_params),
               paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params),
-              "mu.season", "sigma.season", "season"
-              # "D_obs", "D_sim"
+              # "mu.season", "sigma.season", "season"
+              "D_obs", "D_sim"
             ),
             model.file = model_file,
-            n.chains = 2, n.adapt = 100, n.iter = 1000, n.burnin = 100, n.thin = 1,
-            parallel = FALSE, DIC = FALSE, verbose=TRUE)
+            n.chains = 3, n.adapt = 100, n.iter = 1000, n.burnin = 100, n.thin = 1,
+            parallel = TRUE, DIC = FALSE, verbose=TRUE)
 
 message("Finished running JAGS (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)")
 
