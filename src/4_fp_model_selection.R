@@ -11,10 +11,12 @@ theme_set(theme_bw())
 species_metadata = read.csv("data/traits/species_metadata(included).csv", nrows = 107) %>% select(common_name, scientific_name, home_range_radius_m, residency, habitat_association, habitat_ebird) %>% mutate(species_name = tolower(common_name))
 
 model_paths = c(
-  "data/cache/models/nofp_2025-09-22.rds",
+  "data/cache/models/msom_multiseason_nofp_2025-09-26.rds",
+  # "data/cache/models/nofp_2025-09-22.rds",
   # "data/cache/models/fp_RoyleLink_2025-09-22.rds",
   # "data/cache/models/fp_Miller_2025-09-19.rds"
-  "data/cache/models/multiseason_2025-09-24.rds"
+  # "data/cache/models/fp_Miller_2025-09-30.rds"
+  "data/cache/models/msom_multiseason_fp_Miller_2025-10-02_11:52:21.rds"
 )
 
 model_data = list()
@@ -35,14 +37,13 @@ for (path in model_paths) {
   model_fits = rbind(model_fits, data.frame(
     model = tools::file_path_sans_ext(basename(path)),
     n_sites = length(msom_results$sites),
-    p_se = msom_results$p.se,
-    p_dev = msom_results$p.dev,
-    combined_mean_auc = msom_results$auc_combined['mean_auc'],
-    combined_mean_auc_lower95 = msom_results$auc_combined['lower95_auc'],
-    combined_mean_auc_upper95 = msom_results$auc_combined['upper95_auc'],
-    species_mean_auc = mean(msom_results$auc_species$mean_auc, na.rm = TRUE),
-    species_min_auc  = min(msom_results$auc_species$mean_auc, na.rm = TRUE),
-    species_max_auc  = max(msom_results$auc_species$mean_auc, na.rm = TRUE)
+    p_val = ifelse(is.null(msom_results$p_val), 0, msom_results$p_val)
+    # combined_mean_auc = msom_results$auc_combined['mean_auc'],
+    # combined_mean_auc_lower95 = msom_results$auc_combined['lower95_auc'],
+    # combined_mean_auc_upper95 = msom_results$auc_combined['upper95_auc'],
+    # species_mean_auc = mean(msom_results$auc_species$mean_auc, na.rm = TRUE),
+    # species_min_auc  = min(msom_results$auc_species$mean_auc, na.rm = TRUE),
+    # species_max_auc  = max(msom_results$auc_species$mean_auc, na.rm = TRUE)
   ))
 }
 model_fits = model_fits %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
@@ -52,31 +53,12 @@ model_fits = model_fits %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
 
 message("Comparing model fits and predictive performance")
 
-plt = ggplot(model_fits, aes(x = model, y = p_se)) +
-  geom_point(size = 2) +
-  geom_hline(yintercept = 0.5, color = "gray50") +
-  geom_hline(yintercept = c(0.25, 0.75), color = "red", linetype = "dashed") +
-  ylim(0.0, 1) +
-  labs(title = "Bayesian p-value (squared error)"); print(plt + plot_annotation(title = ""))
-
-plt = ggplot(model_fits, aes(x = model, y = p_dev)) +
+plt = ggplot(model_fits, aes(x = model, y = p_val)) +
   geom_point(size = 2) +
   geom_hline(yintercept = 0.5, color = "gray50") +
   geom_hline(yintercept = c(0.25, 0.75), color = "red", linetype = "dashed") +
   ylim(0.0, 1) +
   labs(title = "Bayesian p-value (deviance)"); print(plt + plot_annotation(title = ""))
-
-plt = ggplot(model_fits, aes(x = model, y = mean_auc)) +
-  geom_errorbar(aes(ymin = lower95_auc, ymax = upper95_auc), width = 0.1) +
-  geom_point(size = 2) +
-  ylim(0.8, 1) +
-  labs(title = "Combined ROC AUC (95% BCI)"); print(plt + plot_annotation(title = ""))
-
-plt = ggplot(model_fits, aes(x = model, y = species_mean_auc)) +
-  geom_errorbar(aes(ymin = species_min_auc, ymax = species_max_auc), width = 0.1) +
-  geom_point(size = 2) +
-  ylim(0.5, 1) +
-  labs(title = "Species-specific ROC AUC (range)"); print(plt + plot_annotation(title = ""))
 
 ####################################################################################################################
 # Compare latent occurrence estimates
@@ -158,28 +140,28 @@ ggplot(species_baselines %>% filter(startsWith(param, "u")), aes(x = prob, y = s
   geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) +
   labs(x = "Posterior probability", y = "Species index", shape = "Model", color = "Model",
     title = "Species-specific occupancy probability `u` across models (mean and 95% BCI)"
-  )
+  ) + theme(legend.position = "bottom")
 
 ggplot(species_baselines %>% filter(startsWith(param, "v")), aes(x = prob, y = species_name, shape = model, color = model)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
   geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) +
   labs(x = "Posterior probability", y = "Species index", shape = "Model", color = "Model",
        title = "Species-specific TP detection probability given presence `v` across models (mean and 95% BCI)"
-  )
+  ) + theme(legend.position = "bottom")
 
 ggplot(species_baselines %>% filter(startsWith(param, "w")), aes(x = prob, y = species_name, shape = model, color = model)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
   geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) +
   labs(x = "Posterior probability", y = "Species index", shape = "Model", color = "Model",
        title = "Species-specific FP detection probability given absence `w` across models (mean and 95% BCI)"
-  )
+  ) + theme(legend.position = "bottom")
 
 ggplot(species_baselines %>% filter(startsWith(param, "b")), aes(x = prob, y = species_name, shape = model, color = model)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
   geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) +
   labs(x = "Posterior probability", y = "Species index", shape = "Model", color = "Model",
        title = "Species-specific certain confirmation probability given detection `b` across models (mean and 95% BCI)"
-  )
+  ) + theme(legend.position = "bottom")
 
 message("Species false positive probability range:")
 species_baselines %>% filter(startsWith(param, "w")) %>% group_by(model) %>% summarise(
@@ -277,7 +259,7 @@ for (path in model_paths) {
       data = species_effects %>% filter(coef_overlap0 == 0),
       aes(x = coef_mean, y = name, label = species_name, color = habitat_association),
       size = 3, nudge_x = 0.05, direction = "y", hjust = 0.05
-    ); print(plt)
+    ) + theme(legend.position = "bottom"); print(plt)
   
   season_coef_summary = msom_summary %>%
     filter(str_detect(param, "^(mu|sigma)\\.(season)")) %>% arrange(param) %>%
@@ -326,5 +308,63 @@ for (path in model_paths) {
       data = species_effects %>% filter(coef_overlap0 == 0),
       aes(x = coef_mean, y = name, label = species_name, color = habitat_association),
       size = 3, nudge_x = 0.05, direction = "y", hjust = 0.05
-    ); print(plt)
+    ) + theme(legend.position = "bottom"); print(plt)
 }
+
+##################
+
+param_name = "alpha1"
+msom_summary = model_data[[path]]$msom_summary
+param_data   = model_data[[path]]$param_alpha_data %>% filter(param == param_name)
+
+# Mean marginal probabilities of occurrence for the metacommunity in relation to alpha
+coefs = msom_summary %>% filter(stringr::str_starts(param, param_name)) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
+param_scaled_data = param_data %>% pull(scaled)
+p_mu = attr(param_scaled_data[[1]], "scaled:center") # to transform between z-scale and pred_range_original scale
+p_sd = attr(param_scaled_data[[1]], "scaled:scale")
+bound_low  = min(param_scaled_data[[1]]) * p_sd + p_mu
+bound_high = max(param_scaled_data[[1]]) * p_sd + p_mu
+pred_range_original = seq(bound_low, bound_high, by = 1) # range of possible alpha values
+pred_range_standardized = (pred_range_original - p_mu) / p_sd
+# species-specific occurrence intercepts u[i]
+intercepts = msom_summary %>% filter(str_starts(param, "u")) %>%
+  mutate(species_idx = as.integer(str_extract(param, "\\d+")), species_name = species[species_idx]) %>%
+  select(species_name, u_i = mean)
+# species-specific coefficients
+intercepts_and_coeffs = coefs %>% rename(alpha6_i = mean) %>% select(species_name, alpha6_i) %>%
+  left_join(intercepts, by = "species_name")
+# predict species-specific occurrence probabilities
+predictions = intercepts_and_coeffs %>%
+  rowwise() %>% do({
+    i <- .
+    tibble(
+      species_name = i$species_name,
+      mango = pred_range_original,
+      psi = plogis(i$u_i + i$alpha6_i * pred_range_standardized)
+    )
+  }) %>% bind_rows()
+# predict meta-community occurrence probabilities (across posterior samples to calculate BCI)
+mu_u_samples      = as.matrix(msom$sims.list[["mu.u"]])
+mu_param_samples = as.matrix(msom$sims.list[[paste0("mu.", param_name)]])
+meta_preds = map_dfr(1:nrow(mu_u_samples), function(i) {
+  tibble(
+    mango = pred_range_original,
+    psi = plogis(mu_u_samples[i, 1] + mu_param_samples[i, 1] * pred_range_standardized),
+    draw = i
+  )
+})
+meta_summary = meta_preds %>% # calculate means and 95% BCIs
+  group_by(mango) %>% summarise(
+    psi_mean = mean(psi),
+    psi_lower = quantile(psi, 0.025),
+    psi_upper = quantile(psi, 0.975)
+  )
+ggplot(predictions, aes(x = mango, y = psi, group = species_name)) +
+  geom_line(aes(color = species_name), alpha = 0.4) +
+  geom_ribbon(data = meta_summary, aes(x = mango, ymin = psi_lower, ymax = psi_upper), fill = "blue", alpha = 0.2, inherit.aes = FALSE) +
+  geom_line(data = meta_summary, aes(x = mango, y = psi_mean), color = "blue", linewidth = 1.2, inherit.aes = FALSE) +
+  scale_x_continuous(limits = c(bound_low, bound_high)) +
+  scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
+  labs(title = "", x = param_data$name, y = "Occurrence probability") +
+  theme(legend.position = "none")
