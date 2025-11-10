@@ -1,17 +1,37 @@
-# Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024)
+# 1c_calculate_species_thresholds.R ===================================================================
+#
+# Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024). Takes as input a parquet file containing the validation dataset following the format below:
 
-library(dplyr)
-library(ggplot2)
-library(PRROC)
-theme_set(theme_classic())
+# label_predicted       confidence  file                                  label_truth 
+# <chr>                 <dbl>       <chr>                                 <chr>       
+# townsend's warbler    0.996       101_20210508_090002_1293.0s_1296.0s   townsend's warbler
+# varied thrush         0.0003      101_20210508_090002_1293.0s_1296.0s   0            
+# violet-green swallow  0.0001      101_20210508_090002_1293.0s_1296.0s   0            
 
+# INPUTS:
+# Path to predictions directory containing "predictions_[model].parquet" files
 path_predictions_cache = "/Users/giojacuzzi/repos/few-shot-transfer-learning-bioacoustics/data/cache"
-
-p_tp = 0.95 # Desired probability of true positive
+# Desired minimum probability of true positive
+p_tp = 0.95
 display_plots = TRUE
 
+# Load required packages (automatically install any missing) -------------------------
+pkgs = c(
+  "dplyr",
+  "arrow",
+  "PRROC",
+  "ggplot2"
+)
+sapply(pkgs, function(pkg) {
+  if (!pkg %in% installed.packages()[, "Package"]) install.packages(pkg, dependencies = TRUE)
+  library(pkg, character.only = TRUE)
+  as.character(packageVersion(pkg))
+})
+
+# Helper functions -------------------------
+
 conf_to_logit = function(c) {
-  # guard against undefined logit for exceptionally low/high scores beyond model rounding limits
+  # Prevent undefined logit for extreme scores due to rounding error
   c = min(max(c, 0.00001), 1.0 - 0.00001)
   return(log(c / (1 - c)))
 }
@@ -19,6 +39,10 @@ conf_to_logit = function(c) {
 logit_to_conf = function(l) {
   return(1 / (1 + exp(-l)))
 }
+
+theme_set(theme_classic())
+
+# Calculate species-specific thresholds via Platt scaling -------------------------
 
 message("Calculating species-specific thresholds and performance metrics (current time ", time_start <- format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ")")
 
