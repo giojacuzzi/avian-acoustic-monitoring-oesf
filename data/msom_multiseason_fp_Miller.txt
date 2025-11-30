@@ -27,6 +27,9 @@ model{
   mu.alpha4 ~ dnorm(0,0.01)
   sigma.alpha4 ~ dunif(0,5)
   tau.alpha4 <- pow(sigma.alpha4,-2)
+  mu.alpha5 ~ dnorm(0,0.01)
+  sigma.alpha5 ~ dunif(0,5)
+  tau.alpha5 <- pow(sigma.alpha5,-2)
   mu.delta1 ~ dnorm(0,0.01)
   sigma.delta1 ~ dunif(0,5)
   tau.delta1 <- pow(sigma.delta1,-2)
@@ -42,12 +45,6 @@ model{
   mu.delta5 ~ dnorm(0,0.01)
   sigma.delta5 ~ dunif(0,5)
   tau.delta5 <- pow(sigma.delta5,-2)
-  mu.delta6 ~ dnorm(0,0.01)
-  sigma.delta6 ~ dunif(0,5)
-  tau.delta6 <- pow(sigma.delta6,-2)
-  mu.delta7 ~ dnorm(0,0.01)
-  sigma.delta7 ~ dunif(0,5)
-  tau.delta7 <- pow(sigma.delta7,-2)
   mu.season ~ dnorm(0,0.01)
   sigma.season ~ dunif(0,5)
   tau.season <- pow(sigma.season,-2)
@@ -88,13 +85,12 @@ model{
       alpha2[i] ~ dnorm(mu.alpha2,tau.alpha2)
       alpha3[i] ~ dnorm(mu.alpha3,tau.alpha3)
       alpha4[i] ~ dnorm(mu.alpha4,tau.alpha4)
+      alpha5[i] ~ dnorm(mu.alpha5,tau.alpha5)
       delta1[i] ~ dnorm(mu.delta1,tau.delta1)
       delta2[i] ~ dnorm(mu.delta2,tau.delta2)
       delta3[i] ~ dnorm(mu.delta3,tau.delta3)
       delta4[i] ~ dnorm(mu.delta4,tau.delta4)
       delta5[i] ~ dnorm(mu.delta5,tau.delta5)
-      delta6[i] ~ dnorm(mu.delta6,tau.delta6)
-      delta7[i] ~ dnorm(mu.delta7,tau.delta7)
       season[i] ~ dnorm(mu.season,tau.season)
   
       # Unconfirmed true positive detection
@@ -120,12 +116,13 @@ model{
                                    alpha1[i]*x_alpha1[j] +
                                    alpha2[i]*x_alpha2[j] +
                                    alpha3[i]*x_alpha3[j] +
+                                   alpha4[i]*x_alpha4[j] +
+                                   alpha5[i]*x_alpha5[j] +
                                    delta1[i]*x_delta1[j,i] +
                                    delta2[i]*x_delta2[j,i] +
                                    delta3[i]*x_delta3[j,i] +
                                    delta4[i]*x_delta4[j,i] +
                                    delta5[i]*x_delta5[j,i] +
-                                   delta6[i]*x_delta6[j,i] +
                                    season[i]*x_season[t]
 
               z[j,t,i] ~ dbern(psi[j,t,i])

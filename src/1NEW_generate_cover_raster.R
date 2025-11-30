@@ -2,11 +2,9 @@
 # Generate and inspect raster(s) for landscape cover
 ##############################################################################
 
-source("src/global.R")
 source("src/1NEW_preprocess_habitat_data.R")
 
 # Inputs
-species_trait_data = read.csv("data/cache/species_traits/species_traits.csv")
 # Base RS-FRIS data (0.1 acre resolution, i.e. ~404m2 or 20.10836 * 20.10836 m grain, roughly 1% of the area of a 100m radius circle)
 # RS-FRIS 4.0 uses a combination of 2019 and 2020 photogrammetry.
 # RS-FRIS 5.0 uses a combination of 2021 and 2022 photogrammetry. 
@@ -37,9 +35,6 @@ library(vegan)
 # ARU locations (sites)
 # Used to define study area
 mapview(aru_sites, label = aru_sites$name)
-
-# Study area boundary buffer
-study_area = st_buffer(st_as_sfc(st_bbox(aru_sites)), dist = 10000)
 
 # Load a raster, cropped, projected, and masked to the study area
 load_raster = function(path_rast) {
@@ -168,10 +163,13 @@ mapview(rast_stratum) +
 
 # Further delineate patch boundaries by roads, waterbodies, and watercourses
 
+template = rast(ext(rast_stratum), resolution = res(rast_stratum), crs = crs(rast_stratum))
 watercourse_half_width = res(rast_stratum)[1] / 2
 watercourses_buffered = (st_buffer(boundary_watercourses, dist = watercourse_half_width))
 rast_watercourses = rasterize(vect(watercourses_buffered), template, field = 7, background = NA, touches=TRUE)
 # mapview(rast_watercourses) + mapview(watercourses_buffered)
+
+rast_updated = rast_stratum
 rast_updated = cover(rast_watercourses, rast_updated)
 
 rast_waterbodies = rasterize(vect(boundary_waterbodies), template, field = 7, background = NA, touches=TRUE)
@@ -196,7 +194,6 @@ paved_secondary_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Light-
 road_half_width_secondary = max(30 / 2 * conv_ft_to_m, res(rast_stratum)[1] / 2)
 # mapview(paved_secondary_roads) + mapview(st_union(st_buffer(paved_secondary_roads, road_half_width_secondary)))
 
-template = rast(ext(rast_stratum), resolution = res(rast_stratum), crs = crs(rast_stratum))
 paved_roads_primary_buffered = (st_buffer(paved_primary_roads, dist = road_half_width_primary))
 paved_roads_secondary_buffered = (st_buffer(paved_secondary_roads, dist = road_half_width_secondary))
 rast_paved_roads_primary = rasterize(vect(paved_roads_primary_buffered), template, field = 6, background = NA, touches=TRUE)
@@ -204,14 +201,13 @@ rast_paved_roads_secondary = rasterize(vect(paved_roads_secondary_buffered), tem
 # mapview(rast_paved_roads_primary) + mapview(paved_roads_primary_buffered)
 # mapview(rast_paved_roads_secondary) + mapview(paved_roads_secondary_buffered)
 # mapview(rast_paved_roads_primary) + mapview(rast_paved_roads_secondary)
-rast_updated = rast_stratum
 rast_updated = cover(rast_paved_roads_primary, rast_updated)
 rast_updated = cover(rast_paved_roads_secondary, rast_updated)
 
 # TODO: Cover impervious surfaces
 
 # Impute any remaining missing patches with cover class 2 (stem exclusion)
-rast_updated[is.na(rast_updated[])] <- 2
+# rast_updated[is.na(rast_updated[])] <- 2
 mapview(rast_updated)
 
 # Crop raster to the study area (bounded by maximum home range size)
@@ -367,6 +363,8 @@ if (overwrite_rast_cover_cache) {
   mapview(rast_cover_clean) + mapview(patch_stack[['cover_class']])
   
   # TODO: Save an alternative that combines understory reinit and old growth into an LSOG category
+  
+  # TODO: Save alternative patch ids too
   
   message('Saving raster cover data cache ', path_rast_cover_clean_out)
   dir.create(dirname(path_rast_cover_clean_out), recursive = TRUE, showWarnings = FALSE)

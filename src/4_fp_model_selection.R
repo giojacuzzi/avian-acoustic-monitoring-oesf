@@ -1,22 +1,45 @@
 # "To determine support for the presence of false positives in the data sets we compared the full parameterization to one where false positive detections were assumed not to occur by making the constraint that p10 = 0."
 
-library(dplyr)
+library(tidyverse)
 library(ggplot2)
 library(patchwork)
+library(ggrepel)
+library(ggbeeswarm)
 theme_set(theme_bw())
+
+theme_sleek <- function(base_size = 11, base_family = "") {
+  half_line <- base_size/2
+  theme_light(base_size = base_size, base_family = base_family) +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks.length = unit(half_line / 2.2, "pt"),
+      strip.background = element_rect(fill = NA, colour = NA),
+      strip.text.x = element_text(colour = "grey30"),
+      strip.text.y = element_text(colour = "grey30"),
+      axis.text = element_text(colour = "grey30"),
+      axis.title = element_text(colour = "grey30"),
+      legend.title = element_text(colour = "grey30", size = rel(0.9)),
+      panel.border = element_rect(fill = NA, colour = "grey70", linewidth = 1),
+      legend.key.size = unit(0.9, "lines"),
+      legend.text = element_text(size = rel(0.7), colour = "grey30"),
+      legend.key = element_rect(colour = NA, fill = NA),
+      legend.background = element_rect(colour = NA, fill = NA),
+      plot.title = element_text(colour = "grey30", size = rel(1)),
+      plot.subtitle = element_text(colour = "grey30", size = rel(.85))
+    )
+}
 
 ####################################################################################################################
 # Load data for each model
 
 species_metadata = read.csv("data/traits/species_metadata(included).csv", nrows = 107) %>% select(common_name, scientific_name, home_range_radius_m, residency, habitat_association, habitat_ebird) %>% mutate(species_name = tolower(common_name))
 
+species_status = readxl::read_xlsx("data/traits/ACAD Global 2024.05.23.xlsx") %>% janitor::clean_names()
+species_metadata = left_join(species_metadata, species_status, by = "common_name")
+
 model_paths = c(
-  "data/cache/models/msom_multiseason_nofp_2025-09-26.rds",
-  # "data/cache/models/nofp_2025-09-22.rds",
-  # "data/cache/models/fp_RoyleLink_2025-09-22.rds",
-  # "data/cache/models/fp_Miller_2025-09-19.rds"
-  # "data/cache/models/fp_Miller_2025-09-30.rds"
-  "data/cache/models/msom_multiseason_fp_Miller_2025-10-02_11:52:21.rds"
+  "data/cache/models/msom_multiseason_fp_Miller_2025-10-07_14:45:58.rds" # HOMERANGE SCALE FIXED TO MEDIAN (~250 m radius)
 )
 
 model_data = list()
@@ -26,6 +49,7 @@ for (path in model_paths) {
   msom_results = readRDS(path)
   
   model_data[[path]] = list(
+    msom             = msom_results$msom,
     msom_summary     = transform(msom_results$msom_summary, model = path),
     param_alpha_data = msom_results$param_alpha_data,
     param_delta_data = msom_results$param_delta_data,
@@ -104,7 +128,7 @@ u - occupancy probability across sites
 v - true positive detection probability given presence
 w - false positive detection probability given absence
 b - certain confirmation probability given detection
-")
+") + theme(legend.position = "bottom")
 
 species = model_data[[1]]$species
 
@@ -135,33 +159,34 @@ species_baselines %>% filter(startsWith(param, "u")) %>% group_by(model) %>% sum
 #   prob_max = range_prob$prob[, "max"]
 # )
 
-ggplot(species_baselines %>% filter(startsWith(param, "u")), aes(x = prob, y = species_name, shape = model, color = model)) +
+ggplot(species_baselines %>% filter(startsWith(param, "u")), aes(x = prob, y = reorder(species_name, prob), shape = model, color = model)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
   geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) +
   labs(x = "Posterior probability", y = "Species index", shape = "Model", color = "Model",
-    title = "Species-specific occupancy probability `u` across models (mean and 95% BCI)"
+    title = "Species-specific occurrence probability `u` across models (mean and 95% BCI)"
   ) + theme(legend.position = "bottom")
 
-ggplot(species_baselines %>% filter(startsWith(param, "v")), aes(x = prob, y = species_name, shape = model, color = model)) +
+ggplot(species_baselines %>% filter(startsWith(param, "v")), aes(x = prob, y = reorder(species_name, prob), shape = model, color = model)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
   geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) +
   labs(x = "Posterior probability", y = "Species index", shape = "Model", color = "Model",
        title = "Species-specific TP detection probability given presence `v` across models (mean and 95% BCI)"
   ) + theme(legend.position = "bottom")
 
-ggplot(species_baselines %>% filter(startsWith(param, "w")), aes(x = prob, y = species_name, shape = model, color = model)) +
+ggplot(species_baselines %>% filter(startsWith(param, "w")), aes(x = prob, y = reorder(species_name, prob), shape = model, color = model)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
   geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) +
   labs(x = "Posterior probability", y = "Species index", shape = "Model", color = "Model",
        title = "Species-specific FP detection probability given absence `w` across models (mean and 95% BCI)"
-  ) + theme(legend.position = "bottom")
+  ) + theme(legend.position = "bottom") + xlim(0, 1)
 
-ggplot(species_baselines %>% filter(startsWith(param, "b")), aes(x = prob, y = species_name, shape = model, color = model)) +
+# TODO: Is this on the right scale??
+ggplot(species_baselines %>% filter(startsWith(param, "b")), aes(x = prob, y = reorder(species_name, prob), shape = model, color = model)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
   geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) +
   labs(x = "Posterior probability", y = "Species index", shape = "Model", color = "Model",
        title = "Species-specific certain confirmation probability given detection `b` across models (mean and 95% BCI)"
-  ) + theme(legend.position = "bottom")
+  ) + theme(legend.position = "bottom") + xlim(0, 1)
 
 message("Species false positive probability range:")
 species_baselines %>% filter(startsWith(param, "w")) %>% group_by(model) %>% summarise(
@@ -244,11 +269,13 @@ for (path in model_paths) {
   species_effects = full_join(species_effects, species_metadata, by = c('species_name'))
   species_effects = species_effects %>% filter(!is.na(name) & name != "")
   
+  # color by `habitat_association`, `continental_importance`, `iucn_red_list_2023`, `ccs_b`
   plt = ggplot() +
     geom_vline(xintercept = 0, linetype = "dashed", color = "darkgray") +
     geom_point(data = species_effects, aes(x = coef_mean, y = name, color = habitat_association, shape = coef_overlap0), position = position_jitter(height = 0.2), size = 3, alpha = 0.95) +
     # geom_dotplot(data = species_effects, aes(x = coef_mean, y = name, fill = name, alpha = coef_overlap0), color = "transparent", binwidth = 0.03, stackdir = "center") +
-    scale_color_manual(values = c("darkgray", "#d8c18a", "#b2675e", "#3c8273")) + #c('#90c6bd', '#3c8273', '#d8c18a', '#9b652b', '#b2675e', 'darkgray', '#6495ed')
+    scale_color_manual(values = c("darkgray", "#d8c18a", "#b2675e", "#3c8273")) +
+    # scale_color_viridis_c() +
     geom_errorbar(data = occ_effect_sizes, aes(x = mean, y = as.factor(name), xmin = `2.5%`, xmax = `97.5%`), width = 0) +
     geom_point(data = occ_effect_sizes, aes(x = mean, y = as.factor(name), shape = overlap0), size = 3.5) +
       xlim(c(-2.5, 2.5)) +
@@ -258,12 +285,33 @@ for (path in model_paths) {
     geom_text_repel(
       data = species_effects %>% filter(coef_overlap0 == 0),
       aes(x = coef_mean, y = name, label = species_name, color = habitat_association),
-      size = 3, nudge_x = 0.05, direction = "y", hjust = 0.05
+      size = 3, nudge_x = 0.05, direction = "y", hjust = 0.05, max.overlaps = 10
     ) + theme(legend.position = "bottom"); print(plt)
   
   season_coef_summary = msom_summary %>%
     filter(str_detect(param, "^(mu|sigma)\\.(season)")) %>% arrange(param) %>%
     select(param, mean, sd, `2.5%`, `97.5%`, `25%`, `75%`, overlap0)
+
+  # ggplot(species_effects %>% filter(name == "prop_abund_lsog")) +
+  #   geom_point(aes(x = habitat_association, y = coef_mean))
+  
+  plt = ggplot(species_effects, aes(x = coef_mean, y = name)) +
+    geom_vline(xintercept = 0, color = "gray80") +
+    geom_beeswarm(aes(shape = coef_overlap0, group = habitat_association, color = habitat_association), dodge.width = 0.5, cex = 0.01, priority = "density", size = 2, alpha = 1) +
+    scale_color_manual(values = c("gray40", "#d8c18a", "#b2675e", "#3c8273")) +
+    geom_errorbar(data = occ_effect_sizes, aes(x = mean, y = as.factor(name), xmin = `2.5%`, xmax = `97.5%`), width = 0) +
+    geom_point(data = occ_effect_sizes, aes(x = mean, y = as.factor(name), shape = overlap0), size = 3.5) +
+    scale_shape_manual(values = c(19, 1)) +
+    xlim(c(-2.5, 2.5)) +
+    labs(title = "Effect sizes for occurrence covariates at community and species levels",
+         subtitle = tools::file_path_sans_ext(basename(path)),
+         x = "Standardized coefficient mean", y = "Occupancy predictor") +
+    geom_text_repel(
+      data = species_effects %>% filter(coef_overlap0 == 0),
+      aes(x = coef_mean, y = name, label = species_name, color = habitat_association),
+      size = 3, nudge_x = 0.05, direction = "y", hjust = 0.05, max.overlaps = 10
+    ) +
+    theme_sleek() + theme(legend.position = "bottom"); print(plt)
   
 }
 
@@ -313,13 +361,14 @@ for (path in model_paths) {
 
 ##################
 
-param_name = "alpha1"
+param_name = "alpha5"
+msom         = model_data[[path]]$msom
 msom_summary = model_data[[path]]$msom_summary
 param_data   = model_data[[path]]$param_alpha_data %>% filter(param == param_name)
 
 # Mean marginal probabilities of occurrence for the metacommunity in relation to alpha
 coefs = msom_summary %>% filter(stringr::str_starts(param, param_name)) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
-  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(species_name = species[species_idx])
+  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(common_name = species[species_idx])
 param_scaled_data = param_data %>% pull(scaled)
 p_mu = attr(param_scaled_data[[1]], "scaled:center") # to transform between z-scale and pred_range_original scale
 p_sd = attr(param_scaled_data[[1]], "scaled:scale")
@@ -329,17 +378,17 @@ pred_range_original = seq(bound_low, bound_high, by = 1) # range of possible alp
 pred_range_standardized = (pred_range_original - p_mu) / p_sd
 # species-specific occurrence intercepts u[i]
 intercepts = msom_summary %>% filter(str_starts(param, "u")) %>%
-  mutate(species_idx = as.integer(str_extract(param, "\\d+")), species_name = species[species_idx]) %>%
-  select(species_name, u_i = mean)
+  mutate(species_idx = as.integer(str_extract(param, "\\d+")), common_name = species[species_idx]) %>%
+  select(common_name, u_i = mean)
 # species-specific coefficients
-intercepts_and_coeffs = coefs %>% rename(alpha6_i = mean) %>% select(species_name, alpha6_i) %>%
-  left_join(intercepts, by = "species_name")
+intercepts_and_coeffs = coefs %>% rename(alpha6_i = mean) %>% select(common_name, alpha6_i) %>%
+  left_join(intercepts, by = "common_name")
 # predict species-specific occurrence probabilities
 predictions = intercepts_and_coeffs %>%
   rowwise() %>% do({
     i <- .
     tibble(
-      species_name = i$species_name,
+      common_name = i$common_name,
       mango = pred_range_original,
       psi = plogis(i$u_i + i$alpha6_i * pred_range_standardized)
     )
@@ -360,11 +409,20 @@ meta_summary = meta_preds %>% # calculate means and 95% BCIs
     psi_lower = quantile(psi, 0.025),
     psi_upper = quantile(psi, 0.975)
   )
-ggplot(predictions, aes(x = mango, y = psi, group = species_name)) +
-  geom_line(aes(color = species_name), alpha = 0.4) +
+ggplot(predictions, aes(x = mango, y = psi, group = common_name)) +
+  geom_line(aes(color = common_name), alpha = 0.4) +
   geom_ribbon(data = meta_summary, aes(x = mango, ymin = psi_lower, ymax = psi_upper), fill = "blue", alpha = 0.2, inherit.aes = FALSE) +
   geom_line(data = meta_summary, aes(x = mango, y = psi_mean), color = "blue", linewidth = 1.2, inherit.aes = FALSE) +
   scale_x_continuous(limits = c(bound_low, bound_high)) +
   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
+  labs(title = "", x = param_data$name, y = "Occurrence probability") +
+  theme(legend.position = "none")
+
+ggplot(predictions, aes(x = mango, y = psi, group = common_name)) +
+  geom_line() +
+  gghighlight::gghighlight(use_direct_label = FALSE, unhighlighted_params = list(color = alpha("black", 0.1))) +
+  facet_wrap(~reorder(common_name, psi)) +
+  scale_x_continuous(limits = c(bound_low, bound_high)) +
+  scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.5, 1.0)) +
   labs(title = "", x = param_data$name, y = "Occurrence probability") +
   theme(legend.position = "none")

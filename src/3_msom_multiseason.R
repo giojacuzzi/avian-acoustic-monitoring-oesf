@@ -1,32 +1,35 @@
 ############################################################################################################################
 # A standard single-season multi-species occupancy model assuming no false positives
 #
-generate_diagnostic_plots = FALSE
 model_file = "data/msom_multiseason_fp_Miller.txt" # "data/msom_multiseason_nofp.txt" or "data/msom_multiseason_fp_Miller.txt"
 path_community_survey_data = "data/cache/1_derive_community_survey_data/community_survey_data_2025-08-15.rds"
 path_species_thresholds    = "data/cache/1_calculate_species_thresholds/species_thresholds.csv"
-path_plot_scale_data       = "data/cache/occurrence_covariates/data_plot_scale.rds"
-path_homerange_scale_data  = "data/cache/occurrence_covariates/data_homerange_scale.rds"
+path_plot_scale_data       = "data/cache/habitat_vars/data_plot_scale_sites.rds"
+path_homerange_scale_data  = "data/cache/habitat_vars/data_homerange_scale_sites.rds"
 ############################################################################################################################
 
 model_name = tools::file_path_sans_ext(basename(model_file))
 path_out = paste0("data/cache/models/", model_name, "_", format(Sys.time(), "%Y-%m-%d_%H:%M:%S"), ".rds")
-pacman::p_load(progress, car, tidyverse, jagsUI, MCMCvis, glue, ggplot2, ggrepel)
+pacman::p_load(progress, car, tidyverse, jagsUI, MCMCvis, glue, ggplot2, ggrepel, MCMCvis)
 theme_set(theme_classic())
+
+# DEBUG
+OVERRIDE_SPECIES_SCALE_WITH_MEDIAN = TRUE
 
 ############################################################################################################################
 # Load occurrence covariate data
 
 # local plot scale
 occ_data_plot_shared = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site, elev
+  site, elev, dist_road_paved, dist_road_all, dist_watercourse_major, dist_watercourse_all
 )
-occ_data_plot_rs = readRDS(path_homerange_scale_data)[['plot']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
-  site, homerange_downvol_mean, homerange_htmax_cv, homerange_qmd_mean, homerange_treeden_all_mean, homerange_treeden_gt4in_dbh_mean, homerange_ba_mean, homerange_snagden_gt15dbh_mean
+# TODO: do occ_data_plot_rs at PLOT scale, not median
+occ_data_plot_rs = readRDS(path_homerange_scale_data)[['median']] %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
+  site,
+  # homerange_downvol_mean, homerange_ba_mean, homerange_snagden_gt15dbh_mean, homerange_htmax_cv, homerange_treeden_gt4in_dbh_mean,
+  homerange_qmd_mean, homerange_treeden_all_mean
 )
-occ_data_plot = occ_data_plot_shared %>% full_join(occ_data_plot_rs, by = "site") %>% select(
-  site, elev, homerange_treeden_all_mean, homerange_qmd_mean, homerange_htmax_cv
-)
+occ_data_plot = occ_data_plot_shared %>% full_join(occ_data_plot_rs, by = "site")
 
 # species-specific homerange scales
 occ_data_homerange = readRDS(path_homerange_scale_data)
@@ -37,10 +40,10 @@ occ_data_homerange = map(occ_data_homerange, ~
                            select(
                              buffer_radius_m,
                              site,
-                             cover_forest_diversity,
-                             density_edge_cw,
-                             density_roads_paved,
-                             density_streams_major,
+                             # cover_forest_diversity,
+                             # density_edge_cw,
+                             # density_roads_paved,
+                             # density_streams_major,
                              focalpatch_area_homeange_pcnt,
                              prop_abund_standinit,
                              prop_abund_lsog,
@@ -439,7 +442,7 @@ if (model_name == "msom_multiseason_fp_Miller") {
   message("By season:")
   print(table(predictions$season, predictions$label_truth))
   
-  ## TODO: Miller model incorporation!
+  ## TODO: Review Miller model incorporation!
   
   # --- 1. Map site names to row indices in y ---
   site_idx <- match(predictions$site_agg, dimnames(y)[["site"]])
@@ -497,35 +500,6 @@ if (model_name == "msom_multiseason_fp_Miller") {
   }
   counts_df
 }
-
-# Get detection covariate data
-# detection_data = readRDS("data/cache/detection_covariates/data_detection.rds") %>% filter(year == "2020")
-
-# x_yday_df = as.data.frame(x_yday[["2020"]])
-# x_yday_df$site = rownames(x_yday_df)
-# x_yday_long = tidyr::pivot_longer(
-#   x_yday_df,
-#   cols = -site,
-#   names_to = "survey",
-#   values_to = "yday"
-# )
-# 
-# get_var_matrix = function(variable) {
-#   detection_data_long = x_yday_long %>%
-#     left_join(detection_data, by = c("site", "yday")) %>%
-#     select(site, survey, !!sym(variable))
-#   x = tidyr::pivot_wider(
-#     detection_data_long,
-#     names_from = survey,
-#     values_from = !!sym(variable)
-#   )
-#   x = as.data.frame(x)
-#   rownames(x) = x$site
-#   x$site = NULL
-#   return(as.matrix(x))
-# }
-# x_tmax = get_var_matrix("tmax_deg_c")
-# x_prcp = get_var_matrix("prcp_mm_day")
 
 # Get detection covariate data
 detection_data = readRDS("data/cache/detection_covariates/data_detection.rds") %>% mutate(year = as.character(year))
@@ -596,14 +570,16 @@ stopifnot(dimnames(y)[["site"]] == occ_data_plot$site) # check that covariate da
 param_alpha_names = c(
   "elev",
   # "homerange_htmax_cv",
+  "dist_road_paved",
+  "dist_watercourse_major",
   "homerange_qmd_mean",
   "homerange_treeden_all_mean"
 )
 param_delta_names = c(
   # "cover_forest_diversity",
-  # "shape_idx",
-  "density_roads_paved", # TODO: density_roads_all?
-  "density_streams_major",
+  "shape_idx",
+  # "density_roads_paved", # TODO: density_roads_all?
+  # "density_streams_major",
   "focalpatch_area_homeange_pcnt",
   "prop_abund_comthin",
   "prop_abund_lsog",
@@ -619,8 +595,14 @@ n_alpha_params = nrow(param_alpha_data)
 names(occ_data_homerange)[names(occ_data_homerange) == "western flycatcher"] = "pacific-slope flycatcher"
 
 # Store minimum (i.e. floor) plot homerange data for those species who have smaller estimated home range sizes
+if (!OVERRIDE_SPECIES_SCALE_WITH_MEDIAN) {
 occ_data_homerange_floor = occ_data_homerange[['plot']] %>% filter(site %in% dimnames(y)$site)
 stopifnot(dimnames(y)$site == occ_data_homerange_floor$site)
+}
+
+# Store median plot homerange data for debugging
+occ_data_homerange_median = occ_data_homerange[['median']] %>% filter(site %in% dimnames(y)$site)
+stopifnot(dimnames(y)$site == occ_data_homerange_median$site)
 
 # Store delta parameter ID, variable name, and standardized data in species-specific matricies
 delta_data = setNames(vector('list', length(param_delta_names)), param_delta_names)
@@ -632,14 +614,18 @@ for (param in param_delta_names) {
   for (i in 1:length(species)) {
     species_name = species[i]
     # message(i, " ", species_name)
-    # discard data for irrelevant sites
-    species_occ_data = occ_data_homerange[[species_name]] %>% filter(site %in% dimnames(y)$site)
-    # check that data are aligned with observation matrix by site
-    stopifnot(dimnames(y)$site == species_occ_data$site)
-    if (unique(species_occ_data %>% pull(buffer_radius_m)) >= 100) {
-      param_data = species_occ_data %>% select(site, all_of(param))
+    if (OVERRIDE_SPECIES_SCALE_WITH_MEDIAN) {
+      param_data = occ_data_homerange_median %>% select(site, all_of(param))
     } else {
-      param_data = occ_data_homerange_floor %>% select(site, all_of(param))
+      # discard data for irrelevant sites
+      species_occ_data = occ_data_homerange[[species_name]] %>% filter(site %in% dimnames(y)$site)
+      # check that data are aligned with observation matrix by site
+      stopifnot(dimnames(y)$site == species_occ_data$site)
+      if (unique(species_occ_data %>% pull(buffer_radius_m)) >= 100) {
+        param_data = species_occ_data %>% select(site, all_of(param))
+      } else {
+        param_data = occ_data_homerange_floor %>% select(site, all_of(param))
+      }
     }
     species_delta_data[[species_name]] = scale(param_data[[param]])
   }
@@ -750,6 +736,8 @@ for (b in seq_len(n_beta_params)) {
 
 str(msom_data)
 
+stop()
+
 ############################################################################################################################
 # Run JAGS
 
@@ -762,8 +750,7 @@ msom = jags(data = msom_data,
             inits = function() { list( # initial values to avoid data/model conflicts
               z = z,
               v = rep(logit(0.70), length(species)), # informative priors are necessary to avoid invalid PPC log(0) values
-              w = rep(logit(0.05), length(species)),
-              gamma = rep(logit(0.05), length(species))
+              w = rep(logit(0.05), length(species))
             ) },
             parameters.to.save = c( # monitored parameters
               "mu.u", "sigma.u", "u",
@@ -777,10 +764,23 @@ msom = jags(data = msom_data,
               "D_obs", "D_sim"
             ),
             model.file = model_file,
-            n.chains = 3, n.adapt = 100, n.iter = 1000, n.burnin = 100, n.thin = 1,
-            parallel = FALSE, DIC = FALSE, verbose=TRUE)
+            # n.chains = 3, n.adapt = 100, n.iter = 1000, n.burnin = 100, n.thin = 1, parallel = FALSE,
+            n.chains = 3, n.adapt = 1000, n.iter = 10000, n.burnin = 2000, n.thin = 1, parallel = TRUE, # ~21 hr
+            DIC = FALSE, verbose=TRUE)
 
-message("Finished running JAGS (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)")
+message("Finished running JAGS (", round(msom$mcmc.info$elapsed.mins / 60, 2), " hr)")
+
+message("MCMC information:")
+print(data.frame(
+  n.chains = msom$mcmc.info$n.chains,
+  n.adapt = msom$mcmc.info$n.adapt[1],
+  n.iter = msom$mcmc.info$n.iter,
+  n.burnin = msom$mcmc.info$n.burnin,
+  n.thin = msom$mcmc.info$n.thin,
+  samples = msom$mcmc.info$n.samples
+))
+
+message("Model size: ", format(utils::object.size(msom), units = "MB"))
 
 ############################################################################################################################
 # Retrieve summary data and investigate goodness-of-fit
@@ -803,14 +803,20 @@ if (nrow(suspected_nonconvergence) > 1) {
   message("All parameters appear to have converged (rhat < ", rhat_threshold, ")")
 }
 
-## Posterior predictive check
+## Posterior predictive check - Bernoulli deviance contribution (Broms et al. 2016)
 # "If the observed data are consistent with the model in question, then the Bayesian p-value should be close to 0.5. In practice, a p-value close to 0 or 1 indicates that the model is inadequate in some way -- close to 0 suggests a lack of fit and close to 1 suggests that the model over-fits the data, which may occur when it is too complex... A Bayesian p-value is calculated as the proportion of times the selected summary statistic calculated for the generated data is greater than the value calculated from the observed data" (MacKenzie et al. 2018)
-
-# Bernoulli deviance contribution (Broms et al. 2016)
 # Is the overall likelihood of the observed detection histories under the fitted model about the same as the likelihood of new data generated from that model?
 # This Bayesian p-value is the probability (proportion of iterations) that the simulated deviance is greater than the observed deviance.
 p_val = mean(msom$sims.list$D_sim > msom$sims.list$D_obs)
 message("Baysian p-value (deviance): ", round(p_val,3))
+
+if (FALSE) {
+  # "Examine trace plots for good mixing and convergence among chains. Each chain is displayed in a different colour. This means random paths exploring a lot of the parameter space on the y-axis without a clear pattern and each chain converging on the same value."
+  MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'trace', Rhat = TRUE, n.eff = TRUE)
+  
+  # "Examine density plots for not super-wide or with irregular peaks. The more parameter space the density plots include, the higher the uncertainty in a parameter estimate. The density curves don’t have to be normal but shouldn’t have multiple peaks and each chain colour should have approximately the same peak."
+  MCMCtrace(msom$samples, ISB = FALSE, pdf = F, exact = TRUE, post_zm = TRUE, type = 'density', Rhat = TRUE, n.eff = TRUE, ind = TRUE)
+}
 
 # Inspect the mean and 95% BCI of hyperparameter estimates
 whiskerplot(msom, c(paste0('mu.', param_alpha_data$param), paste0('mu.', param_delta_data$param), 'mu.season'))
@@ -818,6 +824,7 @@ whiskerplot(msom, c(paste0('mu.', param_beta_data$param)))
 
 # Write results to cache
 msom_results = list(
+  msom              = msom,
   msom_summary      = msom_summary,
   p_val             = p_val,
   param_alpha_data  = param_alpha_data,
