@@ -38,6 +38,7 @@ logit_to_conf = function(l) {
 }
 
 # Load class labels
+# TODO: fix unstandard names e.g. "glaucidium gnoma_northern pygmy-owl"
 class_labels = readLines("data/models/ensemble/ensemble_class_labels.txt") %>% tolower() %>% tibble(label = .) %>%
   separate(label, into = c("scientific_name", "common_name"), sep = "_", extra = "merge", fill  = "right", remove = FALSE) %>%
   select(label, common_name, scientific_name)
@@ -115,21 +116,20 @@ if (!overwrite_annotation_cache) {
     
     for (class_label in class_labels$label) {
       
-      # TODO: just encode TN as 0 and TP as 1
-      a = "TN"
+      a = "0"
       if (nrow(file_annotations) == 0) {
         # True negative if no labels are present (no annotations for the file exist)
         # NOTE: Annotations from Jacuzzi and Olden 2025 are exhaustive and pooled across focal species
-        a = "TN"
+        a = "0"
       } else if (any(file_annotations$label == class_label)) {
         # True positive if the class label is present
-        a = "TP"
+        a = "1"
       } else if (any(file_annotations$label == "unknown")) {
         # Unknown if "unknown" label is present
         a = "unknown"
       } else if (class_label == focal_class & any(file_annotations$label == "not_focal")) {
         # True negative if "not_focal" is present and the file's focal_class == class_label
-        a = "TN"
+        a = "0"
       } else if (any(file_annotations$label == "not_focal")) {
         # Unknown if "not_focal" is present but the file's focal class != class_label
         # NOTE: Annotations from Jacuzzi and Olden 2025 are exhaustive and pooled across focal species
@@ -162,37 +162,38 @@ jo_counts = jo_annotations %>%
     values_fill = 0
   )
 
+message("J&0 annotation counts:")
+print(jo_counts, n = Inf)
+
 # Platt scaling -----------------------------------------------------------------------
 
+# Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024). Takes as input a parquet file containing the validation dataset following the format below:
+message("Calibrating species-specific score thresholds")
+
 # DEBUG
-stop("DEBUG")
 annotations = jo_annotations
+# TODO: include all annotations
+# DEBUG
 
 # For each class
+calibration_results = data.frame()
 for (class_label in class_labels$label) {
   
-  message("Processing class ", class_label)
+  message(class_label)
   
   # Get all annotations with matching "class" value
   # Rename "class" to "label_predicted"
-  class_annotations = annotations %>% select(file, all_of(class_label))
+  class_annotations = annotations %>% select(file, all_of(class_label)) %>%
+    rename(label_truth = !!sym(class_label))
   
-  # Discard files (rows) with "unknown"
-  class_annotations = class_annotations %>% filter(.data[[class_label]] != "unknown")
-  table(class_annotations[[class_label]])
-  
-  # TODO just cast as numeric
-  # Encode as binary 1 (TP) and 0 (TN)
-  class_annotations[[class_label]] = recode(
-    class_annotations[[class_label]],
-    "TP" = 1, "TN" = 0,
-    .default = NA_real_
-  )
+  # Discard files (rows) with "unknown" and cast to integer
+  class_annotations = class_annotations %>% filter(label_truth != "unknown") %>%
+    mutate(label_truth = as.integer(label_truth))
+  table(class_annotations$label_truth)
   
   # Merge with prediction scores
   class_predictions = jo_predictions %>% filter(label_predicted == class_label)
-  class_calibration_data = left_join(class_annotations, class_predictions, by = c("file")) %>%
-    rename(label_truth = !!sym(class_label))
+  class_calibration_data = left_join(class_annotations, class_predictions, by = c("file"))
   
   # Sanity check
   summary(class_calibration_data %>% filter(label_truth == 1) %>% pull(confidence_source))
@@ -204,18 +205,17 @@ for (class_label in class_labels$label) {
   for (model in c("source", "target")) {
     
     # Convert confidence scores to logit scale
-    data_model = class_calibration_data
-    data_model$score = sapply(data_model[[paste0("confidence_", model)]], conf_to_logit)
+    class_calibration_data$score = sapply(class_calibration_data[[paste0("confidence_", model)]], conf_to_logit)
     
     # Calculate PR AUC and ROC AUC of classifier (from raw scores)
     auc_pr <- auc_roc <- NA
     tryCatch(
       {
-        auc_pr = pr.curve(scores.class0 = subset(data_model, label_truth == 1) %>% pull(score),
-                          scores.class1 = subset(data_model, label_truth == 0) %>% pull(score))$auc.integral
+        auc_pr = pr.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score),
+                          scores.class1 = subset(class_calibration_data, label_truth == 0) %>% pull(score))$auc.integral
         
-        auc_roc = roc.curve(scores.class0 = subset(data_model, label_truth == 1) %>% pull(score),
-                            scores.class1 = subset(data_model, label_truth == 0) %>% pull(score))$auc
+        auc_roc = roc.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score),
+                            scores.class1 = subset(class_calibration_data, label_truth == 0) %>% pull(score))$auc
       },
       warning = function(w) {
         model_warning <<- TRUE
@@ -226,7 +226,7 @@ for (class_label in class_labels$label) {
         message(crayon::yellow("WARNING:", conditionMessage(e)))
       }
     )
-    message("  PR-AUC ", round(auc_pr,3), ", ROC-AUC ", round(auc_roc,3))
+    # message("  PR-AUC ", round(auc_pr,3), ", ROC-AUC ", round(auc_roc,3))
     
     # Perform Platt scaling to determine threshold for desired probability of true positive
     threshold = Inf # default threshold is infinite (i.e. do not retain detections unless a species is validated)
@@ -234,7 +234,7 @@ for (class_label in class_labels$label) {
     model_warning = FALSE
     tryCatch(
       {
-        regression = glm(label_truth ~ score, data_model, family = binomial(link = "logit"))
+        regression = glm(label_truth ~ score, class_calibration_data, family = binomial(link = "logit"))
         intercept   = as.numeric(coef(regression)[1])
         coefficient = as.numeric(coef(regression)[2])
         threshold_logit = (log(tp_min_prob / (1 - tp_min_prob)) - intercept) / coefficient # logit scale
@@ -254,21 +254,21 @@ for (class_label in class_labels$label) {
             recall    = TP / (TP + FN)
           ))
         }
-        perf_t = calc_precision_recall(data_model, threshold_logit)
+        perf_t = calc_precision_recall(class_calibration_data, threshold_logit)
         precision_threshold  = perf_t$precision
         recall_threshold     = perf_t$recall
-        message("  Performance at threshold ", round(threshold,3), ":\n  Precision ", round(precision_threshold,3), "\n  Recall ", round(recall_threshold,3))
+        # message("  Performance at threshold ", round(threshold,3), ":\n  Precision ", round(precision_threshold,3), "\n  Recall ", round(recall_threshold,3))
         
         # Calculate at minimum threshold
-        perf_tmin = calc_precision_recall(data_model, conf_to_logit(threshold_min_classifier_score))
+        perf_tmin = calc_precision_recall(class_calibration_data, conf_to_logit(threshold_min_classifier_score))
         precision_tmin = perf_tmin$precision
         recall_tmin    = perf_tmin$recall
-        message("  Performance at minimum threshold ", threshold_min_classifier_score, ":\n  Precision ", round(precision_tmin,3), "\n  Recall ", round(recall_tmin,3))
+        # message("  Performance at minimum threshold ", threshold_min_classifier_score, ":\n  Precision ", round(precision_tmin,3), "\n  Recall ", round(recall_tmin,3))
         
         if (visualize_calibration_regressions) {
           
           ## Visualize precision and recall performance as a function of score
-          data_sorted = data_model %>% mutate(score = logit_to_conf(score)) %>% arrange(desc(score))
+          data_sorted = class_calibration_data %>% mutate(score = logit_to_conf(score)) %>% arrange(desc(score))
           n_pos = sum(data_sorted$label_truth == 1)
           data_sorted = data_sorted %>% mutate(
             tp = cumsum(label_truth == 1),
@@ -282,7 +282,7 @@ for (class_label in class_labels$label) {
             labs(title = paste0(class_label), x = "Score", y = "Performance", color = "Metric"); print(plt)
           
           ## Visualize the logistic regression and data
-          x_range = seq(min(data_model$score), max(data_model$score), length.out = 100)
+          x_range = seq(min(class_calibration_data$score), max(class_calibration_data$score), length.out = 100)
           
           # Predict fitted values and calculate confidence intervals on probability scale
           pred = predict(regression, newdata = data.frame(score = x_range), type = "link", se.fit = TRUE)
@@ -296,7 +296,7 @@ for (class_label in class_labels$label) {
           regression_df = data.frame(score = x_range, prob = y_pred, lower = lower, upper = upper, warning = model_warning)
           plt = ggplot() +
             geom_vline(xintercept = 0, color = "gray", linetype = "solid", linewidth = 0.5) +
-            geom_point(data = data_model, aes(x = score, y = label_truth), shape = 1, alpha = 0.5) +
+            geom_point(data = class_calibration_data, aes(x = score, y = label_truth), shape = 1, alpha = 0.5) +
             geom_hline(yintercept = tp_min_prob, color = "black", linetype = "dashed", linewidth = 0.5) +
             geom_vline(xintercept = threshold_logit, color = "black", linetype = "dashed", linewidth = 0.5) +
             geom_ribbon(data = regression_df, aes(x = score, ymin = lower, ymax = upper, fill = warning), alpha = 0.2) +
@@ -311,15 +311,43 @@ for (class_label in class_labels$label) {
       },
       warning = function(w) {
         model_warning <<- TRUE
-        message(crayon::yellow("WARNING", conditionMessage(w)))
+        message(crayon::yellow("WARNING:", conditionMessage(w)))
       },
       error = function(e) {
-        stop(crayon::red("ERROR", conditionMessage(e)))
+        model_warning <<- TRUE
+        message(crayon::yellow("WARNING:", conditionMessage(e)))
       }
     )
     
+    # TODO: Enforce minimum threshold for classes with no negatives in validation data
+    
+    calibration_results = rbind(calibration_results, data.frame(
+      class_label          = class_label,
+      model                = model,
+      n_tp                 = sum(class_calibration_data$label_truth == 1),
+      n_tn                 = sum(class_calibration_data$label_truth == 0),
+      auc_pr               = auc_pr,
+      auc_roc              = auc_roc,
+      warning              = model_warning,
+      tp_min_prob          = tp_min_prob,
+      threshold            = threshold,
+      threshold_min        = threshold_min_classifier_score,
+      precision_threshold  = precision_threshold,
+      recall_threshold     = recall_threshold,
+      precision_tmin       = precision_tmin,
+      recall_tmin          = recall_tmin
+    ))
+    
   }
 }
+
+message("Calibration results:")
+calibration_results %>%
+  mutate(across(where(is.numeric), ~ round(., 2))) %>%
+  as.data.frame() %>%
+  print(row.names = FALSE)
+
+stop("DEBUG")
 
 ################################################################################################################################################
 
@@ -495,8 +523,7 @@ all_files_tn_df = lapply(names(all_files_tn), function(l) {
 annotations = bind_rows(all_files_tp_df, all_files_tn_df)
 
 # Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024). Takes as input a parquet file containing the validation dataset following the format below:
-
-stop("DEBUG")
+message("Calibrating species-specific score thresholds")
 
 # For each class
 for (class_label in class_labels$label) {
