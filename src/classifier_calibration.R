@@ -170,116 +170,128 @@ print(jo_counts, n = Inf)
 # Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024). Takes as input a parquet file containing the validation dataset following the format below:
 message("Calibrating species-specific score thresholds")
 
-# DEBUG
-annotations = jo_annotations
-# TODO: include all annotations
-# DEBUG
-
-# For each class
-calibration_results = data.frame()
-for (class_label in class_labels$label) {
-  
-  message(class_label)
-  
-  # Get all annotations with matching "class" value
-  # Rename "class" to "label_predicted"
-  class_annotations = annotations %>% select(file, all_of(class_label)) %>%
-    rename(label_truth = !!sym(class_label))
-  
-  # Discard files (rows) with "unknown" and cast to integer
-  class_annotations = class_annotations %>% filter(label_truth != "unknown") %>%
-    mutate(label_truth = as.integer(label_truth))
-  table(class_annotations$label_truth)
-  
-  # Merge with prediction scores
-  class_predictions = jo_predictions %>% filter(label_predicted == class_label)
-  class_calibration_data = left_join(class_annotations, class_predictions, by = c("file"))
-  
-  # Sanity check
-  summary(class_calibration_data %>% filter(label_truth == 1) %>% pull(confidence_source))
-  summary(class_calibration_data %>% filter(label_truth == 0) %>% pull(confidence_source))
-  summary(class_calibration_data %>% filter(label_truth == 1) %>% pull(confidence_target))
-  summary(class_calibration_data %>% filter(label_truth == 0) %>% pull(confidence_target))
-  
-  # Platt scaling
-  for (model in c("source", "target")) {
+calibrate = function(predictions, annotations, labels) {
+  calibration_results = list()
+  plots = list()
+  stats = tibble()
+  for (class_label in labels) {
     
-    # Convert confidence scores to logit scale
-    class_calibration_data$score = sapply(class_calibration_data[[paste0("confidence_", model)]], conf_to_logit)
+    message(class_label)
     
-    # Calculate PR AUC and ROC AUC of classifier (from raw scores)
-    auc_pr <- auc_roc <- NA
-    tryCatch(
-      {
-        auc_pr = pr.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score),
-                          scores.class1 = subset(class_calibration_data, label_truth == 0) %>% pull(score))$auc.integral
-        
-        auc_roc = roc.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score),
-                            scores.class1 = subset(class_calibration_data, label_truth == 0) %>% pull(score))$auc
-      },
-      warning = function(w) {
-        model_warning <<- TRUE
-        message(crayon::yellow("WARNING:", conditionMessage(w)))
-      },
-      error = function(e) {
-        model_warning <<- TRUE
-        message(crayon::yellow("WARNING:", conditionMessage(e)))
-      }
-    )
-    # message("  PR-AUC ", round(auc_pr,3), ", ROC-AUC ", round(auc_roc,3))
+    # Get all annotations with matching "class" value
+    # Rename "class" to "label_predicted"
+    class_annotations = annotations %>% select(file, all_of(class_label)) %>%
+      rename(label_truth = !!sym(class_label))
     
-    # Perform Platt scaling to determine threshold for desired probability of true positive
-    threshold = Inf # default threshold is infinite (i.e. do not retain detections unless a species is validated)
-    precision_threshold <- recall_threshold <- precision_tmin <- recall_tmin <- NA
-    model_warning = FALSE
-    tryCatch(
-      {
-        regression = glm(label_truth ~ score, class_calibration_data, family = binomial(link = "logit"))
-        intercept   = as.numeric(coef(regression)[1])
-        coefficient = as.numeric(coef(regression)[2])
-        threshold_logit = (log(tp_min_prob / (1 - tp_min_prob)) - intercept) / coefficient # logit scale
-        threshold       = logit_to_conf(threshold_logit) # confidence scale
-        
-        message("  ", round(threshold, 3), " threshold to achieve Pr(TP)>=", tp_min_prob)
-        
-        # Calculate estimated precision and recall at this threshold
-        # Predicted positive/negative based on threshold
-        calc_precision_recall = function(d, t_logit) {
-          predicted = ifelse(d$score >= t_logit, 1, 0)
-          TP = sum(predicted == 1 & d$label_truth == 1)
-          FP = sum(predicted == 1 & d$label_truth == 0)
-          FN = sum(predicted == 0 & d$label_truth == 1)
-          return(data.frame(
-            precision = TP / (TP + FP),
-            recall    = TP / (TP + FN)
-          ))
-        }
-        perf_t = calc_precision_recall(class_calibration_data, threshold_logit)
-        precision_threshold  = perf_t$precision
-        recall_threshold     = perf_t$recall
-        # message("  Performance at threshold ", round(threshold,3), ":\n  Precision ", round(precision_threshold,3), "\n  Recall ", round(recall_threshold,3))
-        
-        # Calculate at minimum threshold
-        perf_tmin = calc_precision_recall(class_calibration_data, conf_to_logit(threshold_min_classifier_score))
-        precision_tmin = perf_tmin$precision
-        recall_tmin    = perf_tmin$recall
-        # message("  Performance at minimum threshold ", threshold_min_classifier_score, ":\n  Precision ", round(precision_tmin,3), "\n  Recall ", round(recall_tmin,3))
-        
-        if (visualize_calibration_regressions) {
+    # Discard files (rows) with "unknown" and cast to integer
+    class_annotations = class_annotations %>% filter(label_truth != "unknown") %>%
+      mutate(label_truth = as.integer(label_truth))
+    table(class_annotations$label_truth)
+    
+    # Merge with prediction scores
+    class_predictions = predictions %>% filter(label_predicted == class_label)
+    class_calibration_data = left_join(class_annotations, class_predictions, by = c("file"))
+    
+    # Debugging sanity check
+    # summary(class_calibration_data %>% filter(label_truth == 1) %>% pull(confidence_source))
+    # summary(class_calibration_data %>% filter(label_truth == 0) %>% pull(confidence_source))
+    # summary(class_calibration_data %>% filter(label_truth == 1) %>% pull(confidence_target))
+    # summary(class_calibration_data %>% filter(label_truth == 0) %>% pull(confidence_target))
+    
+    # Platt scaling
+    plot_pr = list()
+    plot_prauc = list()
+    plot_threshold = list()
+    for (model in c("source", "target")) {
+      
+      # Convert confidence scores to logit scale
+      class_calibration_data$score = sapply(class_calibration_data[[paste0("confidence_", model)]], conf_to_logit)
+      
+      # Visualize precision and recall performance as a function of score
+      data_sorted = class_calibration_data %>% mutate(score = logit_to_conf(score)) %>% arrange(desc(score))
+      n_pos = sum(data_sorted$label_truth == 1)
+      data_sorted = data_sorted %>% mutate(
+        tp = cumsum(label_truth == 1),
+        fp = cumsum(label_truth == 0),
+        recall = tp / n_pos,
+        precision = ifelse(tp + fp == 0, 1, tp / (tp + fp))  # handle division by zero
+      )
+      plt_pr = ggplot(data_sorted, aes(x = score)) +
+        geom_line(aes(y = precision, color = "Precision"), linewidth = 1) +
+        geom_line(aes(y = recall, color = "Recall"), linewidth = 1) +
+        lims(x = c(0,1), y = c(0,1)) +
+        labs(title = paste0(class_label), subtitle = paste0("model '", model, "'"), x = "Score", y = "Performance", color = "Metric")
+      plot_pr[[model]] = plt_pr
+      
+      # Calculate PR AUC and ROC AUC of classifier (from raw scores)
+      auc_pr <- auc_roc <- NA
+      tryCatch(
+        {
+          auc_pr = pr.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score),
+                            scores.class1 = subset(class_calibration_data, label_truth == 0) %>% pull(score))$auc.integral
           
-          ## Visualize precision and recall performance as a function of score
-          data_sorted = class_calibration_data %>% mutate(score = logit_to_conf(score)) %>% arrange(desc(score))
-          n_pos = sum(data_sorted$label_truth == 1)
-          data_sorted = data_sorted %>% mutate(
-            tp = cumsum(label_truth == 1),
-            fp = cumsum(label_truth == 0),
-            recall = tp / n_pos,
-            precision = ifelse(tp + fp == 0, 1, tp / (tp + fp))  # handle division by zero
-          )
-          plt = ggplot(data_sorted, aes(x = score)) +
-            geom_line(aes(y = precision, color = "Precision"), linewidth = 1) +
-            geom_line(aes(y = recall, color = "Recall"), linewidth = 1) +
-            labs(title = paste0(class_label), x = "Score", y = "Performance", color = "Metric"); print(plt)
+          auc_roc = roc.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score),
+                              scores.class1 = subset(class_calibration_data, label_truth == 0) %>% pull(score))$auc
+          
+          # Visualize precision recall AUC
+          pr_curve = data_sorted %>% select(recall, precision) %>% arrange(recall)
+          plt_prauc = ggplot(pr_curve, aes(x = recall, y = precision)) +
+            geom_line(linewidth = 1) +
+            lims(x = c(0,1), y = c(0,1)) +
+            labs(
+              title = paste0(class_label),
+              subtitle = paste0("model '", model, "' PR AUC = ", round(auc_pr, 3)),
+              x = "Recall", y = "Precision"
+            )
+          plot_prauc[[model]] = plt_prauc
+        },
+        warning = function(w) {
+          model_warning <<- TRUE
+          message(crayon::yellow("WARNING:", conditionMessage(w)))
+        },
+        error = function(e) {
+          model_warning <<- TRUE
+          message(crayon::yellow("WARNING:", conditionMessage(e)))
+        }
+      )
+      # message("  PR-AUC ", round(auc_pr,3), ", ROC-AUC ", round(auc_roc,3))
+      
+      # Perform Platt scaling to determine threshold for desired probability of true positive
+      threshold = Inf # default threshold is infinite (i.e. do not retain detections unless a species is validated)
+      precision_threshold <- recall_threshold <- precision_tmin <- recall_tmin <- NA
+      model_warning = FALSE
+      tryCatch(
+        {
+          regression = glm(label_truth ~ score, class_calibration_data, family = binomial(link = "logit"))
+          intercept   = as.numeric(coef(regression)[1])
+          coefficient = as.numeric(coef(regression)[2])
+          threshold_logit = (log(tp_min_prob / (1 - tp_min_prob)) - intercept) / coefficient # logit scale
+          threshold       = logit_to_conf(threshold_logit) # confidence scale
+          
+          message("  ", round(threshold, 3), " threshold to achieve Pr(TP)>=", tp_min_prob)
+          
+          # Calculate estimated precision and recall at this threshold
+          # Predicted positive/negative based on threshold
+          calc_precision_recall = function(d, t_logit) {
+            predicted = ifelse(d$score >= t_logit, 1, 0)
+            TP = sum(predicted == 1 & d$label_truth == 1)
+            FP = sum(predicted == 1 & d$label_truth == 0)
+            FN = sum(predicted == 0 & d$label_truth == 1)
+            return(data.frame(
+              precision = TP / (TP + FP),
+              recall    = TP / (TP + FN)
+            ))
+          }
+          perf_t = calc_precision_recall(class_calibration_data, threshold_logit)
+          precision_threshold  = perf_t$precision
+          recall_threshold     = perf_t$recall
+          # message("  Performance at threshold ", round(threshold,3), ":\n  Precision ", round(precision_threshold,3), "\n  Recall ", round(recall_threshold,3))
+          
+          # Calculate at minimum threshold
+          perf_tmin = calc_precision_recall(class_calibration_data, conf_to_logit(threshold_min_classifier_score))
+          precision_tmin = perf_tmin$precision
+          recall_tmin    = perf_tmin$recall
+          # message("  Performance at minimum threshold ", threshold_min_classifier_score, ":\n  Precision ", round(precision_tmin,3), "\n  Recall ", round(recall_tmin,3))
           
           ## Visualize the logistic regression and data
           x_range = seq(min(class_calibration_data$score), max(class_calibration_data$score), length.out = 100)
@@ -294,7 +306,7 @@ for (class_label in class_labels$label) {
           y_pred = logit_to_conf(pred$fit)
           
           regression_df = data.frame(score = x_range, prob = y_pred, lower = lower, upper = upper, warning = model_warning)
-          plt = ggplot() +
+          plt_threshold = ggplot() +
             geom_vline(xintercept = 0, color = "gray", linetype = "solid", linewidth = 0.5) +
             geom_point(data = class_calibration_data, aes(x = score, y = label_truth), shape = 1, alpha = 0.5) +
             geom_hline(yintercept = tp_min_prob, color = "black", linetype = "dashed", linewidth = 0.5) +
@@ -303,49 +315,63 @@ for (class_label in class_labels$label) {
             geom_line(data = regression_df, aes(x = score, y = prob, color = warning), linewidth = 1) +
             scale_color_manual(values = c("FALSE" = "blue", "TRUE" = "red")) +
             scale_fill_manual(values = c("FALSE" = "blue", "TRUE" = "red")) +
+            lims(x = c(-11.52,11.52), y = c(0,1)) +
             labs(
               x = "Score (logit)", y = "True positive probability",
               title = class_label, subtitle = paste0("model '", model, "', threshold p(TP) ≥ ", tp_min_prob, " = ", round(threshold, 3))
-            ); print(plt)
+            ) + theme(legend.position = "bottom")
+          plot_threshold[[model]] = plt_threshold
+        },
+        warning = function(w) {
+          model_warning <<- TRUE
+          message(crayon::yellow("WARNING:", conditionMessage(w)))
+        },
+        error = function(e) {
+          model_warning <<- TRUE
+          message(crayon::yellow("WARNING:", conditionMessage(e)))
         }
-      },
-      warning = function(w) {
-        model_warning <<- TRUE
-        message(crayon::yellow("WARNING:", conditionMessage(w)))
-      },
-      error = function(e) {
-        model_warning <<- TRUE
-        message(crayon::yellow("WARNING:", conditionMessage(e)))
-      }
-    )
-    
-    # TODO: Enforce minimum threshold for classes with no negatives in validation data
-    
-    calibration_results = rbind(calibration_results, data.frame(
-      class_label          = class_label,
-      model                = model,
-      n_tp                 = sum(class_calibration_data$label_truth == 1),
-      n_tn                 = sum(class_calibration_data$label_truth == 0),
-      auc_pr               = auc_pr,
-      auc_roc              = auc_roc,
-      warning              = model_warning,
-      tp_min_prob          = tp_min_prob,
-      threshold            = threshold,
-      threshold_min        = threshold_min_classifier_score,
-      precision_threshold  = precision_threshold,
-      recall_threshold     = recall_threshold,
-      precision_tmin       = precision_tmin,
-      recall_tmin          = recall_tmin
-    ))
-    
+      )
+      
+      # TODO: Enforce minimum threshold for classes with no negatives in validation data
+      
+      stats = bind_rows(stats, tibble(
+        class_label          = class_label,
+        model                = model,
+        n_tp                 = sum(class_calibration_data$label_truth == 1),
+        n_tn                 = sum(class_calibration_data$label_truth == 0),
+        auc_pr               = auc_pr,
+        auc_roc              = auc_roc,
+        warning              = model_warning,
+        tp_min_prob          = tp_min_prob,
+        threshold            = threshold,
+        threshold_min        = threshold_min_classifier_score,
+        precision_threshold  = precision_threshold,
+        recall_threshold     = recall_threshold,
+        precision_tmin       = precision_tmin,
+        recall_tmin          = recall_tmin
+      ))
+      
+    }
+    class_plots = list(plot_pr, plot_prauc, plot_threshold)
+    names(class_plots) = c("pr", "prauc", "threshold")
+    plots[[class_label]] = class_plots
   }
+  calibration_results[["stats"]] = stats
+  calibration_results[["plots"]] = plots
+  return(calibration_results)
 }
 
+message("Calibrating each class:")
+calibration_results = calibrate(jo_predictions, jo_annotations, class_labels$label)
+
 message("Calibration results:")
-calibration_results %>%
-  mutate(across(where(is.numeric), ~ round(., 2))) %>%
-  as.data.frame() %>%
-  print(row.names = FALSE)
+stats = calibration_results[["stats"]]
+stats %>% mutate(across(where(is.numeric), ~ round(., 2))) %>% print()
+
+# Example comparison plots
+calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["pr"]]
+calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["prauc"]]
+calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["threshold"]]
 
 stop("DEBUG")
 
@@ -621,7 +647,7 @@ for (class_label in class_labels$label) {
           plt = ggplot(data_sorted, aes(x = score)) +
             geom_line(aes(y = precision, color = "Precision"), linewidth = 1) +
             geom_line(aes(y = recall, color = "Recall"), linewidth = 1) +
-            labs(title = paste0(class_label), x = "Score", y = "Performance", color = "Metric"); print(plt)
+            labs(title = paste0(class_label), x = "Score", y = "Performance", color = "Metric")
           
           ## Visualize the logistic regression and data
           x_range = seq(min(data_model$score), max(data_model$score), length.out = 100)
