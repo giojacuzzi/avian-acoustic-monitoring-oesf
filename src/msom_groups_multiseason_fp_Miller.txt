@@ -1,0 +1,202 @@
+######################################################################################
+# JAGS code for a multi-species, multi-season false positive (Miller style) occupancy
+# model with one or more predefined community groupings.
+#
+# Following:
+# - https://besjournals.onlinelibrary.wiley.com/doi/10.1111/j.1365-2664.2009.01664.x
+# - https://esajournals.onlinelibrary.wiley.com/doi/10.1002/eap.2293
+# - https://www.sciencedirect.com/science/article/abs/pii/S0006320709004819
+
+model{
+
+  ## Community (group) level hyperpriors
+  for (g in 1:G) {
+    # Occurrence
+    psi.mean[g] ~ dunif(0,1)                         # probability scale
+    mu.u[g] <- log(psi.mean[g]) - log(1-psi.mean[g]) # logit scale
+    sigma.u[g] ~ dunif(0,5)                          # standard deviation
+    tau.u[g] <- pow(sigma.u[g],-2)                   # precision
+    
+    # Covariate effects on occurrence
+    mu.alpha1[g] ~ dnorm(0,0.01)
+    sigma.alpha1[g] ~ dunif(0,5)
+    tau.alpha1[g] <- pow(sigma.alpha1[g],-2)
+    mu.alpha2[g] ~ dnorm(0,0.01)
+    sigma.alpha2[g] ~ dunif(0,5)
+    tau.alpha2[g] <- pow(sigma.alpha2[g],-2)
+    mu.alpha3[g] ~ dnorm(0,0.01)
+    sigma.alpha3[g] ~ dunif(0,5)
+    tau.alpha3[g] <- pow(sigma.alpha3[g],-2)
+    mu.alpha4[g] ~ dnorm(0,0.01)
+    sigma.alpha4[g] ~ dunif(0,5)
+    tau.alpha4[g] <- pow(sigma.alpha4[g],-2)
+    mu.alpha5[g] ~ dnorm(0,0.01)
+    sigma.alpha5[g] ~ dunif(0,5)
+    tau.alpha5[g] <- pow(sigma.alpha5[g],-2)
+    mu.delta1[g] ~ dnorm(0,0.01)
+    sigma.delta1[g] ~ dunif(0,5)
+    tau.delta1[g] <- pow(sigma.delta1[g],-2)
+    mu.delta2[g] ~ dnorm(0,0.01)
+    sigma.delta2[g] ~ dunif(0,5)
+    tau.delta2[g] <- pow(sigma.delta2[g],-2)
+    mu.delta3[g] ~ dnorm(0,0.01)
+    sigma.delta3[g] ~ dunif(0,5)
+    tau.delta3[g] <- pow(sigma.delta3[g],-2)
+    mu.delta4[g] ~ dnorm(0,0.01)
+    sigma.delta4[g] ~ dunif(0,5)
+    tau.delta4[g] <- pow(sigma.delta4[g],-2)
+    mu.delta5[g] ~ dnorm(0,0.01)
+    sigma.delta5[g] ~ dunif(0,5)
+    tau.delta5[g] <- pow(sigma.delta5[g],-2)
+    mu.season[g] ~ dnorm(0,0.01)
+    sigma.season[g] ~ dunif(0,5)
+    tau.season[g] <- pow(sigma.season[g],-2)
+    
+    # Detection (unconfirmed true-positive)
+    v.mean[g]  ~ dunif(0,1)
+    mu.v[g]  <- log(v.mean[g]) - log(1-v.mean[g])
+    sigma.v[g] ~ dunif(0,5)
+    tau.v[g] <- pow(sigma.v[g],-2)
+  
+    # Covariate effects on detection (unconfirmed true-positive)
+    mu.beta1[g]    ~ dnorm(0,0.01)
+    sigma.beta1[g] ~ dunif(0,5)
+    tau.beta1[g]  <- pow(sigma.beta1[g],-2)
+    mu.beta2[g]    ~ dnorm(0,0.01)
+    sigma.beta2[g] ~ dunif(0,5)
+    tau.beta2[g]  <- pow(sigma.beta2[g],-2)
+    mu.beta3[g]    ~ dnorm(0,0.01)
+    sigma.beta3[g] ~ dunif(0,5)
+    tau.beta3[g]  <- pow(sigma.beta3[g],-2)
+    
+    # False-positive unconfirmed detection (Royle and Link 2006, Miller et al. 2011)
+    mu.w[g] ~ dnorm(0,0.01)
+    sigma.w[g] ~ dunif(0,5)
+    tau.w[g] <- pow(sigma.w[g],-2)
+    
+    # Confirmed true positive detection (Miller et al. 2011)
+    mu.b[g] ~ dnorm(0,0.01)
+    sigma.b[g] ~ dunif(0,5)
+    tau.b[g] <- pow(sigma.b[g],-2)
+
+  } # G groups
+
+  ## Species level priors
+  for (i in 1:I) {
+      
+      # Occupancy
+      u[i]      ~ dnorm(mu.u[group[i]], tau.u[group[i]])
+      alpha1[i] ~ dnorm(mu.alpha1[group[i]],tau.alpha1[group[i]])
+      alpha2[i] ~ dnorm(mu.alpha2[group[i]],tau.alpha2[group[i]])
+      alpha3[i] ~ dnorm(mu.alpha3[group[i]],tau.alpha3[group[i]])
+      alpha4[i] ~ dnorm(mu.alpha4[group[i]],tau.alpha4[group[i]])
+      alpha5[i] ~ dnorm(mu.alpha5[group[i]],tau.alpha5[group[i]])
+      delta1[i] ~ dnorm(mu.delta1[group[i]],tau.delta1[group[i]])
+      delta2[i] ~ dnorm(mu.delta2[group[i]],tau.delta2[group[i]])
+      delta3[i] ~ dnorm(mu.delta3[group[i]],tau.delta3[group[i]])
+      delta4[i] ~ dnorm(mu.delta4[group[i]],tau.delta4[group[i]])
+      delta5[i] ~ dnorm(mu.delta5[group[i]],tau.delta5[group[i]])
+      season[i] ~ dnorm(mu.season[group[i]],tau.season[group[i]])
+  
+      # Unconfirmed true positive detection
+      v[i]     ~ dnorm(mu.v[group[i]], tau.v[group[i]])
+      beta1[i] ~ dnorm(mu.beta1[group[i]],tau.beta1[group[i]])
+      beta2[i] ~ dnorm(mu.beta2[group[i]],tau.beta2[group[i]])
+      beta3[i] ~ dnorm(mu.beta3[group[i]],tau.beta3[group[i]])
+      
+      # Unconfirmed false positive detection
+      w[i] ~ dnorm(mu.w[group[i]],tau.w[group[i]])
+      
+      # Confirmed true positive detection
+      gamma[i] ~ dnorm(mu.b[group[i]], tau.b[group[i]])
+      b[i] <- 1 / (1 + exp(-gamma[i]))
+  }
+  
+  for (i in 1:I) { # for each species i
+      for (t in 1:T) { # for each season t
+          for (j in 1:J) { # for each site j
+          
+              # Ecological process model for latent occurrence z
+              logit(psi[j,t,i]) <- u[i] +
+                                   alpha1[i]*x_alpha1[j] +
+                                   alpha2[i]*x_alpha2[j] +
+                                   alpha3[i]*x_alpha3[j] +
+                                   alpha4[i]*x_alpha4[j] +
+                                   alpha5[i]*x_alpha5[j] +
+                                   delta1[i]*x_delta1[j,i] +
+                                   delta2[i]*x_delta2[j,i] +
+                                   delta3[i]*x_delta3[j,i] +
+                                   delta4[i]*x_delta4[j,i] +
+                                   delta5[i]*x_delta5[j,i] +
+                                   season[i]*x_season[t]
+
+              z[j,t,i] ~ dbern(psi[j,t,i])
+              
+              for (k in 1:K[j,t]) { # for each survey k during season t at site j
+
+                  ## Multiple-detection-state observation model (Miller et al. 2011)
+                  # States: 1 = nondetection, 2 = uncertain detection, 3 = certain detection
+      
+                  # p11 is true-positive detection probability given z = 1
+                  logit(p11[j,k,t,i]) <- v[i] +
+                                         beta1[i]*x_beta1[j,k,t] +
+                                         beta2[i]*x_beta2[j,k,t] +
+                                         beta3[i]*x_beta3[j,k,t]
+                  
+                  # p10 is false-positive detection probability given z = 0
+                  logit(p10[j,k,t,i]) <- w[i]
+                  
+                  # b is the certainty confirmation probability given z = 1 and the species was detected
+                  # (not a function of covariates)
+                  
+                  # Nondetection
+                  pi[j,k,t,i,1] <- z[j,t,i] * (1 - p11[j,k,t,i]) + (1 - z[j,t,i]) * (1 - p10[j,k,t,i])
+                  # Uncertain detection
+                  pi[j,k,t,i,2] <- z[j,t,i] * (1 - b[i]) * p11[j,k,t,i] + (1 - z[j,t,i]) * p10[j,k,t,i]
+                  # Certain detection
+                  pi[j,k,t,i,3] <- z[j,t,i] * b[i] * p11[j,k,t,i]
+    
+                  # Observed categorical outcome
+                  y[j,k,t,i] ~ dcat(pi[j,k,t,i, ])
+                  
+                  # Simulated replicate for posterior predictive checks
+                  y_sim[j,k,t,i] ~ dcat(pi[j,k,t,i, ])
+
+                  # Posterior predictive check (deviance)
+                  p_obs_cat[j,k,t,i] <- equals(y[j,k,t,i],1) * pi[j,k,t,i,1] +
+                                        equals(y[j,k,t,i],2) * pi[j,k,t,i,2] +
+                                        equals(y[j,k,t,i],3) * pi[j,k,t,i,3]
+                  p_sim_cat[j,k,t,i] <- equals(y_sim[j,k,t,i],1) * pi[j,k,t,i,1] +
+                                        equals(y_sim[j,k,t,i],2) * pi[j,k,t,i,2] +
+                                        equals(y_sim[j,k,t,i],3) * pi[j,k,t,i,3]
+                  d_obs[j,k,t,i] <- log(p_obs_cat[j,k,t,i])
+                  d_sim[j,k,t,i] <- log(p_sim_cat[j,k,t,i])
+      
+              } # K surveys
+              
+              # Pad jagged array of deviance values with zeros to enable sum below
+              for (k in (K[j,t]+1):Kmax) {
+                  d_obs[j,k,t,i] <- 0
+                  d_sim[j,k,t,i] <- 0
+              }
+              
+          } # J sites
+      } # T seasons
+  } # I species
+  
+  ## Derived quantities
+  
+  # Deviance of simulated and observed data for posterior predictive check
+  D_obs <- -2 * sum(d_obs[1:J,1:Kmax,1:T,1:I])
+  D_sim <- -2 * sum(d_sim[1:J,1:Kmax,1:T,1:I])
+  
+  # Estimated number of occuring sites per species (among the sampled population of sites)
+  #for (i in 1:I) {
+  #  Nocc[i] <- sum(z[ ,i])
+  #}
+  
+  # Estimated number of occuring species per site (among the species that were detected anywhere)
+  #for (j in 1:J) {
+  #  Nsite[j] <- sum(z[j, ])
+  #}
+}

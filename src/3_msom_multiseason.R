@@ -1,23 +1,21 @@
-############################################################################################################################
-# A standard single-season multi-species occupancy model assuming no false positives
-#
-model_file = "data/msom_multiseason_fp_Miller.txt" # "data/msom_multiseason_nofp.txt" or "data/msom_multiseason_fp_Miller.txt"
+model_file = "src/msom_groups_multiseason_fp_Miller.txt"
 path_community_survey_data = "data/cache/1_derive_community_survey_data/community_survey_data_2025-08-15.rds"
 path_species_thresholds    = "data/cache/1_calculate_species_thresholds/species_thresholds.csv"
 path_plot_scale_data       = "data/cache/habitat_vars/data_plot_scale_sites.rds"
 path_homerange_scale_data  = "data/cache/habitat_vars/data_homerange_scale_sites.rds"
-############################################################################################################################
+
+grouping = "habitat_association" # Species grouping ("all", "habitat_association", "primary_lifestyle")
+#################################################################################################################
 
 model_name = tools::file_path_sans_ext(basename(model_file))
-path_out = paste0("data/cache/models/", model_name, "_", format(Sys.time(), "%Y-%m-%d_%H:%M:%S"), ".rds")
+path_out = paste0("data/cache/models/", model_name, "_", grouping, "_", format(Sys.time(), "%Y-%m-%d_%H:%M:%S"), ".rds")
 pacman::p_load(progress, car, tidyverse, jagsUI, MCMCvis, glue, ggplot2, ggrepel, MCMCvis)
 theme_set(theme_classic())
 
 # DEBUG
 OVERRIDE_SPECIES_SCALE_WITH_MEDIAN = TRUE
 
-############################################################################################################################
-# Load occurrence covariate data
+# Load occurrence covariate data ----------------------------------------------------------------------------
 
 # local plot scale
 occ_data_plot_shared = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site)) %>% select(
@@ -53,8 +51,7 @@ occ_data_homerange = map(occ_data_homerange, ~
 )
 names(occ_data_homerange) = tolower(names(occ_data_homerange))
 
-############################################################################################################################
-# Load species-specific thresholds
+# Load species-specific thresholds ----------------------------------------------------------------------
 message("Loading species-specific thresholds")
 species_thresholds = read.csv(path_species_thresholds)
 species_thresholds_source = species_thresholds %>% filter(model == 'source')
@@ -120,8 +117,7 @@ species_thresholds = species_thresholds_manual_selection
 species_thresholds = species_thresholds %>%
   mutate(threshold = if_else(species == "vaux's swift", 0.5, threshold))
 
-############################################################################################################################
-# Derive putative observation and survey date matricies
+# Derive putative observation and survey date matricies --------------------------------------------------
 message("Loading community survey data")
 community_survey_data = readRDS(path_community_survey_data)
 dimnames(community_survey_data)
@@ -272,8 +268,7 @@ for (t in seasons) {
   print(table(n_surveys_per_site))
 }
 
-############################################################################################################################
-# Inspect naive detections, occurrence, and richness
+# Inspect naive detections, occurrence, and richness ----------------------------------------------------------
 
 # Obtain naive occurrence stats and exclude species detected at fewer than a minimum number of sites
 # naive_occurrence = sapply(ylist, function(mat) { sum(apply(mat, 1, function(x) any(x == 1, na.rm = TRUE))) })
@@ -364,8 +359,7 @@ which(total_occurrences == min(total_occurrences[total_occurrences > 0]))
 #   geom_vline(xintercept = mean_species_detected, color = "blue") +
 #   labs(title = "Naive species richness per site", x = "Number of species detected", y = "Number of sites"); print(p)
 
-############################################################################################################################
-# Format observation detection-nondetection and covariate data for modeling as 3D arrays (site × survey × species)
+# Format observation detection-nondetection and covariate data for modeling as 3D arrays (site × survey × species) --------------------------------------------------------------------------------------------------------------
 
 # Observed (uncertain) detection-nondetection data
 y = array(NA, dim = c(length(sites), length(surveys), length(seasons), length(species)),
@@ -561,8 +555,7 @@ get_var_array <- function(variable) {
 x_tmax <- get_var_array("tmax_deg_c")
 x_prcp <- get_var_array("prcp_mm_day")
 
-############################################################################################################################
-# Assemble occurrence covariate data
+# Assemble occurrence covariate data ----------------------------------------------------------------------
 
 occ_data_plot = occ_data_plot %>% filter(site %in% dimnames(y)$site) # discard data for irrelevant sites
 stopifnot(dimnames(y)[["site"]] == occ_data_plot$site) # check that covariate data are aligned with observation matrix by site
@@ -651,8 +644,33 @@ n_beta_params = nrow(param_beta_data)
 
 param_season_data = tibble(param = "season", name = "season", scaled = list(scale(1:length(seasons))))
 
-############################################################################################################################
-# Prepare all data for the model
+# Assign species group membership
+species_traits = read_csv("data/cache/species_traits/species_traits.csv", show_col_types = FALSE) %>% mutate(common_name = tolower(common_name))
+species_traits$common_name = ifelse(
+  species_traits$common_name == "western flycatcher",
+  "pacific-slope flycatcher",
+  species_traits$common_name
+)
+species_traits = left_join(species_traits, species_metadata %>% mutate(common_name = tolower(common_name)) %>% select(common_name, habitat_association), by = "common_name")
+
+# Overwrite habitat association
+species_traits = species_traits %>%
+  mutate(habitat_association = ifelse(
+    habitat_association %in% c("early seral", "late seral"),
+    habitat_association,
+    "none"
+  ))
+
+groups = species_traits %>% filter(common_name %in% species) %>%
+  mutate(
+    group_raw   = if (grouping == "all") "all" else .[[grouping]],
+    group       = ifelse(is.na(group_raw), "NA", as.character(group_raw)),
+    group_idx   = if (grouping == "all") 1 else as.integer(factor(group)),
+    grouping    = grouping
+  ) %>%
+  select(common_name, group, group_idx, grouping)
+
+# Prepare all data for the model ----------------------------------------------------------------------
 
 # Initialize latent occupancy state z[i] as 1 if a detection occurred at site i, and 0 otherwise
 z = array(NA, dim = c(length(sites), length(seasons), length(species)), dimnames = list(sites, seasons, species))
@@ -670,8 +688,9 @@ K = as.matrix(as.data.frame(lapply(n_surveys_per_site, as.vector)))
 Kmax = max(K)
 T = length(seasons)
 I = length(species)
+G = length(unique(groups$group_idx))
 
-if (model_name == "msom_multiseason_fp_Miller") {
+if (model_name == "msom_groups_multiseason_fp_Miller") {
   y = y + 1 # "JAGS dcat() requires integer categories 1..L. Miller's paper uses y = 0 (no detect), 1 (uncertain), 2 (certain). You must recode your y input to JAGS so the values are 1=no detect, 2=uncertain, 3=certain. I will assume that mapping in the code below. If you prefer to keep 0/1/2 in R, transform before sending data to JAGS: y_jags <- y + 1."
 }
 
@@ -692,12 +711,14 @@ if (model_name == "msom_multiseason_fp_Miller") {
 }
 
 msom_data = list(
-  J = J,       # number of sites sampled
-  K = K,       # number of secondary sampling periods (surveys) per site per season (site x season)
-  Kmax = Kmax, # maximum number of surveys across all sites and seasons
-  T = T,       # number of primary sampling periods (seasons)
-  I = I,       # number of species observed
-  y = y       # observed (detection-nondetection) data matrix
+  J = J,                    # number of sites sampled
+  K = K,                    # number of secondary sampling periods (surveys) per site per season (site x season)
+  Kmax = Kmax,              # maximum number of surveys across all sites and seasons
+  T = T,                    # number of primary sampling periods (seasons)
+  I = I,                    # number of species observed
+  G = G,                    # number of species groups
+  group = groups$group_idx, # species group membership
+  y = y                     # observed (detection-nondetection) data matrix
 )
 for (a in seq_len(n_alpha_params)) { # Add alpha covariates
   msom_data[[paste0("x_", param_alpha_data$param[a])]] <- as.vector(param_alpha_data$scaled[[a]])
@@ -736,10 +757,7 @@ for (b in seq_len(n_beta_params)) {
 
 str(msom_data)
 
-stop()
-
-############################################################################################################################
-# Run JAGS
+# Run JAGS ----------------------------------------------------------------------------------------------------
 
 message("\n", "System CPU: "); print(as.data.frame(t(benchmarkme::get_cpu())))
 message("System RAM: "); print(benchmarkme::get_ram())
@@ -749,7 +767,7 @@ message("Running JAGS (current time ", time_start <- Sys.time(), ")")
 msom = jags(data = msom_data,
             inits = function() { list( # initial values to avoid data/model conflicts
               z = z,
-              v = rep(logit(0.70), length(species)), # informative priors are necessary to avoid invalid PPC log(0) values
+              v = rep(logit(0.70), length(species)), # informative priors necessary to avoid invalid PPC log(0) values
               w = rep(logit(0.05), length(species))
             ) },
             parameters.to.save = c( # monitored parameters
@@ -764,8 +782,8 @@ msom = jags(data = msom_data,
               "D_obs", "D_sim"
             ),
             model.file = model_file,
-            # n.chains = 3, n.adapt = 100, n.iter = 1000, n.burnin = 100, n.thin = 1, parallel = FALSE,
-            n.chains = 3, n.adapt = 1000, n.iter = 10000, n.burnin = 2000, n.thin = 1, parallel = TRUE, # ~21 hr
+            n.chains = 3, n.adapt = 100, n.iter = 1000, n.burnin = 100, n.thin = 1, parallel = FALSE, # ~4 hr
+            # n.chains = 3, n.adapt = 1000, n.iter = 10000, n.burnin = 2000, n.thin = 1, parallel = TRUE, # ~21 hr
             DIC = FALSE, verbose=TRUE)
 
 message("Finished running JAGS (", round(msom$mcmc.info$elapsed.mins / 60, 2), " hr)")
@@ -782,8 +800,7 @@ print(data.frame(
 
 message("Model size: ", format(utils::object.size(msom), units = "MB"))
 
-############################################################################################################################
-# Retrieve summary data and investigate goodness-of-fit
+# Retrieve summary data and investigate goodness-of-fit --------------------------------------------------
 
 msom_summary = summary(msom)
 msom_summary = msom_summary %>% as_tibble() %>%
@@ -832,7 +849,8 @@ msom_results = list(
   param_season_data = param_season_data,
   param_beta_data   = param_beta_data,
   sites             = sites,
-  species           = species
+  species           = species,
+  groups            = groups
 )
 if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
 saveRDS(msom_results, file = path_out)
