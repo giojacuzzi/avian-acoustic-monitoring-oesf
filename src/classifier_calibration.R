@@ -1,7 +1,8 @@
 ## Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024).
 
+calibration_class = "geothlypis tolmiei_macgillivray's warbler" # class to calibrate, or "all"
+overwrite_annotation_cache = TRUE
 overwrite_prediction_cache = FALSE
-overwrite_annotation_cache = FALSE
 
 path_jo_predictions_raw    = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/predictions/Jacuzzi_Olden_2025"
 path_wadnr_predictions_raw = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/predictions/WADNR"
@@ -10,6 +11,7 @@ path_jo_annotations_raw    = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive
 path_wadnr_annotations_raw = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/annotations/WADNR"
 
 out_cache_dir = "data/cache/classifier_calibration"
+
 if (!dir.exists(out_cache_dir)) dir.create(out_cache_dir, recursive = TRUE)
 path_jo_predictions_cache = paste0(out_cache_dir, "/jo_predictions.rds")
 path_jo_annotations_cache = paste0(out_cache_dir, "/jo_annotations.rds")
@@ -42,6 +44,7 @@ logit_to_conf = function(l) {
 class_labels = readLines("data/models/ensemble/ensemble_class_labels.txt") %>% tolower() %>% tibble(label = .) %>%
   separate(label, into = c("scientific_name", "common_name"), sep = "_", extra = "merge", fill  = "right", remove = FALSE) %>%
   select(label, common_name, scientific_name)
+if (calibration_class == "all") calibration_class = class_labels$label
 
 # Aggregate classifier predictions ---------------------------------------------------------------------------------------------
 
@@ -111,7 +114,7 @@ if (!overwrite_annotation_cache) {
   # ...
   jo_files = unique(jo_predictions$file) # Consider all files, whether annotations exist or not (no annotations == no species presence)
   jo_annotations = tibble(file = jo_files)
-  jo_annotations[class_labels$label] = NA
+  jo_annotations[calibration_class] = NA
   
   progress = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = length(jo_annotations$file), clear = FALSE)
   annotation_warnings = list()
@@ -129,7 +132,7 @@ if (!overwrite_annotation_cache) {
     # Get the focal class for which the file was validated
     focal_class = unique(file_annotations$focal_class)
     
-    for (class_label in class_labels$label) {
+    for (class_label in calibration_class) {
       
       a = "0"
       if (nrow(file_annotations) == 0) {
@@ -163,7 +166,7 @@ if (!overwrite_annotation_cache) {
 # Count number of TP, TN, unknown, and NA per class
 jo_counts = jo_annotations %>%
   pivot_longer(
-    cols = all_of(class_labels$label),
+    cols = all_of(calibration_class),
     names_to = "class_label",
     values_to = "value",
     values_drop_na = FALSE
@@ -189,6 +192,7 @@ if (!overwrite_annotation_cache) {
     map_dfr(~ read_tsv(.x, show_col_types = FALSE) %>%
               mutate(source_dir = str_to_lower(basename(dirname(.x))))) %>%
     clean_names() %>% rename(file = begin_file, focal_class = source_dir) %>% select(file, focal_class, label) %>%
+    mutate(file = str_remove(file, "\\.wav$")) %>%
     mutate(label = str_to_lower(label)) %>% mutate(label = if_else(label %in% c("non_target", "not_target"), "not_focal", label))
   
   # Standardize labels for focal_class and label
@@ -211,7 +215,7 @@ if (!overwrite_annotation_cache) {
 
   wadnr_files = unique(wadnr_annotations_raw$file) # Only consider annotated files
   wadnr_annotations = tibble(file = wadnr_files)
-  wadnr_annotations[class_labels$label] = NA
+  wadnr_annotations[calibration_class] = NA
   
   progress = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = length(wadnr_annotations$file), clear = FALSE)
   annotation_warnings = list()
@@ -229,7 +233,7 @@ if (!overwrite_annotation_cache) {
     # Get the focal class(es) for which the file was validated
     focal_class = unique(file_annotations$focal_class)
     
-    for (class_label in class_labels$label) {
+    for (class_label in calibration_class) {
       
       a = "unknown"
       if (nrow(file_annotations) == 0) {
@@ -261,7 +265,7 @@ if (!overwrite_annotation_cache) {
 # Count number of TP, TN, unknown, and NA per class
 wadnr_counts = wadnr_annotations %>%
   pivot_longer(
-    cols = all_of(class_labels$label),
+    cols = all_of(calibration_class),
     names_to = "class_label",
     values_to = "value",
     values_drop_na = FALSE
@@ -278,15 +282,18 @@ print(wadnr_counts, n = Inf)
 
 # Join all calibration data ---------------------------------------------------------------------------------
 
-# TODO DEBUG
-wadnr_counts$`0` = 0
-# 
+if (!"1" %in% names(wadnr_counts)) {
+  wadnr_counts$`1` = 0
+}
+if (!"0" %in% names(wadnr_counts)) {
+  wadnr_counts$`0` = 0
+}
 
 stopifnot(all(jo_counts$class_label == wadnr_counts$class_label))
-stopifnot(all(sort(class_labels$label) == jo_counts$class_label))
+stopifnot(all(sort(calibration_class) == jo_counts$class_label))
 
 message("Number of TP and TN samples per class from all annotations:")
-total_counts = tibble(class_label = sort(class_labels$label))
+total_counts = tibble(class_label = sort(calibration_class))
 total_counts$`1` = jo_counts$`1` + wadnr_counts$`1`
 total_counts$`0` = jo_counts$`0` + wadnr_counts$`0`
 total_counts$`unknown` = jo_counts$`unknown` + wadnr_counts$`unknown`
@@ -317,6 +324,7 @@ calibrate = function(preds, anno, labels) {
     # Merge with prediction scores
     class_predictions = preds %>% filter(label_predicted == class_label)
     class_calibration_data = left_join(class_annotations, class_predictions, by = c("file"))
+    table(class_calibration_data$label_truth)
     
     # Debugging sanity check
     # summary(class_calibration_data %>% filter(label_truth == 1) %>% pull(confidence_source))
@@ -394,7 +402,7 @@ calibrate = function(preds, anno, labels) {
           threshold_logit = (log(tp_min_prob / (1 - tp_min_prob)) - intercept) / coefficient # logit scale
           threshold       = logit_to_conf(threshold_logit) # confidence scale
           
-          message("  ", round(threshold, 3), " threshold to achieve Pr(TP)>=", tp_min_prob)
+          # message("  ", round(threshold, 3), " threshold to achieve Pr(TP)>=", tp_min_prob)
           
           # Calculate estimated precision and recall at this threshold
           # Predicted positive/negative based on threshold
@@ -489,17 +497,17 @@ calibrate = function(preds, anno, labels) {
 
 # Calibrate Jacuzzi and Olden 2026 -----------------------------------------------------------------------
 
-message("Calibrating each class:")
-jo_calibration_results = calibrate(jo_predictions, jo_annotations, class_labels$label)
-
-message("Calibration results:")
-jo_stats = jo_calibration_results[["stats"]]
-jo_stats %>% mutate(across(where(is.numeric), ~ round(., 2))) %>% print()
-
-# Example comparison plots
-jo_calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["pr"]]
-jo_calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["prauc"]]
-jo_calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["threshold"]]
+# message("Calibrating each class:")
+# jo_calibration_results = calibrate(jo_predictions, jo_annotations, calibration_class)
+# 
+# message("Calibration results:")
+# jo_stats = jo_calibration_results[["stats"]]
+# jo_stats %>% mutate(across(where(is.numeric), ~ round(., 2))) %>% print()
+# 
+# # Example comparison plots
+# jo_calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["pr"]]
+# jo_calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["prauc"]]
+# jo_calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["threshold"]]
 
 # Calibrate combined data -----------------------------------------------------------------------------
 
@@ -510,7 +518,7 @@ annotations = bind_rows(jo_annotations, wadnr_annotations)
 # calibration_results = calibrate(predictions, annotations, "geothlypis tolmiei_macgillivray's warbler")
 
 message("Calibrating each class:")
-calibration_results = calibrate(predictions, annotations, class_labels$label)
+calibration_results = calibrate(predictions, annotations, calibration_class)
 
 message("Calibration results:")
 stats = calibration_results[["stats"]]
@@ -519,7 +527,7 @@ stats %>% mutate(across(where(is.numeric), ~ round(., 2))) %>% print()
 # Data inspection -----------------------------------------------------------------------------
 
 # Inspect a class
-l = "troglodytes pacificus_pacific wren" # "geothlypis tolmiei_macgillivray's warbler"
+l = calibration_class # "geothlypis tolmiei_macgillivray's warbler"
 calibration_results[["stats"]] %>% filter(class_label == l) %>% mutate(across(where(is.numeric), ~ round(., 2)))
 calibration_results[["plots"]][[l]][["pr"]]
 calibration_results[["plots"]][[l]][["prauc"]]
@@ -531,5 +539,5 @@ class_annotations = class_annotations %>% filter(label_truth != "unknown") %>% m
 table(class_annotations$label_truth)
 class_predictions = predictions %>% filter(label_predicted == l)
 class_calibration_data = left_join(class_annotations, class_predictions, by = c("file"))
-View(class_calibration_data %>% arrange(desc(confidence_source)))
+# View(class_calibration_data %>% arrange(desc(confidence_source)))
 
