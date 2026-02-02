@@ -1,6 +1,6 @@
 ## Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024).
 
-calibration_class = "geothlypis tolmiei_macgillivray's warbler" # class to calibrate, or "all"
+calibration_class = "Dryobates villosus_Hairy Woodpecker" # class to calibrate, or "all"
 overwrite_annotation_cache = TRUE
 overwrite_prediction_cache = FALSE
 
@@ -44,6 +44,7 @@ logit_to_conf = function(l) {
 class_labels = readLines("data/models/ensemble/ensemble_class_labels.txt") %>% tolower() %>% tibble(label = .) %>%
   separate(label, into = c("scientific_name", "common_name"), sep = "_", extra = "merge", fill  = "right", remove = FALSE) %>%
   select(label, common_name, scientific_name)
+calibration_class = str_to_lower(calibration_class)
 if (calibration_class == "all") calibration_class = class_labels$label
 
 # Aggregate classifier predictions ---------------------------------------------------------------------------------------------
@@ -534,10 +535,11 @@ calibration_results[["plots"]][[l]][["prauc"]]
 calibration_results[["plots"]][[l]][["threshold"]]
 
 # Find specific annotations
+stop("[[Find specific annotations]]")
 class_annotations = annotations %>% select(file, all_of(l)) %>% rename(label_truth = !!sym(l))
 class_annotations = class_annotations %>% filter(label_truth != "unknown") %>% mutate(label_truth = as.integer(label_truth))
 table(class_annotations$label_truth)
 class_predictions = predictions %>% filter(label_predicted == l)
 class_calibration_data = left_join(class_annotations, class_predictions, by = c("file"))
-# View(class_calibration_data %>% arrange(desc(confidence_source)))
+View(class_calibration_data %>% arrange(desc(confidence_target)))
 
