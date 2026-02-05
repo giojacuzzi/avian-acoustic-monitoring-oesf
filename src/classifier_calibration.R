@@ -1,6 +1,6 @@
 ## Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024).
 
-calibration_class = "Dryobates villosus_Hairy Woodpecker" # class to calibrate, or "all"
+calibration_class = "Junco hyemalis_Dark-eyed Junco" # class to calibrate, or "all"
 overwrite_annotation_cache = TRUE
 overwrite_prediction_cache = FALSE
 
@@ -55,7 +55,7 @@ if (!overwrite_prediction_cache) {
   jo_predictions = readRDS(path_jo_predictions_cache)
   
 } else {
-  message("Aggregating raw classifier predictions from ", path_jo_predictions_raw) # ETA 2 min
+  message("Aggregating raw Jacuzzi and Olden (2025) classifier predictions from ", path_jo_predictions_raw) # ETA 2 min
   jo_predictions = list.files(path_jo_predictions_raw, pattern = "\\.csv$", recursive = TRUE, full.names = TRUE) %>%
     map_dfr(~ read_csv(.x, show_col_types = FALSE) %>% mutate(file = basename(.x)))
   
@@ -78,7 +78,7 @@ if (!overwrite_prediction_cache) {
   wadnr_predictions = readRDS(path_wadnr_predictions_cache)
   
 } else {
-  message("Aggregating raw classifier predictions from ", path_wadnr_predictions_raw) # ETA 15 min
+  message("Aggregating raw WADNR classifier predictions from ", path_wadnr_predictions_raw) # ETA 15 min
   wadnr_predictions = list.files(path_wadnr_predictions_raw, pattern = "\\.csv$", recursive = TRUE, full.names = TRUE) %>%
     map_dfr(~ read_csv(.x, show_col_types = FALSE) %>% mutate(file = basename(.x)))
   
@@ -93,15 +93,23 @@ if (!overwrite_prediction_cache) {
   message(crayon::green("Cached", path_wadnr_predictions_cache))
 }
 
+# DEBUG
+wadnr_predictions %>%
+  filter(
+    label_predicted == calibration_class,
+    startsWith(file, "214_0.57")
+  )
+# DEBUG
+
 # Aggregate annotations ------------------------------------------------------------------------------------------
 
 # Aggregate J&O classifier annotations
 if (!overwrite_annotation_cache) {
-  message("Loading cached Jacuzzi and Olden 2025 annotations from ", path_jo_annotations_cache)
+  message("Loading cached Jacuzzi and Olden (2025) annotations from ", path_jo_annotations_cache)
   jo_annotations = readRDS(path_jo_annotations_cache)
   
 } else {
-  message("Loading raw Jacuzzi and Olden 2025 annotations from ", path_jo_annotations_raw)
+  message("Loading raw Jacuzzi and Olden (2025) annotations from ", path_jo_annotations_raw)
   jo_annotations_raw = read_csv(path_jo_annotations_raw, show_col_types = FALSE) %>%
     mutate(labels = str_to_lower(labels), focal_class = str_to_lower(focal_class)) %>%
     mutate(file = str_remove(file, "\\.wav$")) %>%
@@ -246,7 +254,7 @@ if (!overwrite_annotation_cache) {
       } else if (any(file_annotations$label == "unknown")) {
         # Unknown if "unknown" label is present
         a = "unknown"
-      } else if (any(file_annotations$label == "not_focal") & (class_label %in% (file_annotations %>% filter(focal_class == class_label) %>% pull(label)))) {
+      } else if (any(file_annotations$label == "not_focal") & (class_label %in% (file_annotations %>% filter(focal_class == class_label) %>% pull(focal_class)))) {
         # True negative if "not_focal" is present and the file's focal_class == class_label
         a = "0"
       } else if (any(file_annotations$label == "not_focal")) {
@@ -283,12 +291,10 @@ print(wadnr_counts, n = Inf)
 
 # Join all calibration data ---------------------------------------------------------------------------------
 
-if (!"1" %in% names(wadnr_counts)) {
-  wadnr_counts$`1` = 0
-}
-if (!"0" %in% names(wadnr_counts)) {
-  wadnr_counts$`0` = 0
-}
+if (!"1" %in% names(jo_counts)) jo_counts$`1` = 0
+if (!"0" %in% names(jo_counts)) jo_counts$`0` = 0
+if (!"1" %in% names(wadnr_counts)) wadnr_counts$`1` = 0
+if (!"0" %in% names(wadnr_counts)) wadnr_counts$`0` = 0
 
 stopifnot(all(jo_counts$class_label == wadnr_counts$class_label))
 stopifnot(all(sort(calibration_class) == jo_counts$class_label))
@@ -358,8 +364,21 @@ calibrate = function(preds, anno, labels) {
         labs(title = paste0(class_label), subtitle = paste0("model '", model, "'"), x = "Score", y = "Performance", color = "Metric")
       plot_pr[[model]] = plt_pr
       
+      # Predicted positive/negative based on threshold
+      calc_precision_recall = function(d, t_logit) {
+        predicted = ifelse(d$score >= t_logit, 1, 0)
+        TP = sum(predicted == 1 & d$label_truth == 1)
+        FP = sum(predicted == 1 & d$label_truth == 0)
+        FN = sum(predicted == 0 & d$label_truth == 1)
+        return(data.frame(
+          precision = TP / (TP + FP),
+          recall    = TP / (TP + FN)
+        ))
+      }
+      
       # Calculate PR AUC and ROC AUC of classifier (from raw scores)
       auc_pr <- auc_roc <- NA
+      t_maxp <- precision_tmin <- recall_tmin <- NA
       tryCatch(
         {
           auc_pr = pr.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score),
@@ -379,6 +398,15 @@ calibrate = function(preds, anno, labels) {
               x = "Recall", y = "Precision"
             )
           plot_prauc[[model]] = plt_prauc
+          
+          # Minimum threhsold to maximize precision (i.e. precision == 1)
+          t_maxp = logit_to_conf(max(class_calibration_data$score[class_calibration_data$label_truth == 0], na.rm = TRUE))
+          
+          # Calculate performance at minimum threshold
+          perf_tmin = calc_precision_recall(class_calibration_data, conf_to_logit(threshold_min_classifier_score))
+          precision_tmin = perf_tmin$precision
+          recall_tmin    = perf_tmin$recall
+          # message("  Performance at minimum threshold ", threshold_min_classifier_score, ":\n  Precision ", round(precision_tmin,3), "\n  Recall ", round(recall_tmin,3))
         },
         warning = function(w) {
           model_warning <<- TRUE
@@ -393,7 +421,7 @@ calibrate = function(preds, anno, labels) {
       
       # Perform Platt scaling to determine threshold for desired probability of true positive
       threshold = Inf # default threshold is infinite (i.e. do not retain detections unless a species is validated)
-      precision_threshold <- recall_threshold <- precision_tmin <- recall_tmin <- NA
+      precision_threshold <- recall_threshold <- NA
       model_warning = FALSE
       tryCatch(
         {
@@ -406,27 +434,10 @@ calibrate = function(preds, anno, labels) {
           # message("  ", round(threshold, 3), " threshold to achieve Pr(TP)>=", tp_min_prob)
           
           # Calculate estimated precision and recall at this threshold
-          # Predicted positive/negative based on threshold
-          calc_precision_recall = function(d, t_logit) {
-            predicted = ifelse(d$score >= t_logit, 1, 0)
-            TP = sum(predicted == 1 & d$label_truth == 1)
-            FP = sum(predicted == 1 & d$label_truth == 0)
-            FN = sum(predicted == 0 & d$label_truth == 1)
-            return(data.frame(
-              precision = TP / (TP + FP),
-              recall    = TP / (TP + FN)
-            ))
-          }
           perf_t = calc_precision_recall(class_calibration_data, threshold_logit)
           precision_threshold  = perf_t$precision
           recall_threshold     = perf_t$recall
           # message("  Performance at threshold ", round(threshold,3), ":\n  Precision ", round(precision_threshold,3), "\n  Recall ", round(recall_threshold,3))
-          
-          # Calculate at minimum threshold
-          perf_tmin = calc_precision_recall(class_calibration_data, conf_to_logit(threshold_min_classifier_score))
-          precision_tmin = perf_tmin$precision
-          recall_tmin    = perf_tmin$recall
-          # message("  Performance at minimum threshold ", threshold_min_classifier_score, ":\n  Precision ", round(precision_tmin,3), "\n  Recall ", round(recall_tmin,3))
           
           ## Visualize the logistic regression and data
           x_range = seq(min(class_calibration_data$score), max(class_calibration_data$score), length.out = 100)
@@ -477,13 +488,14 @@ calibrate = function(preds, anno, labels) {
         auc_pr               = auc_pr,
         auc_roc              = auc_roc,
         warning              = model_warning,
-        tp_min_prob          = tp_min_prob,
-        threshold            = threshold,
-        threshold_min        = threshold_min_classifier_score,
-        precision_threshold  = precision_threshold,
-        recall_threshold     = recall_threshold,
+        tp_min_p             = tp_min_prob,
+        t                    = threshold,
+        precision_t          = precision_threshold,
+        recall_t             = recall_threshold,
+        t_min                = threshold_min_classifier_score,
         precision_tmin       = precision_tmin,
-        recall_tmin          = recall_tmin
+        recall_tmin          = recall_tmin,
+        t_maxp               = t_maxp
       ))
       
     }
@@ -541,5 +553,5 @@ class_annotations = class_annotations %>% filter(label_truth != "unknown") %>% m
 table(class_annotations$label_truth)
 class_predictions = predictions %>% filter(label_predicted == l)
 class_calibration_data = left_join(class_annotations, class_predictions, by = c("file"))
-View(class_calibration_data %>% arrange(desc(confidence_target)))
+View(class_calibration_data %>% arrange(desc(confidence_source)))
 
