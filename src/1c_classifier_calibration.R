@@ -10,13 +10,15 @@ path_wadnr_predictions_raw = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive
 path_jo_annotations_raw    = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/annotations/Jacuzzi_Olden_2025/test_data_annotations.csv"
 path_wadnr_annotations_raw = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/annotations/WADNR"
 
-out_cache_dir = "data/cache/classifier_calibration"
+out_cache_dir = "data/cache/1c_classifier_calibration"
 
 if (!dir.exists(out_cache_dir)) dir.create(out_cache_dir, recursive = TRUE)
 path_jo_predictions_cache = paste0(out_cache_dir, "/jo_predictions.rds")
 path_jo_annotations_cache = paste0(out_cache_dir, "/jo_annotations.rds")
 path_wadnr_predictions_cache = paste0(out_cache_dir, "/wadnr_predictions.rds")
 path_wadnr_annotations_cache = paste0(out_cache_dir, "/wadnr_annotations.rds")
+
+path_calibration_results_cache = paste0(out_cache_dir, "/calibration_results.csv")
 
 # Naive thresholds
 threshold_min_classifier_score = 0.5 # Naive classifier minimum confidence score threshold to assume binary presence/absence. # "For most false-positive models in our study, using a mid-range threshold of 0.50 or above generally yielded stable estimates." (Katsis et al. 2025)
@@ -512,8 +514,13 @@ message("Calibrating each class:")
 calibration_results = calibrate(predictions, annotations, calibration_class)
 
 message("Calibration results:")
-stats = calibration_results[["stats"]]
-stats %>% mutate(across(where(is.numeric), ~ round(., 2))) %>% print()
+stats = calibration_results[["stats"]] %>% mutate(across(where(is.numeric), ~ round(., 2)))
+print(stats, n = Inf)
+
+# Save results to file -----------------------------------------------------------------------------
+
+write_csv(stats, path_calibration_results_cache)
+message(crayon::green("Cached", path_calibration_results_cache))
 
 # Data inspection -----------------------------------------------------------------------------
 
