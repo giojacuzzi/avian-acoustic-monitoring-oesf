@@ -1,6 +1,6 @@
 ## Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024).
 
-calibration_class = "Junco hyemalis_Dark-eyed Junco" # class to calibrate, or "all"
+calibration_class = "all" # class to calibrate, or "all"
 overwrite_annotation_cache = TRUE
 overwrite_prediction_cache = FALSE
 
@@ -92,14 +92,6 @@ if (!overwrite_prediction_cache) {
   saveRDS(wadnr_predictions, path_wadnr_predictions_cache)
   message(crayon::green("Cached", path_wadnr_predictions_cache))
 }
-
-# DEBUG
-wadnr_predictions %>%
-  filter(
-    label_predicted == calibration_class,
-    startsWith(file, "214_0.57")
-  )
-# DEBUG
 
 # Aggregate annotations ------------------------------------------------------------------------------------------
 
@@ -485,17 +477,17 @@ calibrate = function(preds, anno, labels) {
         model                = model,
         n_tp                 = sum(class_calibration_data$label_truth == 1),
         n_tn                 = sum(class_calibration_data$label_truth == 0),
-        auc_pr               = auc_pr,
-        auc_roc              = auc_roc,
-        warning              = model_warning,
-        tp_min_p             = tp_min_prob,
-        t                    = threshold,
-        precision_t          = precision_threshold,
-        recall_t             = recall_threshold,
-        t_min                = threshold_min_classifier_score,
-        precision_tmin       = precision_tmin,
-        recall_tmin          = recall_tmin,
-        t_maxp               = t_maxp
+        auc_pr               = auc_pr,                                       # Precision-recall AUC
+        auc_roc              = auc_roc,                                      # Receiver operating curve AUC
+        warning              = model_warning,                                # Issue fitting logistic regression
+        tp_min_p             = tp_min_prob,                                  # Requested minimum probability of true positive
+        t                    = threshold,                                    # Calibrated threshold to achieve requested minimum probability of TP
+        precision_t          = precision_threshold,                          # Precision at the calibrated threshold
+        recall_t             = recall_threshold,                             # Recall at the calibrated threshold
+        t_min                = threshold_min_classifier_score,               # Naive minimum confidence score threshold
+        precision_tmin       = precision_tmin,                               # Precision at the naive threshold
+        recall_tmin          = recall_tmin,                                  # Recall at the naive threshold
+        t_maxp               = t_maxp                                        # Threshold to achieve perfect precision (1) while maximizing recall
       ))
       
     }
@@ -507,20 +499,6 @@ calibrate = function(preds, anno, labels) {
   calibration_results[["plots"]] = plots
   return(calibration_results)
 }
-
-# Calibrate Jacuzzi and Olden 2026 -----------------------------------------------------------------------
-
-# message("Calibrating each class:")
-# jo_calibration_results = calibrate(jo_predictions, jo_annotations, calibration_class)
-# 
-# message("Calibration results:")
-# jo_stats = jo_calibration_results[["stats"]]
-# jo_stats %>% mutate(across(where(is.numeric), ~ round(., 2))) %>% print()
-# 
-# # Example comparison plots
-# jo_calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["pr"]]
-# jo_calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["prauc"]]
-# jo_calibration_results[["plots"]][["troglodytes pacificus_pacific wren"]][["threshold"]]
 
 # Calibrate combined data -----------------------------------------------------------------------------
 
@@ -540,7 +518,8 @@ stats %>% mutate(across(where(is.numeric), ~ round(., 2))) %>% print()
 # Data inspection -----------------------------------------------------------------------------
 
 # Inspect a class
-l = calibration_class # "geothlypis tolmiei_macgillivray's warbler"
+calibration_class = "geothlypis tolmiei_macgillivray's warbler"
+l = calibration_class
 calibration_results[["stats"]] %>% filter(class_label == l) %>% mutate(across(where(is.numeric), ~ round(., 2)))
 calibration_results[["plots"]][[l]][["pr"]]
 calibration_results[["plots"]][[l]][["prauc"]]
