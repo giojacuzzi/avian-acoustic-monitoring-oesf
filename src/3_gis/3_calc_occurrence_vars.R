@@ -1,27 +1,42 @@
-##############################################################################
-# Quantify covariates on occurrence
+## 3_calc_occurrence_vars.R ###############################################################################
+# Quantify variables for occurrence
+# NOTE: "hs" refers to data collected from in-person habitat surveys, while "rs" refers to data derived via remote-sensing imagery.
 #
-# Note "hs" refers to data collected from in-person habitat surveys, while
-# "rs" refers to data derived via remote-sensing imagery.
-##############################################################################
+# CONFIG:
+pnts_name = "sites" # "sites" or "no_action"
+overwrite_data_plot_scale_cache = TRUE
+overwrite_data_homerange_scale_cache = TRUE
+#
+## OUTPUT:
+path_data_plot_scale_out      = paste0("data/cache/habitat_vars/data_plot_scale_", pnts_name, ".rds")
+path_data_homerange_scale_out = paste0("data/cache/habitat_vars/data_homerange_scale_", pnts_name, ".rds")
+#
+## INPUT:
+path_trait_data = "data/cache/species_traits/species_traits.csv"
+path_rast_cover = "data/cache/occurrence_covariates/rast_cover_clean.tif"
+# Base RS-FRIS data (0.1 acre resolution, i.e. ~404m2 or 20.10836 * 20.10836 m grain, roughly 1% of the area of a 100m radius circle)
+# RS-FRIS 4.0 uses a combination of 2019 and 2020 photogrammetry.
+# RS-FRIS 5.0 uses a combination of 2021 and 2022 photogrammetry. 
+# TODO: Calculate on a yearly basis!
+dir_rsfris_version = 'data/environment/rsfris_v4.0' # Only use 2020 for now
+###########################################################################################################
 
-source("src/1NEW_preprocess_habitat_data.R")
-library(terra)
+source("src/global.R")
+source("src/3_gis/1_preprocess_gis_data.R")
 
-## Inputs
+options(mapview.maxpixels = 2117676)
 
-pnts_name = "no_action" # sites, no_action
 pnts = switch(pnts_name,
     
     # ARU locations
     sites = {
-      path_rast_cover = "data/cache/occurrence_covariates/rast_cover_clean.tif"
+      path_rast_cover = path_rast_cover
       aru_sites
     },
     
     # Existing 2020 landscape
     no_action = {
-      path_rast_cover = "data/cache/occurrence_covariates/rast_cover_clean.tif"
+      path_rast_cover = path_rast_cover
       bbox = st_bbox(landscape_planning_units_clean)
       cellsize = 250 # distance between points (meters)
       grid = st_sf(st_make_grid(x = st_as_sfc(bbox), cellsize = cellsize, offset = c(bbox["xmin"], bbox["ymin"]), what = "centers"))
@@ -40,28 +55,10 @@ message('Loading raster cover data from cache ', path_rast_cover)
 rast_cover = rast(path_rast_cover)
 rast_cover = as.factor(rast_cover)
 
-## Outputs
-overwrite_data_plot_scale_cache = TRUE
-overwrite_data_homerange_scale_cache = TRUE
-path_data_plot_scale_out = paste0("data/cache/habitat_vars/data_plot_scale_", pnts_name, ".rds")
-path_data_homerange_scale_out = paste0("data/cache/habitat_vars/data_homerange_scale_", pnts_name, ".rds")
-
-library(terra)
-library(progress)
-library(tidyverse)
-library(mapview)
-options(mapview.maxpixels = 2117676)
-library(ggrepel)
-theme_set(theme_minimal())
-library(landscapemetrics)
-library(units)
-library(viridis)
-library(vegan)
-
 ##############################################################################
 # Study area, sites, boundaries, and helper functions
 
-species_trait_data = read.csv("data/cache/species_traits/species_traits.csv")
+species_trait_data = read.csv(path_trait_data)
 
 # Load a raster, cropped, projected, and masked to the study area
 load_raster = function(path_rast) {
@@ -96,12 +93,6 @@ summary_stats = function(x, na.rm = TRUE, conversion_factor = 1) {
   }
   return(data.frame(mean = mu, sd = sigma, cv = cv))
 }
-
-# Base RS-FRIS data (0.1 acre resolution, i.e. ~404m2 or 20.10836 * 20.10836 m grain, roughly 1% of the area of a 100m radius circle)
-# RS-FRIS 4.0 uses a combination of 2019 and 2020 photogrammetry.
-# RS-FRIS 5.0 uses a combination of 2021 and 2022 photogrammetry. 
-# TODO: Calculate on a yearly basis!
-dir_rsfris_version = 'data/environment/rsfris_v4.0' # Only use 2020 for now
 
 # TODO: Get simplified LSOG covers
 

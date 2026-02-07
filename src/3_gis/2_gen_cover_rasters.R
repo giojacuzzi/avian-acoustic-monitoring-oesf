@@ -1,33 +1,24 @@
-##############################################################################
+## 2_gen_cover_rasters.R #########################################################################################
 # Generate and inspect raster(s) for landscape cover
-##############################################################################
-
-source("src/1NEW_preprocess_habitat_data.R")
-
-# Inputs
+#
+# CONFIG:
+overwrite_rast_cover_cache = FALSE
+#
+## OUTPUT:
+path_rast_cover_clean_out = "data/cache/occurrence_covariates/rast_cover_clean.tif"
+#
+## INPUT:
 # Base RS-FRIS data (0.1 acre resolution, i.e. ~404m2 or 20.10836 * 20.10836 m grain, roughly 1% of the area of a 100m radius circle)
 # RS-FRIS 4.0 uses a combination of 2019 and 2020 photogrammetry.
 # RS-FRIS 5.0 uses a combination of 2021 and 2022 photogrammetry. 
 # TODO: Calculate on a yearly basis!
 dir_rsfris_version = 'data/environment/rsfris_v4.0' # Only use 2020 for now
+###########################################################################################################
 
+source("src/global.R")
+source("src/3_gis/1_preprocess_gis_data.R")
 
-# Outputs
-overwrite_rast_cover_cache = FALSE
-path_rast_cover_clean_out = "data/cache/occurrence_covariates/rast_cover_clean.tif"
-
-library(progress)
-library(tidyverse)
-library(sf)
-library(terra)
-library(mapview)
 options(mapview.maxpixels = 2117676)
-library(ggrepel)
-theme_set(theme_minimal())
-library(landscapemetrics)
-library(units)
-library(viridis)
-library(vegan)
 
 ##############################################################################
 # Study area, sites, boundaries, and helper functions
@@ -369,7 +360,7 @@ if (overwrite_rast_cover_cache) {
   message('Saving raster cover data cache ', path_rast_cover_clean_out)
   dir.create(dirname(path_rast_cover_clean_out), recursive = TRUE, showWarnings = FALSE)
   writeRaster(rast_cover_clean, path_rast_cover_clean_out, overwrite=TRUE)
-  message("Finished generating cover cache (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)")
+  message(crayon::green("Finished generating cover cache (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)"))
   
 } else { # overwrite_rast_cover_cache is FALSE
   message('Loading raster cover data from cache ', path_rast_cover_clean_out)

@@ -1,15 +1,20 @@
-# 1c_classifier_calibration.R ======================================================================================
+## 1c_classifier_calibration.R #########################################################################################
 # Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024).
-
-## Script configuration
+# 
+## CONFIG:
 calibration_class = "all" # class to calibrate (e.g. "all" or "catharus ustulatus_swainson's thrush")
 overwrite_annotation_cache = FALSE # Aggregate annotations from the raw data
 overwrite_prediction_cache = FALSE # Aggregate predictions from the raw data
 threshold_min_classifier_score = 0.5 # Naive classifier minimum confidence score threshold to assume binary presence/absence. # "For most false-positive models in our study, using a mid-range threshold of 0.50 or above generally yielded stable estimates." (Katsis et al. 2025)
 threshold_min_detected_days = 2 # Minimum number of unique days detected to retain species detections at a site
 tp_min_prob = 0.99 # Desired minimum probability of a true positive
-
-## Prerequisites:
+#
+## OUTPUT: calibration_results.csv
+out_cache_dir = "data/cache/1c_classifier_calibration"
+path_calibration_results_cache = paste0(out_cache_dir, "/calibration_results.csv") # optimized calibration results
+path_calibration_data_cache    = paste0(out_cache_dir, "/calibration_data.rds")    # raw calibration data and plots
+#
+## INPUT:
 # Directories containing raw .csv predictions for calibration, e.g.
 # confidence_source	confidence_target	label
 # 0.566		          0.678	            Loxia curvirostra_Red Crossbill
@@ -17,9 +22,8 @@ tp_min_prob = 0.99 # Desired minimum probability of a true positive
 # ...       ...     ...
 path_jo_predictions_raw    = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/predictions/Jacuzzi_Olden_2025"
 path_wadnr_predictions_raw = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/predictions/WADNR"
-
-# Directories containing raw annotations for calibration
 #
+# Directories containing raw annotations for calibration
 # e.g. for WADNR .selections.txt Raven Pro files:
 # Selection	Begin File                                                  Label
 # 1         105_0.594_290_SMA00424_20200527_060059_1941.0s_1944.0s.wav	Brown Creeper
@@ -33,26 +37,17 @@ path_wadnr_predictions_raw = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive
 # ...                               ...                                                           ...
 path_jo_annotations_raw    = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/annotations/Jacuzzi_Olden_2025/test_data_annotations.csv"
 path_wadnr_annotations_raw = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/annotations/WADNR"
+#######################################################################################################################
+
+source("src/global.R")
 
 # Helper variables and functions ======================================================================================
-
-out_cache_dir = "data/cache/1c_classifier_calibration"
 
 if (!dir.exists(out_cache_dir)) dir.create(out_cache_dir, recursive = TRUE)
 path_jo_predictions_cache = paste0(out_cache_dir, "/jo_predictions.rds")
 path_jo_annotations_cache = paste0(out_cache_dir, "/jo_annotations.rds")
 path_wadnr_predictions_cache = paste0(out_cache_dir, "/wadnr_predictions.rds")
 path_wadnr_annotations_cache = paste0(out_cache_dir, "/wadnr_annotations.rds")
-
-path_calibration_data_cache    = paste0(out_cache_dir, "/calibration_data.rds")
-path_calibration_results_cache = paste0(out_cache_dir, "/calibration_results.csv")
-
-library(tidyverse)
-library(janitor)
-library(PRROC)
-library(progress)
-
-theme_set(theme_minimal())
 
 conf_to_logit = function(c) {
   c = min(max(c, 0.00001), 1.0 - 0.00001) # prevent undefined logit for extreme scores due to rounding error
@@ -63,10 +58,6 @@ logit_to_conf = function(l) {
   return(1 / (1 + exp(-l)))
 }
 
-# Load class labels
-class_labels = readLines("data/models/ensemble/ensemble_class_labels.txt") %>% tolower() %>% tibble(label = .) %>%
-  separate(label, into = c("scientific_name", "common_name"), sep = "_", extra = "merge", fill  = "right", remove = FALSE) %>%
-  select(label, common_name, scientific_name)
 calibration_class = str_to_lower(calibration_class)
 if (calibration_class == "all") calibration_class = class_labels$label
 

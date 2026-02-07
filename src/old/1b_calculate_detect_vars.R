@@ -16,6 +16,8 @@ data = files %>%
     d
   }) %>% bind_rows() %>% select(site, everything()) %>% janitor::clean_names()
 
+# TODO: add year
+
 message('Saving detection covariate data cache ', path_data_out)
 dir.create(dirname(path_data_out), recursive = TRUE, showWarnings = FALSE)
 saveRDS(data, path_data_out)
