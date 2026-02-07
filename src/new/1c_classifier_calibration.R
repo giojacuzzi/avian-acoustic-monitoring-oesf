@@ -24,7 +24,7 @@ path_calibration_results_cache = paste0(out_cache_dir, "/calibration_results.csv
 threshold_min_classifier_score = 0.5 # Naive classifier minimum confidence score threshold to assume binary presence/absence. # "For most false-positive models in our study, using a mid-range threshold of 0.50 or above generally yielded stable estimates." (Katsis et al. 2025)
 threshold_min_detected_days = 2 # Minimum number of unique days detected to retain species detections at a site
 # Classifier calibration (Platt scaling)
-tp_min_prob = 0.95
+tp_min_prob = 0.99 # Desired minimum probability of a true positive
 
 library(tidyverse)
 library(janitor)
@@ -372,7 +372,7 @@ calibrate = function(preds, anno, labels) {
       
       # Calculate PR AUC and ROC AUC of classifier (from raw scores)
       auc_pr <- auc_roc <- NA
-      t_maxp <- precision_tmin <- recall_tmin <- NA
+      t_maxp <- precision_tmaxp <- recall_tmaxp <- precision_tmin <- recall_tmin <- NA
       tryCatch(
         {
           auc_pr = pr.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score),
@@ -394,7 +394,11 @@ calibrate = function(preds, anno, labels) {
           plot_prauc[[model]] = plt_prauc
           
           # Minimum threhsold to maximize precision (i.e. precision == 1)
-          t_maxp = logit_to_conf(max(class_calibration_data$score[class_calibration_data$label_truth == 0], na.rm = TRUE))
+          t_maxp = max(class_calibration_data$score[class_calibration_data$label_truth == 0], na.rm = TRUE)
+          perf_tmaxp = calc_precision_recall(class_calibration_data, t_maxp)
+          precision_tmaxp = perf_tmaxp$precision
+          recall_tmaxp    = recall_tmaxp$recall
+          t_maxp          = logit_to_conf(tmax_p)
           
           # Calculate performance at minimum threshold
           perf_tmin = calc_precision_recall(class_calibration_data, conf_to_logit(threshold_min_classifier_score))
@@ -475,10 +479,10 @@ calibrate = function(preds, anno, labels) {
       # TODO: Enforce minimum threshold for classes with no negatives in validation data
       
       stats = bind_rows(stats, tibble(
-        class_label          = class_label,
-        model                = model,
-        n_tp                 = sum(class_calibration_data$label_truth == 1),
-        n_tn                 = sum(class_calibration_data$label_truth == 0),
+        class_label          = class_label,                                  # Class
+        model                = model,                                        # Classifier model
+        n_tp                 = sum(class_calibration_data$label_truth == 1), # Number of true positive examples
+        n_tn                 = sum(class_calibration_data$label_truth == 0), # Number of true negative examples
         auc_pr               = auc_pr,                                       # Precision-recall AUC
         auc_roc              = auc_roc,                                      # Receiver operating curve AUC
         warning              = model_warning,                                # Issue fitting logistic regression
@@ -489,7 +493,9 @@ calibrate = function(preds, anno, labels) {
         t_min                = threshold_min_classifier_score,               # Naive minimum confidence score threshold
         precision_tmin       = precision_tmin,                               # Precision at the naive threshold
         recall_tmin          = recall_tmin,                                  # Recall at the naive threshold
-        t_maxp               = t_maxp                                        # Threshold to achieve perfect precision (1) while maximizing recall
+        t_maxp               = t_maxp,                                       # Threshold to achieve perfect precision (1) while maximizing recall
+        precision_tmaxp      = precision_tmaxp,                              # Precision at the perfect precision threshold
+        recall_tmaxp         = recall_tmaxp                                  # Recall at the perfect precision threshold
       ))
       
     }
@@ -524,20 +530,57 @@ message(crayon::green("Cached", path_calibration_results_cache))
 
 # Data inspection -----------------------------------------------------------------------------
 
-# Inspect a class
-calibration_class = "geothlypis tolmiei_macgillivray's warbler"
-l = calibration_class
-calibration_results[["stats"]] %>% filter(class_label == l) %>% mutate(across(where(is.numeric), ~ round(., 2)))
-calibration_results[["plots"]][[l]][["pr"]]
-calibration_results[["plots"]][[l]][["prauc"]]
-calibration_results[["plots"]][[l]][["threshold"]]
+if (FALSE) {
+  
+  # Inspect a class
+  calibration_class = "geothlypis tolmiei_macgillivray's warbler"
+  l = calibration_class
+  calibration_results[["stats"]] %>% filter(class_label == l) %>% mutate(across(where(is.numeric), ~ round(., 2)))
+  calibration_results[["plots"]][[l]][["pr"]]
+  calibration_results[["plots"]][[l]][["prauc"]]
+  calibration_results[["plots"]][[l]][["threshold"]]
+  
+  # Find specific annotations
+  stop("[[Find specific annotations]]")
+  class_annotations = annotations %>% select(file, all_of(l)) %>% rename(label_truth = !!sym(l))
+  class_annotations = class_annotations %>% filter(label_truth != "unknown") %>% mutate(label_truth = as.integer(label_truth))
+  table(class_annotations$label_truth)
+  class_predictions = predictions %>% filter(label_predicted == l)
+  class_calibration_data = left_join(class_annotations, class_predictions, by = c("file"))
+  View(class_calibration_data %>% arrange(desc(confidence_source)))
+  
+}
 
-# Find specific annotations
-stop("[[Find specific annotations]]")
-class_annotations = annotations %>% select(file, all_of(l)) %>% rename(label_truth = !!sym(l))
-class_annotations = class_annotations %>% filter(label_truth != "unknown") %>% mutate(label_truth = as.integer(label_truth))
-table(class_annotations$label_truth)
-class_predictions = predictions %>% filter(label_predicted == l)
-class_calibration_data = left_join(class_annotations, class_predictions, by = c("file"))
-View(class_calibration_data %>% arrange(desc(confidence_source)))
+# Determine optimal thresholds per class -----------------------------------------------------------------------------
 
+# Drop classes with zero verified detections
+absent_classes = stats %>% filter(n_tp == 0) %>% pull(class_label) %>% unique()
+class_thresholds = stats %>% filter(!class_label %in% absent_classes)
+
+best_prauc_per_class <- class_thresholds %>%
+  group_by(class_label) %>%
+  slice_max(order_by = auc_pr, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+best_with_deltas <- class_thresholds %>%
+  group_by(class_label) %>%
+  # keep best row by auc_pr
+  slice_max(auc_pr, n = 1, with_ties = FALSE) %>%
+  # bring in the other model row for the same class
+  left_join(
+    class_thresholds %>%
+      rename(
+        precision_t_other = precision_t,
+        recall_t_other    = recall_t,
+        model_other       = model
+      ),
+    by = "class_label"
+  ) %>%
+  # keep only the non-selected model as "other"
+  filter(model != model_other) %>%
+  mutate(
+    precision_t_delta = precision_t - precision_t_other,
+    recall_t_delta    = recall_t - recall_t_other
+  ) %>%
+  select(-precision_t_other, -recall_t_other, -model_other) %>%
+  ungroup()
