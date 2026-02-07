@@ -1,14 +1,40 @@
-## Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024).
+# 1c_classifier_calibration.R ======================================================================================
+# Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024).
 
-calibration_class = "all" # class to calibrate, or "all"
-overwrite_annotation_cache = TRUE
-overwrite_prediction_cache = FALSE
+## Script configuration
+calibration_class = "all" # class to calibrate (e.g. "all" or "catharus ustulatus_swainson's thrush")
+overwrite_annotation_cache = FALSE # Aggregate annotations from the raw data
+overwrite_prediction_cache = FALSE # Aggregate predictions from the raw data
+threshold_min_classifier_score = 0.5 # Naive classifier minimum confidence score threshold to assume binary presence/absence. # "For most false-positive models in our study, using a mid-range threshold of 0.50 or above generally yielded stable estimates." (Katsis et al. 2025)
+threshold_min_detected_days = 2 # Minimum number of unique days detected to retain species detections at a site
+tp_min_prob = 0.99 # Desired minimum probability of a true positive
 
+## Prerequisites:
+# Directories containing raw .csv predictions for calibration, e.g.
+# confidence_source	confidence_target	label
+# 0.566		          0.678	            Loxia curvirostra_Red Crossbill
+# 0.843		          0.998	            Melospiza melodia_Song Sparrow
+# ...       ...     ...
 path_jo_predictions_raw    = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/predictions/Jacuzzi_Olden_2025"
 path_wadnr_predictions_raw = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/predictions/WADNR"
 
+# Directories containing raw annotations for calibration
+#
+# e.g. for WADNR .selections.txt Raven Pro files:
+# Selection	Begin File                                                  Label
+# 1         105_0.594_290_SMA00424_20200527_060059_1941.0s_1944.0s.wav	Brown Creeper
+# 2         114_0.513_176_SMA00403_20200605_060010_642.0s_645.0s.wav  	unknown
+# ...       ...                                                         ...
+#
+# e.g. for Jacuzzi and Olden 2025 .csv summary:
+# focal_class	                      file	                                                        labels
+# Bombycilla cedrorum_Cedar Waxwing	Cedar Waxwing-0.9761422611646536_SMA00346_20200725_145917.wav	"Bombycilla cedrorum_Cedar Waxwing, not_focal, Ixoreus naevius_Varied Thrush"
+# Bombycilla cedrorum_Cedar Waxwing	Cedar Waxwing-0.101301789380809_SMA00370_20200716_060341.wav	not_focal, unknown
+# ...                               ...                                                           ...
 path_jo_annotations_raw    = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/annotations/Jacuzzi_Olden_2025/test_data_annotations.csv"
 path_wadnr_annotations_raw = "/Users/giojacuzzi/Library/CloudStorage/GoogleDrive-giojacuzzi@gmail.com/My Drive/Research/Projects/C4 - OESF avian communities/data/calibration/annotations/WADNR"
+
+# Helper variables and functions ======================================================================================
 
 out_cache_dir = "data/cache/1c_classifier_calibration"
 
@@ -18,13 +44,8 @@ path_jo_annotations_cache = paste0(out_cache_dir, "/jo_annotations.rds")
 path_wadnr_predictions_cache = paste0(out_cache_dir, "/wadnr_predictions.rds")
 path_wadnr_annotations_cache = paste0(out_cache_dir, "/wadnr_annotations.rds")
 
+path_calibration_data_cache    = paste0(out_cache_dir, "/calibration_data.rds")
 path_calibration_results_cache = paste0(out_cache_dir, "/calibration_results.csv")
-
-# Naive thresholds
-threshold_min_classifier_score = 0.5 # Naive classifier minimum confidence score threshold to assume binary presence/absence. # "For most false-positive models in our study, using a mid-range threshold of 0.50 or above generally yielded stable estimates." (Katsis et al. 2025)
-threshold_min_detected_days = 2 # Minimum number of unique days detected to retain species detections at a site
-# Classifier calibration (Platt scaling)
-tp_min_prob = 0.99 # Desired minimum probability of a true positive
 
 library(tidyverse)
 library(janitor)
@@ -305,7 +326,7 @@ print(total_counts %>% select(common_name, `1`, `0`, `unknown`) %>% arrange(comm
 
 # Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024). Takes as input a parquet file containing the validation dataset following the format below:
 calibrate = function(preds, anno, labels) {
-  calibration_results = list()
+  calibration_data = list()
   plots = list()
   stats = tibble()
   for (class_label in labels) {
@@ -360,7 +381,7 @@ calibrate = function(preds, anno, labels) {
       
       # Predicted positive/negative based on threshold
       calc_precision_recall = function(d, t_logit) {
-        predicted = ifelse(d$score >= t_logit, 1, 0)
+        predicted = ifelse(d$score > t_logit, 1, 0)
         TP = sum(predicted == 1 & d$label_truth == 1)
         FP = sum(predicted == 1 & d$label_truth == 0)
         FN = sum(predicted == 0 & d$label_truth == 1)
@@ -397,8 +418,7 @@ calibrate = function(preds, anno, labels) {
           t_maxp = max(class_calibration_data$score[class_calibration_data$label_truth == 0], na.rm = TRUE)
           perf_tmaxp = calc_precision_recall(class_calibration_data, t_maxp)
           precision_tmaxp = perf_tmaxp$precision
-          recall_tmaxp    = recall_tmaxp$recall
-          t_maxp          = logit_to_conf(tmax_p)
+          recall_tmaxp    = perf_tmaxp$recall
           
           # Calculate performance at minimum threshold
           perf_tmin = calc_precision_recall(class_calibration_data, conf_to_logit(threshold_min_classifier_score))
@@ -487,13 +507,13 @@ calibrate = function(preds, anno, labels) {
         auc_roc              = auc_roc,                                      # Receiver operating curve AUC
         warning              = model_warning,                                # Issue fitting logistic regression
         tp_min_p             = tp_min_prob,                                  # Requested minimum probability of true positive
-        t                    = threshold,                                    # Calibrated threshold to achieve requested minimum probability of TP
-        precision_t          = precision_threshold,                          # Precision at the calibrated threshold
-        recall_t             = recall_threshold,                             # Recall at the calibrated threshold
+        t_tp                 = threshold,                                    # Calibrated threshold to achieve requested minimum probability of TP
+        precision_ttp        = precision_threshold,                          # Precision at the calibrated threshold
+        recall_ttp           = recall_threshold,                             # Recall at the calibrated threshold
         t_min                = threshold_min_classifier_score,               # Naive minimum confidence score threshold
         precision_tmin       = precision_tmin,                               # Precision at the naive threshold
         recall_tmin          = recall_tmin,                                  # Recall at the naive threshold
-        t_maxp               = t_maxp,                                       # Threshold to achieve perfect precision (1) while maximizing recall
+        t_maxp               = logit_to_conf(t_maxp),                        # Threshold to achieve perfect precision (1) while maximizing recall
         precision_tmaxp      = precision_tmaxp,                              # Precision at the perfect precision threshold
         recall_tmaxp         = recall_tmaxp                                  # Recall at the perfect precision threshold
       ))
@@ -503,9 +523,9 @@ calibrate = function(preds, anno, labels) {
     names(class_plots) = c("pr", "prauc", "threshold")
     plots[[class_label]] = class_plots
   }
-  calibration_results[["stats"]] = stats
-  calibration_results[["plots"]] = plots
-  return(calibration_results)
+  calibration_data[["stats"]] = stats
+  calibration_data[["plots"]] = plots
+  return(calibration_data)
 }
 
 # Calibrate combined data -----------------------------------------------------------------------------
@@ -514,31 +534,25 @@ stopifnot(colnames(jo_annotations) == colnames(wadnr_annotations))
 predictions = bind_rows(jo_predictions, wadnr_predictions)
 annotations = bind_rows(jo_annotations, wadnr_annotations)
 
-# calibration_results = calibrate(predictions, annotations, "geothlypis tolmiei_macgillivray's warbler")
-
 message("Calibrating each class:")
-calibration_results = calibrate(predictions, annotations, calibration_class)
+calibration_data = calibrate(predictions, annotations, calibration_class)
 
-message("Calibration results:")
-stats = calibration_results[["stats"]] %>% mutate(across(where(is.numeric), ~ round(., 2)))
+message("Calibration stats:")
+stats = calibration_data[["stats"]] %>% mutate(across(where(is.numeric), ~ round(., 3)))
 print(stats, n = Inf)
 
-# Save results to file -----------------------------------------------------------------------------
-
-write_csv(stats, path_calibration_results_cache)
-message(crayon::green("Cached", path_calibration_results_cache))
+# saveRDS(calibration_data, path_calibration_data_cache)
+# message(crayon::green("Cached", path_calibration_data_cache))
 
 # Data inspection -----------------------------------------------------------------------------
 
 if (FALSE) {
   
   # Inspect a class
-  calibration_class = "geothlypis tolmiei_macgillivray's warbler"
-  l = calibration_class
-  calibration_results[["stats"]] %>% filter(class_label == l) %>% mutate(across(where(is.numeric), ~ round(., 2)))
-  calibration_results[["plots"]][[l]][["pr"]]
-  calibration_results[["plots"]][[l]][["prauc"]]
-  calibration_results[["plots"]][[l]][["threshold"]]
+  calibration_data[["stats"]] %>% filter(class_label == calibration_class) %>% mutate(across(where(is.numeric), ~ round(., 2)))
+  calibration_data[["plots"]][[l]][["pr"]]
+  calibration_data[["plots"]][[l]][["prauc"]]
+  calibration_data[["plots"]][[l]][["threshold"]]
   
   # Find specific annotations
   stop("[[Find specific annotations]]")
@@ -553,34 +567,60 @@ if (FALSE) {
 
 # Determine optimal thresholds per class -----------------------------------------------------------------------------
 
-# Drop classes with zero verified detections
-absent_classes = stats %>% filter(n_tp == 0) %>% pull(class_label) %>% unique()
-class_thresholds = stats %>% filter(!class_label %in% absent_classes)
+message("Determining optimal thresholds for each class")
 
-best_prauc_per_class <- class_thresholds %>%
-  group_by(class_label) %>%
-  slice_max(order_by = auc_pr, n = 1, with_ties = FALSE) %>%
-  ungroup()
+# Drop classes with less than a minimum number of verified detections
+sparse_classes = stats %>% filter(n_tp < 20) %>% pull(class_label) %>% unique()
+class_thresholds = stats %>% filter(!class_label %in% sparse_classes)
 
-best_with_deltas <- class_thresholds %>%
-  group_by(class_label) %>%
-  # keep best row by auc_pr
-  slice_max(auc_pr, n = 1, with_ties = FALSE) %>%
-  # bring in the other model row for the same class
-  left_join(
-    class_thresholds %>%
-      rename(
-        precision_t_other = precision_t,
-        recall_t_other    = recall_t,
-        model_other       = model
-      ),
-    by = "class_label"
-  ) %>%
-  # keep only the non-selected model as "other"
-  filter(model != model_other) %>%
-  mutate(
-    precision_t_delta = precision_t - precision_t_other,
-    recall_t_delta    = recall_t - recall_t_other
-  ) %>%
-  select(-precision_t_other, -recall_t_other, -model_other) %>%
-  ungroup()
+# Drop additional abiotic and biotic classes
+class_thresholds = class_thresholds %>% filter(!str_starts(class_label, "abiotic"))
+class_thresholds = class_thresholds %>% filter(!str_starts(class_label, "biotic"))
+
+calibration_results = tibble()
+for (l in unique(class_thresholds$class_label)) {
+  l_data = class_thresholds %>% filter(class_label == l)
+  
+  # Determine the model with the highest PR AUC
+  l_data = l_data %>% slice_max(order_by = auc_pr, n = 1, with_ties = FALSE)
+  
+  t = Inf
+  if (l_data$warning) {
+    # For classes that did not converge, use max of t_maxp or t_min
+    if (l_data$t_maxp > l_data$t_min) {
+      t = l_data$t_maxp
+      p = l_data$precision_tmaxp
+      r = l_data$recall_tmaxp
+      m = "precision"
+    } else {
+      t = l_data$t_min
+      p = l_data$precision_tmin
+      r = l_data$recall_tmin
+      m = "naive"
+    }
+  } else {
+    # Use the probabilistic threshold
+    t = l_data$t_tp
+    p = l_data$precision_ttp
+    r = l_data$recall_ttp
+    m = "probabilistic"
+  }
+  calibration_results = bind_rows(calibration_results, l_data %>%
+                                     select(class_label, model, n_tp, n_tn, auc_pr, auc_roc) %>% mutate(threshold = t, precision = p, recall = r, method = m))
+}
+
+message("Calibration results:")
+print(calibration_results, n = Inf)
+
+write_csv(calibration_results, path_calibration_results_cache)
+message(crayon::green("Cached", path_calibration_results_cache))
+
+# TODO: The following classes may need to be manually validated (i.e. set their thresholds to Inf):
+# TODO: NOTE THAT SOME JUST NEED MORE VALIDATIONS
+# bonasa umbellus_ruffed grouse
+# leiothlypis celata_orange-crowned warbler
+# molothrus ater_brown-headed cowbird
+# perisoreus canadensis_canada jay
+# streptopelia decaocto_eurasian collared-dove
+
+
