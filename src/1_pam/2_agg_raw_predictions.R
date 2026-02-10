@@ -1,14 +1,14 @@
 # 2_agg_raw_predictions.R ####################################################################################
-# Aggregate raw prediction (.csv) data and associated metadata
+# Aggregate raw prediction (.csv) data and associated metadata into a single table
 # 
 # OUTPUT:
-path_out_dir = "data/cache/0_aggregate_raw_prediction_data"
-path_out_prediction_data = paste0(path_out_dir, '/prediction_data.feather') # All predictions
+path_out_dir = "data/cache/1_pam/2_agg_raw_predictions"
+path_out_prediction_data    = paste0(path_out_dir, '/prediction_data.feather')    # All predictions
 path_out_survey_file_counts = paste0(path_out_dir, '/survey_file_counts.feather') # Prediction file counts (i.e. recordings) per site-survey
 #
 # INPUT:
-# Raw .csv prediction data with metadata contained in directory structure (see above)
-path_in_dir = "/Volumes/gioj/OESF_processed/predictions"
+# Raw .csv prediction data with metadata contained in directory structure
+path_in_dir = "/Volumes/gioj/OESF/predictions"
 ##############################################################################################################
 
 source("src/global.R")
@@ -59,6 +59,7 @@ predictions_metadata_matched = predictions_metadata %>%
   )
 
 # Drop prediction files that were not matched to a unit
+# TODO: Add missing site ID and stage for SMA00403 2020 deployment 2 to "unit_key.csv"
 predictions_metadata_no_match = predictions_metadata_matched %>% filter(is.na(unit) | unit == "")
 predictions_metadata_no_match = predictions_metadata_no_match %>%
   distinct(season, deploy, serialno)
@@ -79,17 +80,15 @@ survey_file_counts = predictions_metadata_matched %>% mutate(survey_date = as.Da
   mutate(season = factor(season), unit = factor(unit)) %>%
   arrange(season, unit, survey_date)
 if (!dir.exists(path_out_dir)) dir.create(path_out_dir, recursive = TRUE)
-arrow::write_feather(survey_file_counts, path_out_survey_file_counts)
+write_feather(survey_file_counts, path_out_survey_file_counts)
 
 # Read and aggregate all predictions
 message('Aggregating prediction data (this may take some time)')
 n = nrow(predictions_metadata_matched)
 all_data_list = vector("list", n)  # preallocate list
 
-for (i in seq_len(n)) {
-  if (i %% ceiling(n/100) == 0 || i == n) {
-    cat(sprintf("%.0f%% (%d/%d)\n", 100 * i / n, i, n))
-  }
+for (i in seq_len(n)) { # ETA ~45 min
+  if (i %% ceiling(n/100) == 0 || i == n) cat(sprintf("%.0f%% (%d/%d)\n", 100 * i / n, i, n))
   file_path = predictions_metadata_matched[[i, 'file_path']]
   rec_time_start = predictions_metadata_matched[[i, 'rec_time_start']]
   # Read the prediction history data
@@ -116,8 +115,9 @@ message(nrow(prediction_data), " predictions aggregated")
 # Format data
 message("Formatting prediction data")
 prediction_data = prediction_data %>%
-  mutate(across(c(common_name, season, deploy, serialno, unit, unit_agg), as.factor))
+  mutate(across(c(common_name, season, deploy, serialno, unit, unit_agg), as.factor)) %>%
+  mutate(common_name = str_to_lower(common_name))
 
 # Write results to cache
-message("Caching prediction data to ", path_out_prediction_data)
-arrow::write_feather(prediction_data, path_out_prediction_data)
+write_feather(prediction_data, path_out_prediction_data)
+message(crayon::green("Cached prediction data to", path_out_prediction_data))

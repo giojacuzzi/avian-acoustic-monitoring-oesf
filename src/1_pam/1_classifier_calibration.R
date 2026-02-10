@@ -3,16 +3,16 @@
 # 
 ## CONFIG:
 calibration_class = "all" # class to calibrate (e.g. "all" or "catharus ustulatus_swainson's thrush")
-overwrite_annotation_cache = FALSE # Aggregate annotations from the raw data
-overwrite_prediction_cache = FALSE # Aggregate predictions from the raw data
-threshold_min_classifier_score = 0.5 # Naive classifier minimum confidence score threshold to assume binary presence/absence. # "For most false-positive models in our study, using a mid-range threshold of 0.50 or above generally yielded stable estimates." (Katsis et al. 2025)
-threshold_min_detected_days = 2 # Minimum number of unique days detected to retain species detections at a site
-tp_min_prob = 0.95 # Desired minimum probability of a true positive
+overwrite_annotation_cache = FALSE   # Aggregate annotations from the raw data
+overwrite_prediction_cache = FALSE   # Aggregate predictions from the raw data
+threshold_min_classifier_score = 0.5 # Naive classifier minimum confidence score threshold to assume binary presence/absence. "For most false-positive models in our study, using a mid-range threshold of 0.50 or above generally yielded stable estimates." (Katsis et al. 2025)
+threshold_min_detected_days = 2      # Minimum number of unique days detected to retain species detections at a site
+tp_min_prob = 0.95                   # Desired minimum probability of a true positive
 #
 ## OUTPUT: calibration_results.csv
-out_cache_dir = "data/cache/1c_classifier_calibration"
+out_cache_dir = "data/cache/1_pam/1_classifier_calibration"
 path_calibration_results_cache = paste0(out_cache_dir, "/calibration_results.csv") # optimized calibration results
-path_calibration_data_cache    = paste0(out_cache_dir, "/calibration_data.rds")    # raw calibration data and plots
+# path_calibration_data_cache    = paste0(out_cache_dir, "/calibration_data.rds")    # raw calibration data and plots
 #
 ## INPUT:
 # Directories containing raw .csv predictions for calibration, e.g.
