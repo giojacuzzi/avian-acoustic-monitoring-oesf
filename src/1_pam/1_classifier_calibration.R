@@ -7,7 +7,7 @@ overwrite_annotation_cache = FALSE # Aggregate annotations from the raw data
 overwrite_prediction_cache = FALSE # Aggregate predictions from the raw data
 threshold_min_classifier_score = 0.5 # Naive classifier minimum confidence score threshold to assume binary presence/absence. # "For most false-positive models in our study, using a mid-range threshold of 0.50 or above generally yielded stable estimates." (Katsis et al. 2025)
 threshold_min_detected_days = 2 # Minimum number of unique days detected to retain species detections at a site
-tp_min_prob = 0.99 # Desired minimum probability of a true positive
+tp_min_prob = 0.95 # Desired minimum probability of a true positive
 #
 ## OUTPUT: calibration_results.csv
 out_cache_dir = "data/cache/1c_classifier_calibration"
@@ -79,8 +79,6 @@ if (!overwrite_prediction_cache) {
     select(file, label, confidence_source, confidence_target) %>%
     rename(label_predicted = label) %>%
     mutate(file = str_remove(file, "\\.BirdNET\\.results\\.csv$"))
-  
-  # TODO: Remove 
   
   saveRDS(jo_predictions, path_jo_predictions_cache)
   message(crayon::green("Cached", path_jo_predictions_cache))
@@ -387,11 +385,11 @@ calibrate = function(preds, anno, labels) {
       t_maxp <- precision_tmaxp <- recall_tmaxp <- precision_tmin <- recall_tmin <- NA
       tryCatch(
         {
-          auc_pr = pr.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score),
-                            scores.class1 = subset(class_calibration_data, label_truth == 0) %>% pull(score))$auc.integral
+          auc_pr = pr.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score) %>% na.omit(),
+                            scores.class1 = subset(class_calibration_data, label_truth == 0) %>% pull(score) %>% na.omit())$auc.integral
           
-          auc_roc = roc.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score),
-                              scores.class1 = subset(class_calibration_data, label_truth == 0) %>% pull(score))$auc
+          auc_roc = roc.curve(scores.class0 = subset(class_calibration_data, label_truth == 1) %>% pull(score) %>% na.omit(),
+                              scores.class1 = subset(class_calibration_data, label_truth == 0) %>% pull(score) %>% na.omit())$auc
           
           # Visualize precision recall AUC
           pr_curve = data_sorted %>% select(recall, precision) %>% arrange(recall)
@@ -407,12 +405,12 @@ calibrate = function(preds, anno, labels) {
           
           # Minimum threhsold to maximize precision (i.e. precision == 1)
           t_maxp = max(class_calibration_data$score[class_calibration_data$label_truth == 0], na.rm = TRUE)
-          perf_tmaxp = calc_precision_recall(class_calibration_data, t_maxp)
+          perf_tmaxp = calc_precision_recall(class_calibration_data %>% filter(!is.na(score)), t_maxp)
           precision_tmaxp = perf_tmaxp$precision
           recall_tmaxp    = perf_tmaxp$recall
           
           # Calculate performance at minimum threshold
-          perf_tmin = calc_precision_recall(class_calibration_data, conf_to_logit(threshold_min_classifier_score))
+          perf_tmin = calc_precision_recall(class_calibration_data %>% filter(!is.na(score)), conf_to_logit(threshold_min_classifier_score))
           precision_tmin = perf_tmin$precision
           recall_tmin    = perf_tmin$recall
           # message("  Performance at minimum threshold ", threshold_min_classifier_score, ":\n  Precision ", round(precision_tmin,3), "\n  Recall ", round(recall_tmin,3))
@@ -434,7 +432,7 @@ calibrate = function(preds, anno, labels) {
       model_warning = FALSE
       tryCatch(
         {
-          regression = glm(label_truth ~ score, class_calibration_data, family = binomial(link = "logit"))
+          regression = glm(label_truth ~ score, class_calibration_data %>% filter(!is.na(score)), family = binomial(link = "logit"))
           intercept   = as.numeric(coef(regression)[1])
           coefficient = as.numeric(coef(regression)[2])
           threshold_logit = (log(tp_min_prob / (1 - tp_min_prob)) - intercept) / coefficient # logit scale
@@ -443,13 +441,13 @@ calibrate = function(preds, anno, labels) {
           # message("  ", round(threshold, 3), " threshold to achieve Pr(TP)>=", tp_min_prob)
           
           # Calculate estimated precision and recall at this threshold
-          perf_t = calc_precision_recall(class_calibration_data, threshold_logit)
+          perf_t = calc_precision_recall(class_calibration_data %>% filter(!is.na(score)), threshold_logit)
           precision_threshold  = perf_t$precision
           recall_threshold     = perf_t$recall
           # message("  Performance at threshold ", round(threshold,3), ":\n  Precision ", round(precision_threshold,3), "\n  Recall ", round(recall_threshold,3))
           
           ## Visualize the logistic regression and data
-          x_range = seq(min(class_calibration_data$score), max(class_calibration_data$score), length.out = 100)
+          x_range = seq(min(class_calibration_data$score, na.rm = TRUE), max(class_calibration_data$score, na.rm = TRUE), length.out = 100)
           
           # Predict fitted values and calculate confidence intervals on probability scale
           pred = predict(regression, newdata = data.frame(score = x_range), type = "link", se.fit = TRUE)
@@ -486,8 +484,6 @@ calibrate = function(preds, anno, labels) {
           message(crayon::yellow("WARNING:", conditionMessage(e)))
         }
       )
-      
-      # TODO: Enforce minimum threshold for classes with no negatives in validation data
       
       stats = bind_rows(stats, tibble(
         class_label          = class_label,                                  # Class
@@ -535,6 +531,118 @@ print(stats, n = Inf)
 # saveRDS(calibration_data, path_calibration_data_cache)
 # message(crayon::green("Cached", path_calibration_data_cache))
 
+# Determine optimal thresholds per class -----------------------------------------------------------------------------
+
+message("Determining optimal thresholds for each class")
+
+# Drop additional abiotic and biotic classes
+class_thresholds = stats
+class_thresholds = class_thresholds %>% filter(!str_starts(class_label, "abiotic"))
+class_thresholds = class_thresholds %>% filter(!str_starts(class_label, "biotic"))
+
+calibration_results = tibble()
+for (l in unique(class_thresholds$class_label)) {
+  l_data = class_thresholds %>% filter(class_label == l)
+  
+  # Determine the model with the highest PR AUC
+  l_data = l_data %>% slice_max(order_by = auc_pr, n = 1, with_ties = FALSE)
+  
+  # The "method" column describes one of four methods to determine the threshold. Most classes use "probabilistic",
+  # which leverages logistic regression (Platt scaling) to determine the threshold at which Pr(TP)>=0.99. However,
+  # some classes cannot fit such a regression because they:
+  #   1) report perfect performance from our calibration data (the random sample contained no true negatives).
+  #      These classes default to A) an optimized threshold that maximizes recall while maintaining perfect precision
+  #      ("precision"); or B) a naive threshold at the decision boundary 0.5 ("naive"), whichever threshold is higher.
+  #   2) report exceptionally poor performance (the random sample contained very few true positives). These classes must
+  #      be manually reviewed by a human to determine true presence/absence (model = "manual").
+  #   3) are very rare (there are not enough samples available to meaningfully evaluate performance). These classes also
+  #      must be manually reviewed by a human to determine true presence/absence (model = "manual").
+  
+  t = Inf
+  m = "manual"
+  p <- r <- NA
+  model_warning = FALSE
+  tryCatch(
+    {
+      if (l_data$warning) {
+        # For classes that did not converge, use max of t_maxp or t_min
+        if (l_data$t_maxp > l_data$t_min) {
+          t = l_data$t_maxp
+          p = l_data$precision_tmaxp
+          r = l_data$recall_tmaxp
+          m = "precision"
+        } else {
+          t = l_data$t_min
+          p = l_data$precision_tmin
+          r = l_data$recall_tmin
+          m = "naive"
+        }
+      } else {
+        # Use the probabilistic threshold
+        t = l_data$t_tp
+        p = l_data$precision_ttp
+        r = l_data$recall_ttp
+        m = "probabilistic"
+      }
+    },
+    warning = function(w) {
+      message(crayon::yellow("WARNING:", l, conditionMessage(w)))
+    },
+    error = function(e) {
+      message(crayon::yellow("WARNING:", l, conditionMessage(e)))
+    }
+  )
+  calibration_results = bind_rows(calibration_results, l_data %>%
+                                     select(class_label, model, n_tp, n_tn, auc_pr, auc_roc) %>% mutate(threshold = t, precision = p, recall = r, method = m))
+}
+calibration_results = calibration_results %>% mutate(across(where(is.numeric), ~ round(., 3)))
+calibration_results = left_join(calibration_results, class_labels %>% rename(class_label = label), by = "class_label")
+
+# The following classes are rare or insufficiently performant, and must only be
+# detected through manual review (i.e. set their thresholds to Inf, and method to "manual")
+manual_classes = c(
+  "brown-headed cowbird",
+  "cliff swallow",
+  "downy woodpecker",
+  "eurasian collared-dove",
+  "great horned owl",
+  "merlin",
+  "northern goshawk",
+  "northern rough-winged swallow",
+  "ruffed grouse",
+  "townsend's solitaire",
+  "western bluebird",
+  "yellow warbler"
+)
+calibration_results = calibration_results %>%
+  mutate(
+    threshold = if_else(common_name %in% manual_classes, Inf, threshold),
+    precision = if_else(common_name %in% manual_classes, NA, precision),
+    recall    = if_else(common_name %in% manual_classes, NA, recall),
+    method    = if_else(common_name %in% manual_classes, "manual", method)
+  )
+
+# TODO: The following classes require exhaustive manual validation
+# cassin's vireo
+# great horned owl
+# marbled murrelet
+# western bluebird
+
+# Format calibration results
+calibration_results_out = calibration_results
+absent_classes = calibration_results_out %>% filter(n_tp == 0)
+absent_classes$model = "source"
+absent_classes$threshold = Inf
+absent_classes$method = "manual"
+calibration_results_out = bind_rows(calibration_results_out %>% filter(n_tp > 0), absent_classes)
+calibration_results_out = calibration_results_out %>% select(scientific_name, common_name, everything()) %>% select(-class_label)
+
+message("Calibration results:")
+print(calibration_results_out, n = Inf)
+
+write_csv(calibration_results_out, path_calibration_results_cache, na = "-")
+message(crayon::green("Cached", path_calibration_results_cache))
+
 # Data inspection -----------------------------------------------------------------------------
 
 if (FALSE) {
@@ -546,7 +654,6 @@ if (FALSE) {
   calibration_data[["plots"]][[l]][["threshold"]]
   
   # Find specific annotations
-  stop("[[Find specific annotations]]")
   class_annotations = annotations %>% select(file, all_of(l)) %>% rename(label_truth = !!sym(l))
   class_annotations = class_annotations %>% filter(label_truth != "unknown") %>% mutate(label_truth = as.integer(label_truth))
   table(class_annotations$label_truth)
@@ -555,63 +662,3 @@ if (FALSE) {
   View(class_calibration_data %>% arrange(desc(confidence_source)))
   
 }
-
-# Determine optimal thresholds per class -----------------------------------------------------------------------------
-
-message("Determining optimal thresholds for each class")
-
-# Drop classes with less than a minimum number of verified detections
-sparse_classes = stats %>% filter(n_tp < 20) %>% pull(class_label) %>% unique()
-class_thresholds = stats %>% filter(!class_label %in% sparse_classes)
-
-# Drop additional abiotic and biotic classes
-class_thresholds = class_thresholds %>% filter(!str_starts(class_label, "abiotic"))
-class_thresholds = class_thresholds %>% filter(!str_starts(class_label, "biotic"))
-
-calibration_results = tibble()
-for (l in unique(class_thresholds$class_label)) {
-  l_data = class_thresholds %>% filter(class_label == l)
-  
-  # Determine the model with the highest PR AUC
-  l_data = l_data %>% slice_max(order_by = auc_pr, n = 1, with_ties = FALSE)
-  
-  t = Inf
-  if (l_data$warning) {
-    # For classes that did not converge, use max of t_maxp or t_min
-    if (l_data$t_maxp > l_data$t_min) {
-      t = l_data$t_maxp
-      p = l_data$precision_tmaxp
-      r = l_data$recall_tmaxp
-      m = "precision"
-    } else {
-      t = l_data$t_min
-      p = l_data$precision_tmin
-      r = l_data$recall_tmin
-      m = "naive"
-    }
-  } else {
-    # Use the probabilistic threshold
-    t = l_data$t_tp
-    p = l_data$precision_ttp
-    r = l_data$recall_ttp
-    m = "probabilistic"
-  }
-  calibration_results = bind_rows(calibration_results, l_data %>%
-                                     select(class_label, model, n_tp, n_tn, auc_pr, auc_roc) %>% mutate(threshold = t, precision = p, recall = r, method = m))
-}
-
-message("Calibration results:")
-print(calibration_results, n = Inf)
-
-write_csv(calibration_results, path_calibration_results_cache)
-message(crayon::green("Cached", path_calibration_results_cache))
-
-# TODO: The following classes may need to be manually validated (i.e. set their thresholds to Inf):
-# TODO: NOTE THAT SOME JUST NEED MORE VALIDATIONS
-# bonasa umbellus_ruffed grouse
-# leiothlypis celata_orange-crowned warbler
-# molothrus ater_brown-headed cowbird
-# perisoreus canadensis_canada jay
-# streptopelia decaocto_eurasian collared-dove
-
-
