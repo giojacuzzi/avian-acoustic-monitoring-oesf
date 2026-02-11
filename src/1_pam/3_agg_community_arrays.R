@@ -7,7 +7,7 @@ min_prediction_count = 1 # Minimum number of predictions in a survey (i.e. secon
 # OUTPUT:
 # A multidimensional data structure with dimensions [site × survey × season × species], with each
 # element containing a named list of observational data (including survey date and confidence scores)
-path_out_community_array_predictions = "data/cache/1_pam/3_derive_observation_data/community_array_predictions.rds"
+path_out_community_array_predictions = "data/cache/1_pam/3_derive_observation_data/community_array_predictions.rds" # TODO: rename cache directory and re-run script
 path_out_community_array_surveydates = "data/cache/1_pam/3_derive_observation_data/community_array_surveydates.rds"
 #
 # INPUT:
