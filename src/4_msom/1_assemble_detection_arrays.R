@@ -1,4 +1,4 @@
-# 4_assemble_detection_arrays.R ####################################################################################
+# 1_assemble_detection_arrays.R ####################################################################################
 # Derive MSOM-ready data arrays:
 # - Survey date (yday) array (site x survey x season)
 # - Putative detection array (site x survey x species x season) from both manually validated and thresholded prediction data.
