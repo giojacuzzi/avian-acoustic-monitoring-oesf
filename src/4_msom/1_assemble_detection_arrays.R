@@ -1,12 +1,15 @@
-# 4_derive_detection_array.R ####################################################################################
-# Derive an MSOM-ready putative detection array (site, survey, species, season) from both manually validated and
-# thresholded prediction data.
+# 4_assemble_detection_arrays.R ####################################################################################
+# Derive MSOM-ready data arrays:
+# - Survey date (yday) array (site x survey x season)
+# - Putative detection array (site x survey x species x season) from both manually validated and thresholded prediction data.
 #
 # CONFIG:
 min_sites_detected = 1 # Minimum number of sites present to retain a species for analysis
 #
 # OUTPUT:
-
+out_cache_dir  = "data/cache/4_msom/1_assemble_detection_arrays"
+path_out_y     = paste0(out_cache_dir, "/y.rds")
+path_out_xyday = paste0(out_cache_dir, "/xyday.rds")
 #
 # INPUT:
 path_community_array_predictions = "data/cache/1_pam/3_derive_observation_data/community_array_predictions.rds" # TODO: rename cache directory and re-run script 3
@@ -16,6 +19,8 @@ path_annotations                 = "data/cache/1_pam/1_classifier_calibration/an
 ##################################################################################################################
 
 source("src/global.R")
+
+if (!dir.exists(out_cache_dir)) dir.create(out_cache_dir, recursive = TRUE)
 
 # Load dependencies ----------------------------------------------------------------------------------------------
 
@@ -89,7 +94,7 @@ for (t in seasons) {
       threshold = sp_threshdata %>% pull(threshold)
       
       confidence_model = switch(model, source = "confidence_source", target = "confidence_target", stop("Incompatible model type ", model))
-
+      
       mat_obs = matrix(
         unlist(lapply(species_data, function(x) {
           if (!is.null(x)) {
@@ -203,7 +208,7 @@ if (length(sites_not_surveyed) > 0) {
 
 # Convert to an MSOM-ready numeric array --------------------------------------------------------------------
 
-message("Formatting observation data for MSOM modeling")
+message("Formatting observation data for MSOM")
 
 species = names(ylist)
 seasons = names(ylist[[1]])
@@ -250,7 +255,8 @@ for (t in names(x_yday)) {
 
 # Cache results -------------------------------------------------------------------------------------
 
-# TODO: Save y to file
+saveRDS(y, path_out_y)
+message(crayon::green("Cached y to", path_out_y))
 
-# TODO: Save x_yday to file
-
+saveRDS(x_yday, path_out_xyday)
+message(crayon::green("Cached xyday to", path_out_xyday))
