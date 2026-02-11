@@ -3,7 +3,7 @@
 # 
 ## CONFIG:
 calibration_class = "all" # class to calibrate (e.g. "all" or "catharus ustulatus_swainson's thrush")
-overwrite_annotation_cache = FALSE   # Aggregate annotations from the raw data
+overwrite_annotation_cache = TRUE   # Aggregate annotations from the raw data
 overwrite_prediction_cache = FALSE   # Aggregate predictions from the raw data
 threshold_min_classifier_score = 0.5 # Naive classifier minimum confidence score threshold to assume binary presence/absence. "For most false-positive models in our study, using a mid-range threshold of 0.50 or above generally yielded stable estimates." (Katsis et al. 2025)
 threshold_min_detected_days = 2      # Minimum number of unique days detected to retain species detections at a site
@@ -318,6 +318,7 @@ stopifnot(colnames(jo_annotations) == colnames(wadnr_annotations))
 predictions = bind_rows(jo_predictions, wadnr_predictions)
 annotations = bind_rows(jo_annotations, wadnr_annotations)
 
+# TODO: No matching site confirmations for files like "0.988_6_SMA00518_20230725_150002_945.00s_948.00s"
 if (overwrite_annotation_cache) {
   annotations_clean = annotations %>%
     rename_with(
@@ -343,7 +344,7 @@ if (overwrite_annotation_cache) {
     annotations_clean %>% filter(is.na(site)) %>% select(file, serialno, season, yday, site) %>% print(n = Inf)
   }
   
-  write.csv(annotations_clean, path_annotations_clean_cache)
+  write_csv(annotations_clean, path_annotations_clean_cache)
   message(crayon::green("Cached", path_annotations_clean_cache))
 }
 
@@ -646,6 +647,9 @@ manual_classes = c(
   "western bluebird",
   "yellow warbler"
 )
+# The following classes are completely absent
+absent_classes = calibration_results %>% filter(n_tp == 0) %>% pull(common_name)
+manual_classes = unique(c(manual_classes, absent_classes))
 calibration_results = calibration_results %>%
   mutate(
     threshold = if_else(common_name %in% manual_classes, Inf, threshold),
@@ -662,11 +666,11 @@ calibration_results = calibration_results %>%
 
 # Format calibration results for output and tables
 calibration_results_clean = calibration_results
-absent_classes = calibration_results_clean %>% filter(n_tp == 0)
-absent_classes$model = "source"
-absent_classes$threshold = Inf
-absent_classes$method = "manual"
-calibration_results_clean = bind_rows(calibration_results_clean %>% filter(n_tp > 0), absent_classes)
+absent_class_rows = calibration_results_clean %>% filter(n_tp == 0)
+# absent_class_rows$model = "source"
+# absent_class_rows$threshold = Inf
+# absent_class_rows$method = "manual"
+calibration_results_clean = bind_rows(calibration_results_clean %>% filter(n_tp > 0), absent_class_rows)
 calibration_results_clean = calibration_results_clean %>% select(scientific_name, common_name, everything()) %>% select(-class_label)
 
 message("Calibration results:")
