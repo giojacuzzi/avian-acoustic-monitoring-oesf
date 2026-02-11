@@ -18,11 +18,6 @@ path_annotations                 = "data/cache/1_pam/1_classifier_calibration/an
 source("src/global.R")
 
 # Load dependencies ----------------------------------------------------------------------------------------------
-message("Loading community prediction array from ", path_community_array_predictions)
-community_array_predictions = readRDS(path_community_array_predictions)
-
-message("Loading community survey date array from ", path_community_array_surveydates)
-community_array_surveydates = readRDS(path_community_array_surveydates)
 
 message("Loading species-specific thresholds from ", path_calibration_results)
 calibration_results = read_csv(path_calibration_results, show_col_types = FALSE)
@@ -30,33 +25,45 @@ calibration_results = read_csv(path_calibration_results, show_col_types = FALSE)
 message("Loading site confirmation annotations from ", path_annotations)
 annotations = read_csv(path_annotations, show_col_types = FALSE)
 
-# Derive putative (uncertain) detection-nondetection arrays for each species with optimized thresholds -----------------------
+message("Loading community survey date array from ", path_community_array_surveydates)
+community_array_surveydates = readRDS(path_community_array_surveydates)
 
-message("Deriving putative observation arrays for each species with optimized thresholds (detection '1' nondetection '0')")
+message("Loading community prediction array from ", path_community_array_predictions)
+community_array_predictions = readRDS(path_community_array_predictions)
+
 sites   = dimnames(community_array_predictions)[["site"]]
 surveys = dimnames(community_array_predictions)[["survey"]]
 seasons = dimnames(community_array_predictions)[["season"]]
+message("Found ", length(sites), " sites, ", length(seasons), " seasons, and up to ", length(surveys), " surveys per site")
+
+# Derive survey date (yday) arrays ------------------------------------------------------------------------
+
+message("Deriving survey date (yday) arrays x_yday")
+x_yday = setNames(
+  lapply(seq_along(seasons), function(t) {
+    matrix(
+      unlist(lapply(community_array_surveydates[, , t, 1], function(x) {
+        if (!is.null(x)) yday(x$survey_date) else NA
+      })),
+      nrow = dim(community_array_surveydates)[1],
+      ncol = dim(community_array_surveydates)[2],
+      dimnames = dimnames(community_array_surveydates)[1:2]
+    )
+  }),
+  seasons
+)
+# Inspect examples
+x_yday[["2020"]]
+
+# Derive putative (uncertain) detection-nondetection arrays for each species with optimized thresholds -----------------------
+
+message("Deriving putative observation arrays for each species with optimized thresholds (detection '1' nondetection '0')")
 species = dimnames(community_array_predictions)[["common_name"]]
 species = species[!str_starts(species, "abiotic")] # Manually exclude non-avian classes
 species = species[!str_starts(species, "biotic")]
 ylist   = setNames(lapply(species, function(x) {
   setNames(vector("list", length(seasons)), seasons)
 }), species)
-
-# TODO: 
-# x_yday = setNames(
-#   lapply(seq_along(seasons), function(t) {
-#     matrix(
-#       unlist(lapply(community_survey_data[, , t, 1], function(x) {
-#         if (!is.null(x)) yday(x$survey_date) else NA
-#       })),
-#       nrow = dim(community_survey_data)[1],
-#       ncol = dim(community_survey_data)[2],
-#       dimnames = dimnames(community_survey_data)[1:2]
-#     )
-#   }),
-#   seasons
-# )
 
 class_discrepancies = sort(c(setdiff(species, calibration_results$common_name), setdiff(calibration_results$common_name, species)))
 if (length(class_discrepancies) > 0) {
@@ -68,7 +75,7 @@ species_thresholds = calibration_results %>% rename(species = common_name) %>% s
 
 # Populate putative detection-nondetection matrices via species-specific score thresholds
 for (t in seasons) {
-  message(t)
+  message("Season ", t)
   pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = length(species), clear = FALSE)
   for (i in species) {
     n_row        = dim(community_array_predictions)[1]
@@ -128,15 +135,7 @@ for (i in species) {
       next
     }
     
-    slice = community_array_surveydates[, , t, i, drop = FALSE]
-    yday_mat = matrix(
-      unlist(lapply(slice, function(x) if (!is.null(x)) x$yday else NA)),
-      nrow = dim(slice)[1],
-      ncol = dim(slice)[2],
-      dimnames = dimnames(slice)[1:2]
-    )
-    
-    j_ydays = yday_mat[j, ]
+    j_ydays = x_yday[[t]][j, ]
     k = which(!is.na(j_ydays) & j_ydays == yday)
     if (length(k) != 0) {
       ylist[[i]][[t]][j,k] <- 2 # Overwrite with confirmed detection
@@ -167,15 +166,16 @@ print(total_occurrences, n = Inf)
 message("Excluding species with insufficient detections (fewer than ", min_sites_detected, " sites):")
 species_to_remove = total_occurrences %>% filter(total_occurrences < min_sites_detected) %>% pull(species)
 print(species_to_remove)
+
 ylist[species_to_remove] = NULL
 species = names(ylist)
 
 # Observed naive species occurrence
 total_occurrences = total_occurrences %>% filter(species %in% names(ylist))
 message(length(species), " species detected")
-message("Most commonly occurring species:")
+message("Most commonly observed species:")
 print(total_occurrences %>% arrange(desc(total_occurrences)), n = 15)
-message("Least commonly occurring species:")
+message("Least commonly observed species:")
 print(total_occurrences %>% arrange(total_occurrences), n = 15)
 
 # Exclude any sites that were not surveyed -----------------------------------------------------------
@@ -221,38 +221,36 @@ for (t in seasons) {
 # access e.g. y[ , , "2020", "common raven"]
 
 # Left-align data (moving any missing NA surveys to the right) to allow for direct indexing by number of surveys per site
-y_unaligned = y
 left_align_row = function(x) {
   non_na = x[!is.na(x)]
   c(non_na, rep(NA, length(x) - length(non_na)))
 }
+
+# Align y data
+y_unaligned = y
 for (t in dimnames(y)[['season']]) {
   for (i in dimnames(y)[['species']]) {
-    # Extract site × survey matrix for this season × species
-    sp_season_mat <- y[, , t, i]
-    
-    # Left-align across surveys for each site
-    sp_season_aligned <- t(apply(sp_season_mat, 1, left_align_row))
-    
-    # Restore dimnames
-    dimnames(sp_season_aligned) <- dimnames(sp_season_mat)
-    
-    # Put back into aligned array
-    y[, , t, i] <- sp_season_aligned
+    sp_season_mat               = y[, , t, i] # Extract site × survey matrix for this season × species
+    sp_season_aligned           = t(apply(sp_season_mat, 1, left_align_row)) # Left-align across surveys for each site
+    dimnames(sp_season_aligned) = dimnames(sp_season_mat) # Restore dimnames
+    y[, , t, i]                 = sp_season_aligned # Put back into aligned array
   }
 }
 
-# x_yday_unaligned = x_yday
-# for (t in names(x_yday)) {
-#   season_mat <- x_yday[[t]]
-#   
-#   # Left-align across surveys for each site
-#   season_mat_aligned <- t(apply(season_mat, 1, left_align_row))
-#   
-#   # Restore dimnames
-#   dimnames(season_mat_aligned) <- dimnames(season_mat)
-#   
-#   # Put back into aligned list
-#   x_yday[[t]] <- season_mat_aligned
-# }
-# access e.g. y[ , , "2020", "common raven"]
+# Align yday data
+x_yday_unaligned = x_yday
+for (t in names(x_yday)) {
+  season_mat                   = x_yday[[t]]
+  season_mat_aligned           = t(apply(season_mat, 1, left_align_row))  # Left-align across surveys for each site
+  dimnames(season_mat_aligned) = dimnames(season_mat) # Restore dimnames
+  x_yday[[t]]                  = season_mat_aligned # Put back into aligned list
+}
+
+# access e.g. x_yday[["2020"]]
+
+# Cache results -------------------------------------------------------------------------------------
+
+# TODO: Save y to file
+
+# TODO: Save x_yday to file
+
