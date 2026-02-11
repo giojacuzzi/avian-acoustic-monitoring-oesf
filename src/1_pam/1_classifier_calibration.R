@@ -11,10 +11,13 @@ tp_min_prob = 0.95                   # Desired minimum probability of a true pos
 #
 ## OUTPUT: calibration_results.csv
 out_cache_dir = "data/cache/1_pam/1_classifier_calibration"
-path_calibration_results_cache = paste0(out_cache_dir, "/calibration_results.csv") # optimized calibration results
+path_annotations_clean_cache         = paste0(out_cache_dir, "/annotations_clean.csv")
+path_calibration_results_raw_cache   = paste0(out_cache_dir, "/calibration_results_raw.csv")   # raw optimized calibration results for subsequent modeling
+path_calibration_results_clean_cache = paste0(out_cache_dir, "/calibration_results_clean.csv") # clean optimized calibration results for inspection and print
 # path_calibration_data_cache    = paste0(out_cache_dir, "/calibration_data.rds")    # raw calibration data and plots
 #
 ## INPUT:
+path_site_key = "data/sites/site_key_long.csv"
 # Directories containing raw .csv predictions for calibration, e.g.
 # confidence_source	confidence_target	label
 # 0.566		          0.678	            Loxia curvirostra_Red Crossbill
@@ -311,6 +314,39 @@ total_counts$`unknown` = jo_counts$`unknown` + wadnr_counts$`unknown`
 total_counts = total_counts %>% full_join(class_labels %>% rename(class_label = label), by = "class_label")
 print(total_counts %>% select(common_name, `1`, `0`, `unknown`) %>% arrange(common_name), n = Inf)
 
+stopifnot(colnames(jo_annotations) == colnames(wadnr_annotations))
+predictions = bind_rows(jo_predictions, wadnr_predictions)
+annotations = bind_rows(jo_annotations, wadnr_annotations)
+
+if (overwrite_annotation_cache) {
+  annotations_clean = annotations %>%
+    rename_with(
+      ~ ifelse(.x == "file", .x, str_replace(.x, ".*?_", "")) 
+    ) %>%
+    mutate(
+      # Extract serial number with either SMA or S4A
+      serialno = str_extract(file, "S(MA|4A)\\d+"),
+      # Extract season year (YYYY) if present after the serial
+      season = str_extract(file, "S(MA|4A)\\d+_(\\d{4})") %>%  str_remove("^S(MA|4A)\\d+_"),
+      # Extract full date (YYYYMMDD) if present after the serial
+      yday = str_extract(file, "S(MA|4A)\\d+_(\\d{8})") %>% str_remove("^S(MA|4A)\\d+_") %>%  as.Date(format = "%Y%m%d") %>% yday()
+    )
+  site_key = read.csv(path_site_key) %>% mutate(site = tolower(site), site_agg = tolower(site_agg), date = as.Date(date, format = "%m/%d/%y"), season = as.character(year(date)))
+  site_key$yday = yday(site_key$date)
+  annotations_clean = annotations_clean %>%
+    left_join(
+      site_key %>% select(serialno, yday, site, site_agg, season),
+      by = c("serialno", "yday", "season")
+    )
+  if (anyNA(annotations_clean$site)) {
+    message(yellow("WARNING: Missing site ID match for the following annotation files:"))
+    annotations_clean %>% filter(is.na(site)) %>% select(file, serialno, season, yday, site) %>% print(n = Inf)
+  }
+  
+  write.csv(annotations_clean, path_annotations_clean_cache)
+  message(crayon::green("Cached", path_annotations_clean_cache))
+}
+
 # Platt scaling -----------------------------------------------------------------------
 
 # Calculate species-specific probabilistic score thresholds using Platt scaling (Platt 2000, Wood and Kahl 2024). Takes as input a parquet file containing the validation dataset following the format below:
@@ -517,10 +553,6 @@ calibrate = function(preds, anno, labels) {
 
 # Calibrate combined data -----------------------------------------------------------------------------
 
-stopifnot(colnames(jo_annotations) == colnames(wadnr_annotations))
-predictions = bind_rows(jo_predictions, wadnr_predictions)
-annotations = bind_rows(jo_annotations, wadnr_annotations)
-
 message("Calibrating each class:")
 calibration_data = calibrate(predictions, annotations, calibration_class)
 
@@ -628,20 +660,23 @@ calibration_results = calibration_results %>%
 # marbled murrelet
 # western bluebird
 
-# Format calibration results
-calibration_results_out = calibration_results
-absent_classes = calibration_results_out %>% filter(n_tp == 0)
+# Format calibration results for output and tables
+calibration_results_clean = calibration_results
+absent_classes = calibration_results_clean %>% filter(n_tp == 0)
 absent_classes$model = "source"
 absent_classes$threshold = Inf
 absent_classes$method = "manual"
-calibration_results_out = bind_rows(calibration_results_out %>% filter(n_tp > 0), absent_classes)
-calibration_results_out = calibration_results_out %>% select(scientific_name, common_name, everything()) %>% select(-class_label)
+calibration_results_clean = bind_rows(calibration_results_clean %>% filter(n_tp > 0), absent_classes)
+calibration_results_clean = calibration_results_clean %>% select(scientific_name, common_name, everything()) %>% select(-class_label)
 
 message("Calibration results:")
-print(calibration_results_out, n = Inf)
+print(calibration_results_clean, n = Inf)
 
-write_csv(calibration_results_out, path_calibration_results_cache, na = "-")
-message(crayon::green("Cached", path_calibration_results_cache))
+write_csv(calibration_results, path_calibration_results_raw_cache, na = "-")
+message(crayon::green("Cached", path_calibration_results_raw_cache))
+
+write_csv(calibration_results_clean, path_calibration_results_clean_cache, na = "-")
+message(crayon::green("Cached", path_calibration_results_clean_cache))
 
 # Data inspection -----------------------------------------------------------------------------
 
