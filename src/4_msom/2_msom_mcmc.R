@@ -72,7 +72,7 @@ sites   = dimnames(y)$site
 
 # Store alpha parameter ID, variable name, and standardize data to have mean 0, standard deviation 1
 param_alpha_data = tibble(param = paste0("alpha", 1:length(param_alpha_names)), name  = param_alpha_names)
-param_alpha_data = param_alpha_data %>% rowwise() %>% mutate(scaled = list(scale(occurrence_predictor_plot_data[[name]]))) %>% ungroup()
+param_alpha_data = param_alpha_data %>% rowwise() %>% mutate(data = list(scale(occurrence_predictor_plot_data[[name]]))) %>% ungroup()
 n_alpha_params = nrow(param_alpha_data)
 
 # Prepare occurrence homerange scale covariate data ----------------------------------------------------------------------
@@ -126,10 +126,10 @@ n_delta_params = nrow(param_delta_data)
 # Store beta parameter ID, variable name, and standardize data to have mean 0, standard deviation 1
 param_beta_data = tibble(param = paste0("beta", seq_along(detection_predictor_data)), name = param_beta_names)
 param_beta_data = param_beta_data %>% rowwise() %>%
-  mutate(scaled = list(scale(unlist(detection_predictor_data[[name]], use.names = FALSE)))) %>% ungroup()
+  mutate(data = list(scale(unlist(detection_predictor_data[[name]], use.names = FALSE)))) %>% ungroup()
 n_beta_params = nrow(param_beta_data)
 
-param_season_data = tibble(param = "season", name = "season", scaled = list(scale(1:length(seasons))))
+param_season_data = tibble(param = "season", name = "season", data = list(scale(1:length(seasons))))
 
 # Assign species group membership ------------------------------------------------------------------------------
 
@@ -293,8 +293,8 @@ if (FALSE) {
 
 # Inspect the mean and 95% BCI of hyperparameter estimates
 whiskerplot(msom, c(paste0('mu.', param_alpha_data$param)))
-whiskerplot(msom, c(paste0('mu.', param_delta_data$param)))
-whiskerplot(msom, c(paste0('mu.', param_beta_data$param)))
+whiskerplot(msom, c(paste0('mu.', param_delta_data$param), 'mu.alphaseason'))
+whiskerplot(msom, c(paste0('mu.', param_beta_data$param), 'mu.betaseason'))
 
 # Write results to cache
 msom_results = list(
@@ -302,6 +302,8 @@ msom_results = list(
   msom_summary      = msom_summary,
   p_val             = p_val,
   param_alpha_data  = param_alpha_data,
+  param_delta_data  = param_delta_data,
+  param_season_data = param_season_data, # TODO: Add unique season param for both occ and detect
   param_beta_data   = param_beta_data,
   sites             = sites,
   species           = species,
