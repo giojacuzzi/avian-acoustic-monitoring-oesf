@@ -215,7 +215,7 @@ seasons = names(ylist[[1]])
 sites   = dimnames(ylist[[1]][[1]])$site
 surveys = dimnames(ylist[[1]][[1]])$survey
 
-# Format ylist as 3D arrays (site × survey × species)
+# Format ylist as 4D array (site × survey × season x species)
 y = array(NA, dim = c(length(sites), length(surveys), length(seasons), length(species)),
           dimnames = list(site = sites, survey = surveys, season = seasons, species = species))
 for (t in seasons) {
@@ -225,14 +225,19 @@ for (t in seasons) {
 }
 # access e.g. y[ , , "2020", "common raven"]
 
+# Format x_yday as 3D array (site x survey x season)
+x_yday = simplify2array(x_yday)
+names(dimnames(x_yday)) = c("site", "survey", "season")
+
 # Left-align data (moving any missing NA surveys to the right) to allow for direct indexing by number of surveys per site
 left_align_row = function(x) {
   non_na = x[!is.na(x)]
   c(non_na, rep(NA, length(x) - length(non_na)))
 }
 
-# Align y data
+# Align y and yday data
 y_unaligned = y
+x_yday_unaligned = x_yday
 for (t in dimnames(y)[['season']]) {
   for (i in dimnames(y)[['species']]) {
     sp_season_mat               = y[, , t, i] # Extract site × survey matrix for this season × species
@@ -240,18 +245,12 @@ for (t in dimnames(y)[['season']]) {
     dimnames(sp_season_aligned) = dimnames(sp_season_mat) # Restore dimnames
     y[, , t, i]                 = sp_season_aligned # Put back into aligned array
   }
+  x_season_mat               = x_yday[, , t] # Extract site × survey matrix for this season
+  x_season_aligned           = t(apply(x_season_mat, 1, left_align_row)) # Left-align across surveys for each site
+  dimnames(x_season_aligned) = dimnames(x_season_mat) # Restore dimnames
+  x_yday[, , t]              = x_season_aligned # Put back into aligned array
+  
 }
-
-# Align yday data
-x_yday_unaligned = x_yday
-for (t in names(x_yday)) {
-  season_mat                   = x_yday[[t]]
-  season_mat_aligned           = t(apply(season_mat, 1, left_align_row))  # Left-align across surveys for each site
-  dimnames(season_mat_aligned) = dimnames(season_mat) # Restore dimnames
-  x_yday[[t]]                  = season_mat_aligned # Put back into aligned list
-}
-
-# access e.g. x_yday[["2020"]]
 
 # Cache results -------------------------------------------------------------------------------------
 
