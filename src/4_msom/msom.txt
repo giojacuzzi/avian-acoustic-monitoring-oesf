@@ -11,72 +11,77 @@ model{
 
   ## Community (group) level hyperpriors
   for (g in 1:G) {
+
     # Occurrence
-    psi.mean[g] ~ dunif(0,1)                         # probability scale
-    mu.u[g] <- log(psi.mean[g]) - log(1-psi.mean[g]) # logit scale
-    sigma.u[g] ~ dunif(0,5)                          # standard deviation
-    tau.u[g] <- pow(sigma.u[g],-2)                   # precision
+    mu.u[g]    ~ dnorm(0, 1/2.25^2)       # dnorm(0, 1/2.25^2) per Broms et al. 2016
+    sigma.u[g] ~ dt(0, 1/2.25^2, 1) T(0,) # dt(0, 1/2.25^2, 1) T(0,) Half-cauchy (truncated t distribution with 1 dof) per Broms et al. 2016
+    tau.u[g] <- sigma.u[g]^-2             # precision
     
     # Covariate effects on occurrence
-    mu.alpha1[g] ~ dnorm(0,0.01)
-    sigma.alpha1[g] ~ dunif(0,5)
-    tau.alpha1[g] <- pow(sigma.alpha1[g],-2)
-    mu.alpha2[g] ~ dnorm(0,0.01)
-    sigma.alpha2[g] ~ dunif(0,5)
-    tau.alpha2[g] <- pow(sigma.alpha2[g],-2)
-    mu.alpha3[g] ~ dnorm(0,0.01)
-    sigma.alpha3[g] ~ dunif(0,5)
-    tau.alpha3[g] <- pow(sigma.alpha3[g],-2)
-    mu.alpha4[g] ~ dnorm(0,0.01)
-    sigma.alpha4[g] ~ dunif(0,5)
-    tau.alpha4[g] <- pow(sigma.alpha4[g],-2)
-    mu.alpha5[g] ~ dnorm(0,0.01)
-    sigma.alpha5[g] ~ dunif(0,5)
-    tau.alpha5[g] <- pow(sigma.alpha5[g],-2)
-    mu.delta1[g] ~ dnorm(0,0.01)
-    sigma.delta1[g] ~ dunif(0,5)
-    tau.delta1[g] <- pow(sigma.delta1[g],-2)
-    mu.delta2[g] ~ dnorm(0,0.01)
-    sigma.delta2[g] ~ dunif(0,5)
-    tau.delta2[g] <- pow(sigma.delta2[g],-2)
-    mu.delta3[g] ~ dnorm(0,0.01)
-    sigma.delta3[g] ~ dunif(0,5)
-    tau.delta3[g] <- pow(sigma.delta3[g],-2)
-    mu.delta4[g] ~ dnorm(0,0.01)
-    sigma.delta4[g] ~ dunif(0,5)
-    tau.delta4[g] <- pow(sigma.delta4[g],-2)
-    mu.delta5[g] ~ dnorm(0,0.01)
-    sigma.delta5[g] ~ dunif(0,5)
-    tau.delta5[g] <- pow(sigma.delta5[g],-2)
-    mu.season[g] ~ dnorm(0,0.01)
-    sigma.season[g] ~ dunif(0,5)
-    tau.season[g] <- pow(sigma.season[g],-2)
+    mu.alpha1[g]    ~ dnorm(0, 1/2.25^2)
+    mu.alpha2[g]    ~ dnorm(0, 1/2.25^2)
+    mu.alpha3[g]    ~ dnorm(0, 1/2.25^2)
+    mu.alpha4[g]    ~ dnorm(0, 1/2.25^2)
+    mu.alpha5[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.alpha1[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha2[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha3[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha4[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha5[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.alpha1[g] <- sigma.alpha1[g]^-2
+    tau.alpha2[g] <- sigma.alpha2[g]^-2
+    tau.alpha3[g] <- sigma.alpha3[g]^-2
+    tau.alpha4[g] <- sigma.alpha4[g]^-2
+    tau.alpha5[g] <- sigma.alpha5[g]^-2
+    
+    mu.delta1[g]    ~ dnorm(0, 1/2.25^2)
+    mu.delta2[g]    ~ dnorm(0, 1/2.25^2)
+    mu.delta3[g]    ~ dnorm(0, 1/2.25^2)
+    mu.delta4[g]    ~ dnorm(0, 1/2.25^2)
+    mu.delta5[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.delta1[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.delta2[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.delta3[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.delta4[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.delta5[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.delta1[g] <- sigma.delta1[g]^-2
+    tau.delta2[g] <- sigma.delta2[g]^-2
+    tau.delta3[g] <- sigma.delta3[g]^-2
+    tau.delta4[g] <- sigma.delta4[g]^-2
+    tau.delta5[g] <- sigma.delta5[g]^-2
+    
+    mu.alphaseason[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.alphaseason[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.alphaseason[g] <- sigma.alphaseason[g]^-2
     
     # Detection (unconfirmed true-positive)
-    v.mean[g]  ~ dunif(0,1)
-    mu.v[g]  <- log(v.mean[g]) - log(1-v.mean[g])
-    sigma.v[g] ~ dunif(0,5)
-    tau.v[g] <- pow(sigma.v[g],-2)
+    mu.v[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.v[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.v[g] <- sigma.v[g]^-2
   
     # Covariate effects on detection (unconfirmed true-positive)
-    mu.beta1[g]    ~ dnorm(0,0.01)
-    sigma.beta1[g] ~ dunif(0,5)
-    tau.beta1[g]  <- pow(sigma.beta1[g],-2)
-    mu.beta2[g]    ~ dnorm(0,0.01)
-    sigma.beta2[g] ~ dunif(0,5)
-    tau.beta2[g]  <- pow(sigma.beta2[g],-2)
-    mu.beta3[g]    ~ dnorm(0,0.01)
-    sigma.beta3[g] ~ dunif(0,5)
-    tau.beta3[g]  <- pow(sigma.beta3[g],-2)
+    mu.beta1[g]    ~ dnorm(0, 1/2.25^2)
+    mu.beta2[g]    ~ dnorm(0, 1/2.25^2)
+    mu.beta3[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.beta1[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.beta2[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.beta3[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.beta1[g]  <- sigma.beta1[g]^-2
+    tau.beta2[g]  <- sigma.beta2[g]^-2
+    tau.beta3[g]  <- sigma.beta3[g]^-2
+    
+    mu.betaseason[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.betaseason[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.betaseason[g] <- sigma.betaseason[g]^-2
     
     # False-positive unconfirmed detection (Royle and Link 2006, Miller et al. 2011)
-    mu.w[g] ~ dnorm(0,0.01)
-    sigma.w[g] ~ dunif(0,5)
-    tau.w[g] <- pow(sigma.w[g],-2)
+    mu.w[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.w[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.w[g] <- sigma.w[g]^-2
     
     # Confirmed true positive detection (Miller et al. 2011)
-    mu.b[g] ~ dnorm(0,0.01)
-    sigma.b[g] ~ dunif(0,5)
+    mu.b[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.b[g] ~ dt(0, 1/2.25^2, 1) T(0,)
     tau.b[g] <- pow(sigma.b[g],-2)
 
   } # G groups
@@ -96,13 +101,14 @@ model{
       delta3[i] ~ dnorm(mu.delta3[group[i]],tau.delta3[group[i]])
       delta4[i] ~ dnorm(mu.delta4[group[i]],tau.delta4[group[i]])
       delta5[i] ~ dnorm(mu.delta5[group[i]],tau.delta5[group[i]])
-      season[i] ~ dnorm(mu.season[group[i]],tau.season[group[i]])
+      alphaseason[i] ~ dnorm(mu.alphaseason[group[i]],tau.alphaseason[group[i]])
   
       # Unconfirmed true positive detection
       v[i]     ~ dnorm(mu.v[group[i]], tau.v[group[i]])
       beta1[i] ~ dnorm(mu.beta1[group[i]],tau.beta1[group[i]])
       beta2[i] ~ dnorm(mu.beta2[group[i]],tau.beta2[group[i]])
       beta3[i] ~ dnorm(mu.beta3[group[i]],tau.beta3[group[i]])
+      betaseason[i] ~ dnorm(mu.betaseason[group[i]],tau.betaseason[group[i]])
       
       # Unconfirmed false positive detection
       w[i] ~ dnorm(mu.w[group[i]],tau.w[group[i]])
@@ -128,7 +134,7 @@ model{
                                    delta3[i]*x_delta3[j,i] +
                                    delta4[i]*x_delta4[j,i] +
                                    delta5[i]*x_delta5[j,i] +
-                                   season[i]*x_season[t]
+                                   alphaseason[i]*x_season[t]
 
               z[j,t,i] ~ dbern(psi[j,t,i])
               
@@ -141,7 +147,8 @@ model{
                   logit(p11[j,k,t,i]) <- v[i] +
                                          beta1[i]*x_beta1[j,k,t] +
                                          beta2[i]*x_beta2[j,k,t] +
-                                         beta3[i]*x_beta3[j,k,t]
+                                         beta3[i]*x_beta3[j,k,t] +
+                                         betaseason[i]*x_season[t]
                   
                   # p10 is false-positive detection probability given z = 0
                   logit(p10[j,k,t,i]) <- w[i]
