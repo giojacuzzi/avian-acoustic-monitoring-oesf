@@ -257,5 +257,5 @@ message("Trait data aggregation complete:")
 print(trait_data, n = Inf)
 
 if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
-write.csv(trait_data, path_out)
+write_csv(trait_data, path_out)
 message(crayon::green("Cached trait data:", path_out))

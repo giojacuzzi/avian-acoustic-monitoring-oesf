@@ -3,6 +3,7 @@
 #
 ## CONFIG:
 grouping = "all" # Species grouping ("all", "diet"...)
+model_type = "fp" # nofp, fp
 param_alpha_names = c(
   "elev",
   # "homerange_htmax_cv",
@@ -32,7 +33,6 @@ OVERRIDE_SPECIES_SCALE_WITH_MEDIAN = TRUE # DEBUG
 dir_out = "data/cache/models"
 #
 ## INPUT:
-model_file                               = "src/4_msom/msom.txt"
 path_y                                   = "data/cache/4_msom/1_assemble_msom_data/y.rds"
 path_occurrence_predictor_plot_data      = "data/cache/4_msom/1_assemble_msom_data/occurrence_predictor_plot_data.rds"
 path_occurrence_predictor_homerange_data = "data/cache/4_msom/1_assemble_msom_data/occurrence_predictor_homerange_data.rds"
@@ -42,8 +42,16 @@ path_trait_data                          = "data/cache/trait_data/trait_data.csv
 
 source("src/global.R")
 
+if (model_type == "nofp") {
+  model_file = "src/4_msom/msom.txt"
+} else if (model_type == "fp") {
+  model_file = "src/4_msom/msom_fp.txt"
+} else {
+  stop("ERROR: Unsupported model type")
+}
+
 model_name = tools::file_path_sans_ext(basename(model_file))
-path_out = paste0(dir_out, "/", model_name, "_", grouping, "_", format(Sys.time(), "%Y-%m-%d_%H:%M:%S"), ".rds")
+path_out = paste0(dir_out, "/", model_name, "_", model_type, "_", grouping, "_", format(Sys.time(), "%Y-%m-%d_%H:%M:%S"), ".rds")
 if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
 
 # Load dependencies ----------------------------------------------------------------------------
@@ -129,7 +137,12 @@ param_beta_data = param_beta_data %>% rowwise() %>%
   mutate(data = list(scale(unlist(detection_predictor_data[[name]], use.names = FALSE)))) %>% ungroup()
 n_beta_params = nrow(param_beta_data)
 
-param_season_data = tibble(param = "season", name = "season", data = list(scale(1:length(seasons))))
+season_data_list = list((scale(1:length(seasons))))
+param_season_data = tibble(
+  param = c("alphaseason", "betaseason"),
+  name = "season",
+  data = c(season_data_list, season_data_list)
+)
 
 # Assign species group membership ------------------------------------------------------------------------------
 
@@ -164,7 +177,11 @@ I = length(species)
 G = length(unique(groups$group_idx))
 
 # "JAGS dcat() requires integer categories 1..L. Miller's paper uses y = 0 (no detect), 1 (uncertain), 2 (certain). You must recode your y input to JAGS so the values are 1=no detect, 2=uncertain, 3=certain. I will assume that mapping in the code below. If you prefer to keep 0/1/2 in R, transform before sending data to JAGS: y_jags <- y + 1."
-y = y + 1
+if (model_type == "fp") {
+  y = y + 1
+} else {
+  y[y == 2] <- 1
+}
 
 msom_data = list(
   J = J,                    # number of sites sampled
@@ -178,20 +195,21 @@ msom_data = list(
 )
 # Add alpha parameters
 for (a in seq_len(n_alpha_params)) {
-  msom_data[[paste0("x_", param_alpha_data$param[a])]] <- as.vector(param_alpha_data$scaled[[a]])
+  msom_data[[paste0("x_", param_alpha_data$param[a])]] <- as.vector(param_alpha_data$data[[a]])
 }
 # Add delta parameters
 for (d in seq_len(n_delta_params)) {
   param_data_new = do.call(cbind, param_delta_data %>% filter(name == param_delta_data$name[d]) %>% pull(data) %>% .[[1]])
   msom_data[[paste0("x_", param_delta_data$param[d])]] = param_data_new
 }
-# Add season parameter
-msom_data[["x_season"]] = as.vector(param_season_data$scaled[[1]])
+# TODO: Add season parameter
+# msom_data[["x_alphaseason"]] = as.vector(param_season_data$data[[1]])
+# msom_data[["x_betaseason"]] = as.vector(param_season_data$data[[1]])
 
 # Add beta parameters
 for (b in seq_len(n_beta_params)) {
   arr = detection_predictor_data[[param_beta_data$name[1]]]
-  vec = as.vector(param_beta_data$scaled[[b]]) # flatten to 1D
+  vec = as.vector(param_beta_data$data[[b]]) # flatten to 1D
   
   stopifnot(length(vec) == prod(dim(arr)))  # safety check
   
@@ -214,7 +232,24 @@ for (j in seq_along(sites)) {
   }
 }
 
+params_to_monitor = c(
+  "mu.u", "sigma.u", "u",
+  "mu.v", "sigma.v", "v",
+  paste0("mu.alpha", 1:n_alpha_params), paste0("sigma.alpha", 1:n_alpha_params), paste0("alpha", 1:n_alpha_params),
+  paste0("mu.delta", 1:n_delta_params), paste0("sigma.delta", 1:n_delta_params), paste0("delta", 1:n_delta_params),
+  paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params),
+  "D_obs", "D_sim", "z"
+)
+
+if (model_type == "fp") {
+  params_to_monitor = c(params_to_monitor,
+                        "mu.w", "sigma.w", "w",
+                        "mu.b", "sigma.b", "b")
+}
+
 # Run JAGS ----------------------------------------------------------------------------------------------------
+
+message("Model file:", model_file)
 
 message("\n", "System CPU: "); print(as.data.frame(t(benchmarkme::get_cpu())))
 message("System RAM: "); print(benchmarkme::get_ram())
@@ -223,22 +258,17 @@ message("Running JAGS (current time ", time_start <- Sys.time(), ")")
 
 msom = jags(data = msom_data,
             inits = function() { list( # initial values to avoid data/model conflicts
-              z = z
+              z = z,
+              # DEBUG
+              v = rep(logit(0.70), length(species)), # informative priors necessary to avoid invalid PPC log(0) values
+              w = rep(logit(0.05), length(species))
+              # DEBUG
             ) },
-            parameters.to.save = c( # monitored parameters
-              "mu.u", "sigma.u", "u",
-              "mu.v", "sigma.v", "v",
-              "mu.w", "sigma.w", "w",
-              "mu.b", "sigma.b", "b",
-              paste0("mu.alpha", 1:n_alpha_params), paste0("sigma.alpha", 1:n_alpha_params), paste0("alpha", 1:n_alpha_params),
-              paste0("mu.delta", 1:n_delta_params), paste0("sigma.delta", 1:n_delta_params), paste0("delta", 1:n_delta_params),
-              paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params),
-              "mu.alphaseason", "sigma.alphaseason", "alphaseason",
-              "mu.betaseason", "sigma.betaseason", "betaseason",
-              "D_obs", "D_sim", "z"
-            ),
+            parameters.to.save = params_to_monitor,
             model.file = model_file,
-            n.chains = 3, n.adapt = 200, n.iter = 2000, n.burnin = 200, n.thin = 1, parallel = FALSE, # ETA: 11 hr
+            # Test run, ETA: 11 hr (fp), 3 hr (nofp)
+            n.chains = 3, n.adapt = 200, n.iter = 2000, n.burnin = 200, n.thin = 1, parallel = FALSE,
+            # Forma run, ETA TODO
             # n.chains = 3, n.adapt = 5000, n.iter = 30000, n.burnin = 10000, n.thin = 3, parallel = TRUE, # ETA: TODO
             DIC = FALSE, verbose=TRUE)
 
@@ -293,8 +323,8 @@ if (FALSE) {
 
 # Inspect the mean and 95% BCI of hyperparameter estimates
 whiskerplot(msom, c(paste0('mu.', param_alpha_data$param)))
-whiskerplot(msom, c(paste0('mu.', param_delta_data$param), 'mu.alphaseason'))
-whiskerplot(msom, c(paste0('mu.', param_beta_data$param), 'mu.betaseason'))
+whiskerplot(msom, c(paste0('mu.', param_delta_data$param)))
+whiskerplot(msom, c(paste0('mu.', param_beta_data$param)))
 
 # Write results to cache
 msom_results = list(
@@ -306,6 +336,7 @@ msom_results = list(
   param_season_data = param_season_data, # TODO: Add unique season param for both occ and detect
   param_beta_data   = param_beta_data,
   sites             = sites,
+  seasons           = seasons,
   species           = species,
   groups            = groups
 )

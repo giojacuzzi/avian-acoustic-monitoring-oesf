@@ -639,6 +639,7 @@ manual_classes = c(
   "downy woodpecker",
   "eurasian collared-dove",
   "great horned owl",
+  "marbled murrelet",
   "merlin",
   "northern goshawk",
   "northern rough-winged swallow",

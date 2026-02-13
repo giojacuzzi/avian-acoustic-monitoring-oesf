@@ -213,6 +213,16 @@ if (length(sites_not_surveyed) > 0) {
   x_yday = lapply(x_yday, function(mat) { mat[!(rownames(mat) %in% sites_not_surveyed), , drop = FALSE] })
 }
 
+# Manually exclude outlier site (extremely low richness in both 2020 and 2021?)
+sites_to_exclude = c("dz183i")
+if (length(sites_to_exclude) > 0) {
+  message("Excluding ", length(sites_to_exclude), " outlier site(s)")
+  ylist = lapply(ylist, function(species_mat_list) {
+    lapply(species_mat_list, function(mat) { mat[!(rownames(mat) %in% sites_to_exclude), , drop = FALSE] })
+  })
+  x_yday = lapply(x_yday, function(mat) { mat[!(rownames(mat) %in% sites_to_exclude), , drop = FALSE] })
+}
+
 # Convert to an MSOM-ready numeric array --------------------------------------------------------------------
 
 message("Formatting observation data for MSOM")

@@ -1,4 +1,4 @@
-# 3_derive_observation_data.R ####################################################################################
+# 3_agg_community_arrays.R ####################################################################################
 # Derive a multidimensional observation array (site, survey, species, season) from aggregated prediction data
 #
 # CONFIG:
@@ -7,8 +7,8 @@ min_prediction_count = 1 # Minimum number of predictions in a survey (i.e. secon
 # OUTPUT:
 # A multidimensional data structure with dimensions [site × survey × season × species], with each
 # element containing a named list of observational data (including survey date and confidence scores)
-path_out_community_array_predictions = "data/cache/1_pam/3_derive_observation_data/community_array_predictions.rds" # TODO: rename cache directory and re-run script
-path_out_community_array_surveydates = "data/cache/1_pam/3_derive_observation_data/community_array_surveydates.rds"
+path_out_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/community_array_predictions.rds"
+path_out_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/community_array_surveydates.rds"
 #
 # INPUT:
 # Cached dataframe of all predictions
@@ -16,8 +16,6 @@ path_prediction_data    = "data/cache/1_pam/2_agg_raw_predictions/prediction_dat
 # Cached dataframe of prediction file counts (i.e. recordings) per site-survey
 path_survey_file_counts = "data/cache/1_pam/2_agg_raw_predictions/survey_file_counts.feather"
 ##################################################################################################################
-
-# TODO: REVISE THE CODE BELOW
 
 source("src/global.R")
 
@@ -220,10 +218,10 @@ matrix( # Max confidence (target)
   dimnames = dimnames(slice_predictions)[1:2]
 )
 matrix( # e.g. thresholded
-  unlist(lapply(slice_after, function(x) if (!is.null(x)) as.integer(any(x$confidence_source > 0.9, na.rm = TRUE)) else NA)),
-  nrow = dim(slice_after)[1],
-  ncol = dim(slice_after)[2],
-  dimnames = dimnames(slice_after)[1:2]
+  unlist(lapply(slice_predictions, function(x) if (!is.null(x)) as.integer(any(x$confidence_source > 0.9, na.rm = TRUE)) else NA)),
+  nrow = dim(slice_predictions)[1],
+  ncol = dim(slice_predictions)[2],
+  dimnames = dimnames(slice_predictions)[1:2]
 )
 
 # Examine the data structure
