@@ -2,7 +2,7 @@
 # Inspect MSOM results across model variants
 #
 # CONFIG:
-path_msom = "data/cache/models/msom_fp_fp_all_2026-02-12_20:32:27.rds"
+path_msom = "data/cache/models/msom_fp_fp_diet_2026-02-13_18:14:56.rds"
 # "data/cache/models/msom_groups_multiseason_fp_Miller_habitat_association_2025-11-30_13:01:50.rds"
 # "data/cache/models/msom_all_2026-02-11_19:12:08.rds"
 #
@@ -37,15 +37,9 @@ y = readRDS(path_y)
 
 # Inspect group membership ---------------------------------------------------------------------
 
-ggplot(groups %>% left_join(species_traits, by = "common_name") %>%
-         mutate(g = as.factor(group_diet)) %>% count(group, g) %>% group_by(group) %>%
-         mutate(prop = n / sum(n)) %>% ungroup(),
-       aes(x = group, y = prop, fill = g)) + geom_col(position = "fill")
-
-ggplot(groups %>% left_join(species_traits, by = "common_name") %>%
-         mutate(g = as.factor(group_forage_behavior)) %>% count(group, g) %>% group_by(group) %>%
-         mutate(prop = n / sum(n)) %>% ungroup(),
-       aes(x = group, y = prop, fill = g)) + geom_col(position = "fill")
+ggplot(groups %>% left_join(species_traits, by = "common_name"), aes(x = 1, fill = group_nest)) + geom_bar(position = "fill")
+ggplot(groups %>% left_join(species_traits, by = "common_name"), aes(x = 1, fill = group_nest)) + geom_bar(position = "fill")
+ggplot(groups %>% left_join(species_traits, by = "common_name"), aes(x = 1, fill = group_status)) + geom_bar(position = "fill")
 
 # Visualize results ---------------------------------------------------------------------
 
@@ -76,16 +70,16 @@ community_baselines <- model_data$msom_summary %>%
 community_baselines = community_baselines %>% left_join(groups %>% distinct(group_idx, group), by = "group_idx")
 
 message("Baseline occurrence probability:")
-print(subset(community_baselines, param == "mu.u"))
+print(subset(community_baselines, grepl("^mu.u", param)))
 
 message("Baseline unconfirmed detection probability:")
-print(subset(community_baselines, param == "mu.v"))
+print(subset(community_baselines, grepl("^mu.v", param)))
 
 message("Baseline unconfirmed false positive detection probability:")
-print(subset(community_baselines, param == "mu.w"))
+print(subset(community_baselines, grepl("^mu.w", param)))
 
 message("Baseline confirmed true positive probability:")
-print(subset(community_baselines, param == "mu.b"))
+print(subset(community_baselines, grepl("^mu.b", param)))
 
 ggplot(community_baselines %>% filter(startsWith(param, "mu")), aes(x = prob, y = param, color = group)) +
   geom_point(position = position_dodge(width = 0.5), size = 3) +
@@ -169,12 +163,11 @@ combined_occ_effects <- map_dfr(c(path_msom), function(m) {
 combined_occ_effects %>% filter(str_starts(param, "mu"))
 
 ggplot(combined_occ_effects %>% filter(str_starts(param, "mu")),
-       aes(x = mean, y = name, group = fct_rev(group), color = as.factor(overlap0) == 0)) +
+       aes(x = mean, y = name, group = fct_rev(group), color = factor(group))) +
   geom_vline(xintercept = 0, color = "gray") +
   geom_point(position = position_dodge(width = 0.5)) +
   geom_errorbar(aes(xmin = `25%`,  xmax = `75%`), width = 0, linewidth = 1, position = position_dodge(width = 0.5)) +
-  geom_errorbar(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0, position = position_dodge(width = 0.5)) +
-  theme(legend.position = "none")
+  geom_errorbar(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0, position = position_dodge(width = 0.5))
 
 param_occ_data = bind_rows(
   model_data$param_alpha_data,
@@ -282,7 +275,7 @@ p_mu = attr(param_scaled_data[[1]], "scaled:center") # to transform between z-sc
 p_sd = attr(param_scaled_data[[1]], "scaled:scale")
 bound_low  = min(param_scaled_data[[1]]) * p_sd + p_mu
 bound_high = max(param_scaled_data[[1]]) * p_sd + p_mu
-pred_range_original = seq(bound_low, bound_high, by = 1) # range of possible alpha values
+pred_range_original = seq(bound_low, bound_high, length.out = 100) # range of possible alpha values
 pred_range_standardized = (pred_range_original - p_mu) / p_sd
 
 mu_u_samples      = as.matrix(model_data$msom$sims.list[["mu.u"]])
@@ -337,21 +330,13 @@ ggplot() +
   geom_ribbon(data = meta_summary, aes(x = idx, ymin = psi_lower, ymax = psi_upper, fill = group, group = group), alpha = 0.2, inherit.aes = FALSE) +
   geom_line(data = meta_summary, aes(x = idx, y = psi_mean, color = group, group = group), linewidth = 1.2, inherit.aes = FALSE) +
   # scale_x_continuous(limits = c(bound_low, bound_high)) +
-  scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
-  labs(x = param_data$name, y = "Occurrence probability")
-
-
-ggplot() +
-  geom_line(data = predictions %>% left_join(species_traits, by = "common_name"), aes(x = idx, y = psi, group = common_name, color = group_forage_behavior), alpha = 0.5) +
-  geom_ribbon(data = meta_summary, aes(x = idx, ymin = psi_lower, ymax = psi_upper, fill = group, group = group), alpha = 0.2, inherit.aes = FALSE) +
-  geom_line(data = meta_summary, aes(x = idx, y = psi_mean, color = group, group = group), linewidth = 1.2, inherit.aes = FALSE) +
-  # scale_x_continuous(limits = c(bound_low, bound_high)) +
+  facet_wrap(~ group) +
   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
   labs(x = param_data$name, y = "Occurrence probability")
 
 
 # Multiple dimension "delta" covariate
-effect_name = "prop_abund_lsog"
+effect_name = "prop_abund_standinit"
 
 message("Marginal responses for ", effect_name)
 s = "american robin"
@@ -367,7 +352,7 @@ p_mu = attr(param_scaled_data[[1]][[s]], "scaled:center") # to transform between
 p_sd = attr(param_scaled_data[[1]][[s]], "scaled:scale")
 bound_low  = min(param_scaled_data[[1]][[s]]) * p_sd + p_mu
 bound_high = max(param_scaled_data[[1]][[s]]) * p_sd + p_mu
-pred_range_original = seq(bound_low, bound_high, by = 1) # range of possible alpha values
+pred_range_original = seq(bound_low, bound_high, length.out = 100) # range of possible alpha values
 pred_range_standardized = (pred_range_original - p_mu) / p_sd
 
 mu_u_samples      = as.matrix(model_data$msom$sims.list[["mu.u"]])
@@ -422,5 +407,14 @@ ggplot() +
   geom_ribbon(data = meta_summary, aes(x = idx, ymin = psi_lower, ymax = psi_upper, fill = group, group = group), alpha = 0.2, inherit.aes = FALSE) +
   geom_line(data = meta_summary, aes(x = idx, y = psi_mean, color = group, group = group), linewidth = 1.2, inherit.aes = FALSE) +
   # scale_x_continuous(limits = c(bound_low, bound_high)) +
+  scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
+  labs(x = param_data$name, y = "Occurrence probability")
+
+ggplot() +
+  geom_line(data = predictions, aes(x = idx, y = psi, group = common_name, color = group), alpha = 0.2) +
+  geom_ribbon(data = meta_summary, aes(x = idx, ymin = psi_lower, ymax = psi_upper, fill = group, group = group), alpha = 0.2, inherit.aes = FALSE) +
+  geom_line(data = meta_summary, aes(x = idx, y = psi_mean, color = group, group = group), linewidth = 1.2, inherit.aes = FALSE) +
+  # scale_x_continuous(limits = c(bound_low, bound_high)) +
+  facet_wrap(~ group) +
   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
   labs(x = param_data$name, y = "Occurrence probability")

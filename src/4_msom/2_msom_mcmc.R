@@ -2,7 +2,7 @@
 # Fit a multispecies occupancy model using MCMC
 #
 ## CONFIG:
-grouping = "all" # Species grouping ("all", "diet"...)
+grouping = "nest" # Species grouping ("all", "diet", "nest" ...)
 model_type = "fp" # nofp, fp
 param_alpha_names = c(
   "elev",
@@ -137,12 +137,12 @@ param_beta_data = param_beta_data %>% rowwise() %>%
   mutate(data = list(scale(unlist(detection_predictor_data[[name]], use.names = FALSE)))) %>% ungroup()
 n_beta_params = nrow(param_beta_data)
 
-season_data_list = list((scale(1:length(seasons))))
-param_season_data = tibble(
-  param = c("alphaseason", "betaseason"),
-  name = "season",
-  data = c(season_data_list, season_data_list)
-)
+# season_data_list = list((scale(1:length(seasons))))
+# param_season_data = tibble(
+#   param = c("alphaseason", "betaseason"),
+#   name = "season",
+#   data = c(season_data_list, season_data_list)
+# )
 
 # Assign species group membership ------------------------------------------------------------------------------
 
@@ -172,7 +172,7 @@ for (t in dimnames(y)[["season"]]) {
 J = length(sites)
 K = as.matrix(as.data.frame(lapply(n_surveys_per_site, as.vector)))
 Kmax = max(K)
-T = length(seasons)
+Tseason = length(seasons)
 I = length(species)
 G = length(unique(groups$group_idx))
 
@@ -187,7 +187,7 @@ msom_data = list(
   J = J,                    # number of sites sampled
   K = K,                    # number of secondary sampling periods (surveys) per site per season (site x season)
   Kmax = Kmax,              # maximum number of surveys across all sites and seasons
-  T = T,                    # number of primary sampling periods (seasons)
+  Tseason = Tseason,        # number of primary sampling periods (seasons)
   I = I,                    # number of species observed
   G = G,                    # number of species groups
   group = groups$group_idx, # species group membership
@@ -260,6 +260,7 @@ msom = jags(data = msom_data,
             inits = function() { list( # initial values to avoid data/model conflicts
               z = z,
               # DEBUG
+              # "This model has multimodal likelihood, resulting in identical support for different parameter values. We addressed this issue by constraining the parameters so that p11 > p10, an assumption that is supported by the validation  data at the chosen threshold17. We imposed this constraint by providing arbitrarily chosen starting values that  align with this condition (0.7 for p11 and 0.1 for p10)23." 
               v = rep(logit(0.70), length(species)), # informative priors necessary to avoid invalid PPC log(0) values
               w = rep(logit(0.05), length(species))
               # DEBUG
@@ -333,7 +334,7 @@ msom_results = list(
   p_val             = p_val,
   param_alpha_data  = param_alpha_data,
   param_delta_data  = param_delta_data,
-  param_season_data = param_season_data, # TODO: Add unique season param for both occ and detect
+  # param_season_data = param_season_data, # TODO: Add unique season param for both occ and detect
   param_beta_data   = param_beta_data,
   sites             = sites,
   seasons           = seasons,

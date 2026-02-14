@@ -1,53 +1,40 @@
-######################################################################################
-# JAGS code for a multi-species, multi-season false positive (Miller style) occupancy
-# model with one or more predefined community groupings.
-#
-# Following:
-# - https://besjournals.onlinelibrary.wiley.com/doi/10.1111/j.1365-2664.2009.01664.x
-# - https://esajournals.onlinelibrary.wiley.com/doi/10.1002/eap.2293
-# - https://www.sciencedirect.com/science/article/abs/pii/S0006320709004819
-
 model{
 
   ## Community (group) level hyperpriors
   for (g in 1:G) {
 
     # Occurrence
-    psi.mean[g] ~ dunif(0,1)                         # probability scale
-    mu.u[g] <- log(psi.mean[g]) - log(1-psi.mean[g]) # logit scale
-    sigma.u[g] ~ dunif(0,5)                          # standard deviation
-    tau.u[g] <- pow(sigma.u[g],-2)                   # precision
-    #mu.u[g]    ~ dnorm(0, 1/2.25^2)       # dnorm(0, 1/2.25^2) per Broms et al. 2016
-    #sigma.u[g] ~ dt(0, 1/2.25^2, 1) T(0,) # dt(0, 1/2.25^2, 1) T(0,) Half-cauchy (truncated t distribution with 1 dof) per Broms et al. 2016
-    #tau.u[g] <- sigma.u[g]^-2             # precision
+    mu.u[g]    ~ dnorm(0, 1/2.25^2)       # dnorm(0, 1/2.25^2) per Broms et al. 2016
+    sigma.u[g] ~ dt(0, 1/2.25^2, 1) T(0,) # dt(0, 1/2.25^2, 1) T(0,) Half-cauchy (truncated t distribution with 1 dof) per Broms et al. 2016
+    tau.u[g] <- sigma.u[g]^-2             # precision
     
     # Covariate effects on occurrence
-    mu.alpha1[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    mu.alpha2[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    mu.alpha3[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    mu.alpha4[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    mu.alpha5[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    sigma.alpha1[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
-    sigma.alpha2[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
-    sigma.alpha3[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
-    sigma.alpha4[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
-    sigma.alpha5[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
+    mu.alpha1[g]    ~ dnorm(0, 1/2.25^2)
+    mu.alpha2[g]    ~ dnorm(0, 1/2.25^2)
+    mu.alpha3[g]    ~ dnorm(0, 1/2.25^2)
+    mu.alpha4[g]    ~ dnorm(0, 1/2.25^2)
+    mu.alpha5[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.alpha1[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha2[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha3[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha4[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha5[g] ~ dt(0, 1/2.25^2, 1) T(0,)
     tau.alpha1[g] <- sigma.alpha1[g]^-2
     tau.alpha2[g] <- sigma.alpha2[g]^-2
     tau.alpha3[g] <- sigma.alpha3[g]^-2
     tau.alpha4[g] <- sigma.alpha4[g]^-2
     tau.alpha5[g] <- sigma.alpha5[g]^-2
     
-    mu.delta1[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    mu.delta2[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    mu.delta3[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    mu.delta4[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    mu.delta5[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    sigma.delta1[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
-    sigma.delta2[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
-    sigma.delta3[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
-    sigma.delta4[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
-    sigma.delta5[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
+    mu.delta1[g]    ~ dnorm(0, 1/2.25^2)
+    mu.delta2[g]    ~ dnorm(0, 1/2.25^2)
+    mu.delta3[g]    ~ dnorm(0, 1/2.25^2)
+    mu.delta4[g]    ~ dnorm(0, 1/2.25^2)
+    mu.delta5[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.delta1[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.delta2[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.delta3[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.delta4[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.delta5[g] ~ dt(0, 1/2.25^2, 1) T(0,)
     tau.delta1[g] <- sigma.delta1[g]^-2
     tau.delta2[g] <- sigma.delta2[g]^-2
     tau.delta3[g] <- sigma.delta3[g]^-2
@@ -55,21 +42,17 @@ model{
     tau.delta5[g] <- sigma.delta5[g]^-2
     
     # Detection (unconfirmed true-positive)
-    #mu.v[g]    ~ dnorm(0, 1/2.25^2)
-    #sigma.v[g] ~ dt(0, 1/2.25^2, 1) T(0,)
-    #tau.v[g] <- sigma.v[g]^-2
-    v.mean[g]  ~ dunif(0,1)
-    mu.v[g]  <- log(v.mean[g]) - log(1-v.mean[g])
-    sigma.v[g] ~ dunif(0,5)
-    tau.v[g] <- pow(sigma.v[g],-2)
+    mu.v[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.v[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.v[g] <- sigma.v[g]^-2
   
     # Covariate effects on detection (unconfirmed true-positive)
-    mu.beta1[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    mu.beta2[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    mu.beta3[g]    ~ dnorm(0,0.01) #dnorm(0, 1/2.25^2)
-    sigma.beta1[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
-    sigma.beta2[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
-    sigma.beta3[g] ~ dunif(0,5) #dt(0, 1/2.25^2, 1) T(0,)
+    mu.beta1[g]    ~ dnorm(0, 1/2.25^2)
+    mu.beta2[g]    ~ dnorm(0, 1/2.25^2)
+    mu.beta3[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.beta1[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.beta2[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.beta3[g] ~ dt(0, 1/2.25^2, 1) T(0,)
     tau.beta1[g]  <- sigma.beta1[g]^-2
     tau.beta2[g]  <- sigma.beta2[g]^-2
     tau.beta3[g]  <- sigma.beta3[g]^-2
@@ -112,12 +95,12 @@ model{
       w[i] ~ dnorm(mu.w[group[i]],tau.w[group[i]])
       
       # Confirmed true positive detection
-      gamma[i] ~ dnorm(mu.b[group[i]], tau.b[group[i]])
-      b[i] <- 1 / (1 + exp(-gamma[i]))
+      b_logit[i] ~ dnorm(mu.b[group[i]], tau.b[group[i]])
+      b[i] <- ilogit(b_logit[i])
   }
   
   for (i in 1:I) { # for each species i
-      for (t in 1:T) { # for each season t
+      for (t in 1:Tseason) { # for each season t
           for (j in 1:J) { # for each site j
           
               # Ecological process model for latent occurrence z
@@ -184,12 +167,12 @@ model{
               }
               
           } # J sites
-      } # T seasons
+      } # Tseason seasons
   } # I species
   
   ## Derived quantities
   
   # Deviance of simulated and observed data for posterior predictive check
-  D_obs <- -2 * sum(d_obs[1:J,1:Kmax,1:T,1:I])
-  D_sim <- -2 * sum(d_sim[1:J,1:Kmax,1:T,1:I])
+  D_obs <- -2 * sum(d_obs[1:J,1:Kmax,1:Tseason,1:I])
+  D_sim <- -2 * sum(d_sim[1:J,1:Kmax,1:Tseason,1:I])
 }

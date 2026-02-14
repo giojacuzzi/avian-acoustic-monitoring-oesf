@@ -51,7 +51,7 @@ eltontraits = read_csv(path_eltontraits, show_col_types = FALSE) %>% clean_names
 
 message("Loading guilds from ", path_guilds)
 guilds = read_csv(path_guilds, show_col_types = FALSE) %>% clean_names() %>%
-  mutate(common_name = tolower(common_name)) %>% select(common_name, foraging_guild_cornell)
+  mutate(common_name = tolower(common_name)) %>% select(common_name, foraging_guild_cornell, nesting_guild_cornell, conservation_cornell)
 
 message("Loading metadata from ", path_metadata)
 metadata = read.csv(path_metadata, nrows = 107) %>% clean_names() %>%
@@ -70,9 +70,9 @@ trait_data = trait_data %>% mutate(
   group_all = "all"
 )
 
-# TODO: Nesting guild
+# Nesting guild
 trait_data = trait_data %>% mutate(
-  group_nest = "TODO"
+  group_nest = str_to_lower(nesting_guild_cornell)
 )
 
 # TODO: Dietary guild
@@ -108,7 +108,7 @@ trait_data = trait_data %>% mutate(
 
 # TODO: Conservation status
 trait_data = trait_data %>% mutate(
-  group_status = "TODO"
+  group_status = str_to_lower(conservation_cornell)
 )
 
 # Predict home range size from traits ------------------------------------------------------------------
