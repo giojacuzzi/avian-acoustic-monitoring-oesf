@@ -2,7 +2,7 @@
 # Inspect MSOM results across model variants
 #
 # CONFIG:
-path_msom = "data/cache/models/msom_nofp_all_2026-02-12_19:37:00.rds"
+path_msom = "data/cache/models/msom_fp_fp_all_2026-02-12_20:32:27.rds"
 # "data/cache/models/msom_groups_multiseason_fp_Miller_habitat_association_2025-11-30_13:01:50.rds"
 # "data/cache/models/msom_all_2026-02-11_19:12:08.rds"
 #
@@ -66,16 +66,11 @@ species_per_site_season <- apply(occurrence_per_season, c("site", "season"), sum
 
 ## Retrieve baseline responses
 
-community_baselines = model_data$msom_summary %>%
-  filter(Reduce(`|`, lapply(
-    c("mu.u", "sigma.u", "mu.v", "sigma.v",
-      "mu.w", "sigma.w", "mu.b", "sigma.b"),
-    \(p) str_starts(param, p)
-  ))) %>%
-  mutate(
-    group_idx = str_extract(param, "(?<=\\[)\\d+(?=\\])") %>% as.integer(),
-    param = str_remove(param, "\\[\\d+\\]")
-  ) %>%
+community_baselines <- model_data$msom_summary %>%
+  mutate(param_base = str_remove(param, "\\[\\d+\\]")) %>%   # strip index first
+  filter(param_base %in% c("mu.u", "sigma.u", "mu.v", "sigma.v",
+                           "mu.w", "sigma.w", "mu.b", "sigma.b")) %>%
+  mutate(group_idx = str_extract(param, "(?<=\\[)\\d+(?=\\])") %>% as.integer()) %>%
   select(param, group_idx, prob, prob_lower95, prob_upper95)
 
 community_baselines = community_baselines %>% left_join(groups %>% distinct(group_idx, group), by = "group_idx")
@@ -198,8 +193,17 @@ species_effects = species_effects %>% left_join(species_traits, by ="common_name
 # Inspect a specific parameter
 p = ggplot(species_effects %>% filter(name == "prop_abund_lsog"),
            aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
-  geom_vline(xintercept = 0, color = "gray80") +
-  geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
+  geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
+  geom_point(); print(p)
+
+p = ggplot(species_effects %>% filter(name == "prop_abund_standinit"),
+           aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
+  geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
+  geom_point(); print(p)
+
+p = ggplot(species_effects %>% filter(name == "prop_abund_comthin"),
+           aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
+  geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
   geom_point(); print(p)
 
 ggplot(species_effects, aes(x = coef_mean, y = name, group = group, color = group)) +
@@ -262,6 +266,7 @@ p_yday = ggplot(detect_species_effects %>% filter(name == "yday"), aes(x = coef_
 
 # Marginal responses --------------------------------------------------------------------
 
+# Single dimension "alpha" covariate
 effect_name = "homerange_qmd_mean"
 
 message("Marginal responses for ", effect_name)
@@ -337,7 +342,83 @@ ggplot() +
 
 
 ggplot() +
-  geom_line(data = predictions %>% left_join(species_traits, by = "common_name"), aes(x = idx, y = psi, group = common_name, color = group_diet), alpha = 0.5) +
+  geom_line(data = predictions %>% left_join(species_traits, by = "common_name"), aes(x = idx, y = psi, group = common_name, color = group_forage_behavior), alpha = 0.5) +
+  geom_ribbon(data = meta_summary, aes(x = idx, ymin = psi_lower, ymax = psi_upper, fill = group, group = group), alpha = 0.2, inherit.aes = FALSE) +
+  geom_line(data = meta_summary, aes(x = idx, y = psi_mean, color = group, group = group), linewidth = 1.2, inherit.aes = FALSE) +
+  # scale_x_continuous(limits = c(bound_low, bound_high)) +
+  scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
+  labs(x = param_data$name, y = "Occurrence probability")
+
+
+# Multiple dimension "delta" covariate
+effect_name = "prop_abund_lsog"
+
+message("Marginal responses for ", effect_name)
+s = "american robin"
+
+param_data = param_occ_data %>% filter(name == effect_name)
+param_name = param_data %>% pull(param)
+
+# Mean marginal probabilities of occurrence for the metacommunity in relation to alpha
+coefs = model_data$msom_summary %>% filter(stringr::str_starts(param, param_name)) %>% arrange(mean) %>% mutate(plot_order = 1:nrow(.)) %>%
+  mutate(species_idx = as.integer(gsub(".*\\[(\\d+)\\]", "\\1", param))) %>% mutate(common_name = species[species_idx])
+param_scaled_data = param_data %>% pull(data)
+p_mu = attr(param_scaled_data[[1]][[s]], "scaled:center") # to transform between z-scale and pred_range_original scale
+p_sd = attr(param_scaled_data[[1]][[s]], "scaled:scale")
+bound_low  = min(param_scaled_data[[1]][[s]]) * p_sd + p_mu
+bound_high = max(param_scaled_data[[1]][[s]]) * p_sd + p_mu
+pred_range_original = seq(bound_low, bound_high, by = 1) # range of possible alpha values
+pred_range_standardized = (pred_range_original - p_mu) / p_sd
+
+mu_u_samples      = as.matrix(model_data$msom$sims.list[["mu.u"]])
+mu_param_samples  = as.matrix(model_data$msom$sims.list[[paste0("mu.", param_name)]])
+n_groups = ncol(mu_u_samples)
+
+meta_summary <- map_dfr(seq_len(n_groups), function(g) {
+  
+  eta <- outer(
+    mu_param_samples[, g],
+    pred_range_standardized
+  ) + mu_u_samples[, g]
+  
+  psi <- plogis(eta)
+  
+  tibble(
+    group_idx = g,
+    idx = pred_range_original,
+    psi_mean  = colMeans(psi),
+    psi_lower = matrixStats::colQuantiles(psi, probs = 0.025),
+    psi_upper = matrixStats::colQuantiles(psi, probs = 0.975)
+  )
+})
+
+# Predict species-specific occurrence probabilities
+# species-specific occurrence intercepts u[i]
+intercepts = model_data$msom_summary %>% filter(str_starts(param, "u")) %>%
+  mutate(species_idx = as.integer(str_extract(param, "\\d+")), common_name = species[species_idx]) %>%
+  select(common_name, u_i = mean)
+# species-specific coefficients
+intercepts_and_coeffs = coefs %>% rename(alpha6_i = mean) %>% select(common_name, alpha6_i) %>%
+  left_join(intercepts, by = "common_name")
+predictions = intercepts_and_coeffs %>%
+  rowwise() %>% do({
+    i <- .
+    tibble(
+      common_name = i$common_name,
+      idx = pred_range_original,
+      psi = plogis(i$u_i + i$alpha6_i * pred_range_standardized)
+    )
+  }) %>% bind_rows()
+predictions = predictions %>% left_join(groups %>% select(common_name, group), by = "common_name")
+
+meta_summary = meta_summary %>%
+  left_join(
+    groups %>% select(group_idx, group) %>% distinct(),
+    by = "group_idx"
+  )
+
+ggplot() +
+  geom_line(data = predictions, aes(x = idx, y = psi, group = common_name, color = group), alpha = 0.2) +
   geom_ribbon(data = meta_summary, aes(x = idx, ymin = psi_lower, ymax = psi_upper, fill = group, group = group), alpha = 0.2, inherit.aes = FALSE) +
   geom_line(data = meta_summary, aes(x = idx, y = psi_mean, color = group, group = group), linewidth = 1.2, inherit.aes = FALSE) +
   # scale_x_continuous(limits = c(bound_low, bound_high)) +
