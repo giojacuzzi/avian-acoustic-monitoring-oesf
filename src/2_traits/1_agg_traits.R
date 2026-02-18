@@ -71,8 +71,14 @@ trait_data = trait_data %>% mutate(
 )
 
 # Nesting guild
-trait_data = trait_data %>% mutate(
-  group_nest = str_to_lower(nesting_guild_cornell)
+trait_data = trait_data %>% mutate(nesting_guild_cornell = str_to_lower(nesting_guild_cornell)) %>% mutate(
+  group_nest = case_when(
+    (nesting_guild_cornell %in% c("tree"))   ~ "tree",
+    (nesting_guild_cornell %in% c("cavity")) ~ "cavity",
+    (nesting_guild_cornell %in% c("ground")) ~ "ground",
+    (nesting_guild_cornell %in% c("shrub"))  ~ "shrub",
+    TRUE ~ "other" # building, burrow, cliff
+  )
 )
 
 # TODO: Dietary guild
@@ -93,6 +99,16 @@ trait_data = trait_data %>% mutate(
     (foraging_guild_cornell %in% c("aerial forager", "soaring", "flycatching", "hovering", "aerial dive")) ~ "aerial",
     (foraging_guild_cornell %in% c("foliage gleaner"))                                                     ~ "gleaner",
     TRUE                                                                                                   ~ "TODO"
+  )
+)
+
+# TODO: Migration
+trait_data = trait_data %>%
+  mutate(group_migrant = case_when(
+    migration == "1" ~ "resident",
+    migration == "2" ~ "partial migrant",
+    migration == "3" ~ "migrant",
+    TRUE ~ "other"
   )
 )
 

@@ -2,6 +2,7 @@
 # Inspect MSOM results across model variants
 #
 # CONFIG:
+path_msom = "data/cache/models/msom_fp_fp_nest_2026-02-14_07:23:20.rds"
 path_msom = "data/cache/models/msom_fp_fp_diet_2026-02-13_18:14:56.rds"
 # "data/cache/models/msom_groups_multiseason_fp_Miller_habitat_association_2025-11-30_13:01:50.rds"
 # "data/cache/models/msom_all_2026-02-11_19:12:08.rds"
@@ -187,29 +188,29 @@ species_effects = species_effects %>% left_join(species_traits, by ="common_name
 p = ggplot(species_effects %>% filter(name == "prop_abund_lsog"),
            aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
   geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
-  geom_point(); print(p)
+  geom_point() + labs(title = "prop_abund_lsog"); print(p)
 
 p = ggplot(species_effects %>% filter(name == "prop_abund_standinit"),
            aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
   geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
-  geom_point(); print(p)
+  geom_point() + labs(title = "prop_abund_standinit"); print(p)
 
 p = ggplot(species_effects %>% filter(name == "prop_abund_comthin"),
            aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
   geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
-  geom_point(); print(p)
+  geom_point() + labs(title = "prop_abund_comthin"); print(p)
 
-ggplot(species_effects, aes(x = coef_mean, y = name, group = group, color = group)) +
-  geom_vline(xintercept = 0, color = "gray80") +
-  geom_vline(xintercept = 0.5, color = "gray90", linetype = "dashed") +
-  geom_vline(xintercept = -0.5, color = "gray90", linetype = "dashed") +
-  geom_beeswarm(aes(shape = coef_overlap0), dodge.width = 0.5, cex = 0.2, priority = "density", size = 0.5, alpha = 0.6) +
-  geom_errorbar(data = combined_occ_effects, aes(x = mean, y = as.factor(name), color = as.factor(group), xmin = `2.5%`, xmax = `97.5%`), linewidth = 0.5, width = 0, position = position_dodge(width = 0.5)) +
-  geom_errorbar(data = combined_occ_effects, aes(x = mean, y = as.factor(name), color = as.factor(group), xmin = `25%`, xmax = `75%`), linewidth = 1, width = 0, position = position_dodge(width = 0.5)) +
-  geom_point(data = combined_occ_effects, aes(x = mean, y = as.factor(name), color = as.factor(group), group = as.factor(group)), size = 3, position = position_dodge(width = 0.5)) +
-  scale_shape_manual(values = c(19, 1)) +
-  labs(x = "Occupancy coefficient mean") +
-  theme_sleek() + guides(shape = "none")
+# ggplot(species_effects, aes(x = coef_mean, y = name, group = group, color = group)) +
+#   geom_vline(xintercept = 0, color = "gray80") +
+#   geom_vline(xintercept = 0.5, color = "gray90", linetype = "dashed") +
+#   geom_vline(xintercept = -0.5, color = "gray90", linetype = "dashed") +
+#   geom_beeswarm(aes(shape = coef_overlap0), dodge.width = 0.5, cex = 0.2, priority = "density", size = 0.5, alpha = 0.6) +
+#   geom_errorbar(data = combined_occ_effects, aes(x = mean, y = as.factor(name), color = as.factor(group), xmin = `2.5%`, xmax = `97.5%`), linewidth = 0.5, width = 0, position = position_dodge(width = 0.5)) +
+#   geom_errorbar(data = combined_occ_effects, aes(x = mean, y = as.factor(name), color = as.factor(group), xmin = `25%`, xmax = `75%`), linewidth = 1, width = 0, position = position_dodge(width = 0.5)) +
+#   geom_point(data = combined_occ_effects, aes(x = mean, y = as.factor(name), color = as.factor(group), group = as.factor(group)), size = 3, position = position_dodge(width = 0.5)) +
+#   scale_shape_manual(values = c(19, 1)) +
+#   labs(x = "Occupancy coefficient mean") +
+#   theme_sleek() + guides(shape = "none")
 
 # Compare detection parameters --------------------------------------------------
 
@@ -254,8 +255,20 @@ p_detect = ggplot(detect_species_effects, aes(x = coef_bin, y = name, group = gr
     legend.position = "none"
   ); print(p_detect)
 
-p_yday = ggplot(detect_species_effects %>% filter(name == "yday"), aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
-  geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) + geom_point(); print(p_yday)
+p_temp = ggplot(detect_species_effects %>% filter(name == "tmax_deg_c"),
+                aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
+  geom_vline(xintercept = 0, color = "gray80") +
+  geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) + geom_point() + labs(title = "tmax_deg_c"); print(p_temp)
+
+p_precip = ggplot(detect_species_effects %>% filter(name == "prcp_mm_day"),
+                aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
+  geom_vline(xintercept = 0, color = "gray80") +
+  geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) + geom_point() + labs(title = "prcp_mm_day"); print(p_precip)
+
+p_yday = ggplot(detect_species_effects %>% filter(name == "yday"),
+                aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
+  geom_vline(xintercept = 0, color = "gray80") +
+  geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) + geom_point() + labs(title = "yday"); print(p_yday)
 
 # Marginal responses --------------------------------------------------------------------
 
@@ -418,3 +431,8 @@ ggplot() +
   facet_wrap(~ group) +
   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
   labs(x = param_data$name, y = "Occurrence probability")
+
+####################
+
+# TODO: Compare models with different community groupings
+# "If uncertainty with groupings is substantial (i.e. precision without any grouping is highest), this may be due to a smaller group sample sizes or species being “less sensitive to grouping because they are much more adept at utilizing different habitats… [and] are capable of enduring landscape changes and disturbances… or there are many factors influencing species habitat preferences… [and] species are responding to different covariates based on more than one classification scheme"

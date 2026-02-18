@@ -59,7 +59,7 @@ predictions_metadata_matched = predictions_metadata %>%
   )
 
 # Drop prediction files that were not matched to a unit
-# TODO: Add missing site ID and stage for SMA00403 2020 deployment 2 to "unit_key.csv"
+# TODO: Double-check site ID Ap157i and stage thinned for SMA00403 2020 deployment 2
 predictions_metadata_no_match = predictions_metadata_matched %>% filter(is.na(unit) | unit == "")
 predictions_metadata_no_match = predictions_metadata_no_match %>%
   distinct(season, deploy, serialno)
