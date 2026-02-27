@@ -104,57 +104,37 @@ diss_between_strata # Which pairs of strata have the highest/lowest turnover?
 # Turnover vs nestedness decomposition
 library(betapart)
 beta_res = beta.pair(z_binary, index.family = "jaccard")
-within_turnover <- tibble()
-
+within_turnover = tibble()
 for (s in levels(strata)) {
-  idx <- which(strata == s)
-  
-  if (length(idx) > 1) {  # only compute if 2+ sites
-    # Convert distance objects to full matrices first
-    t_matrix <- as.matrix(beta_res$beta.jtu)[idx, idx]
-    n_matrix <- as.matrix(beta_res$beta.jne)[idx, idx]
-    tot_matrix <- as.matrix(beta_res$beta.jac)[idx, idx]
-    
-    # Upper triangle
-    mean_turnover <- mean(t_matrix[upper.tri(t_matrix)])
-    mean_nested <- mean(n_matrix[upper.tri(n_matrix)])
-    mean_total <- mean(tot_matrix[upper.tri(tot_matrix)])
-    
-    within_turnover <- rbind(
-      within_turnover,
-      tibble(stratum = s,
-             turnover = mean_turnover,
-             nestedness = mean_nested,
-             mean_jaccard_dissimilarity = mean_total)
-    )
-  }
+  i = which(strata == s)
+  mat_turnover = as.matrix(beta_res$beta.jtu)[i, i]
+  mat_nested   = as.matrix(beta_res$beta.jne)[i, i]
+  mat_total    = as.matrix(beta_res$beta.jac)[i, i]
+  within_turnover = rbind(
+    within_turnover,
+    tibble(stratum    = s,
+           turnover   = mean(mat_turnover[upper.tri(mat_turnover)]),
+           nestedness = mean(mat_nested[upper.tri(mat_nested)]),
+           mean_diss  = mean(mat_total[upper.tri(mat_total)]))
+  )
 }
+within_turnover %>% arrange(desc(mean_diss))
 
-within_turnover %>% arrange(desc(mean_jaccard_dissimilarity))
-
-between_turnover <- tibble()
-
-pairwise_combinations <- combn(levels(strata), 2, simplify = FALSE)
-
-for (pair in pairwise_combinations) {
-  idx1 <- which(strata == pair[1])
-  idx2 <- which(strata == pair[2])
-  
-  t_matrix <- as.matrix(beta_res$beta.jtu)[idx1, idx2]
-  n_matrix <- as.matrix(beta_res$beta.jne)[idx1, idx2]
-  tot_matrix <- as.matrix(beta_res$beta.jac)[idx1, idx2]
-  
-  mean_turnover <- mean(t_matrix)
-  mean_nested <- mean(n_matrix)
-  mean_total <- mean(tot_matrix)
-  
-  between_turnover <- rbind(
+between_turnover = tibble()
+combs = combn(levels(strata), 2, simplify = FALSE)
+for (pair in combs) {
+  i = which(strata == pair[1])
+  j = which(strata == pair[2])
+  mat_turnover = as.matrix(beta_res$beta.jtu)[i, j]
+  mat_nested   = as.matrix(beta_res$beta.jne)[i, j]
+  mat_total    = as.matrix(beta_res$beta.jac)[i, j]
+  between_turnover = rbind(
     between_turnover,
-    tibble(Group1 = pair[1],
-           Group2 = pair[2],
-           turnover = mean_turnover,
-           nestedness = mean_nested,
-           mean_jaccard_dissimilarity = mean_total)
+    tibble(stratum_1  = pair[1],
+           stratum_2  = pair[2],
+           turnover   = mean(mat_turnover),
+           nestedness = mean(mat_nested),
+           mean_diss  = mean(mat_total))
   )
 }
 # Between closed-canopy stages alone, nestedness is low (richness is similar) and turnover is
@@ -165,7 +145,7 @@ for (pair in pairwise_combinations) {
 # The higher overall richness of stand init sites can be attributed to a combination of
 # nestedness (stand init includes several overlapping species) and turnover (novel early colonizers?)?
 # https://www.sciencedirect.com/science/article/pii/S0378112711005779
-between_turnover %>% arrange(desc(mean_jaccard_dissimilarity))
+between_turnover %>% arrange(desc(mean_diss))
 
 # Forth corner? https://besjournals.onlinelibrary.wiley.com/doi/10.1111/2041-210X.12163
 
@@ -258,7 +238,7 @@ nmds_binary_k3 # Stress should be < 0.2 for interpretable results
 ordiplot(nmds_binary_k3,type="n")
 ordiellipse(nmds_binary_k3, groups = strata, draw = "polygon", kind = "sd", conf = 0.95, lwd = 2, col = NA, border = strata_cols, label = FALSE)
 points(nmds_binary_k3, display="sites",col=colors, pch = 16, cex=0.75)
-orditorp(nmds_binary_k3,display="species",col="darkgray",air=0.1, cex=0.75)
+# orditorp(nmds_binary_k3,display="species",col="darkgray",air=0.1, cex=0.75)
 
 tr = tibble(common_name = species) %>% left_join(species_traits, by = "common_name")
 tr_filtered = tr %>% filter(common_name %in% rownames(nmds_binary_k3$species)) %>%  slice(match(rownames(nmds_binary_k3$species), common_name))
@@ -284,6 +264,15 @@ tr_cols = c(
   "very small" = "green")
 tr_colors = tr_cols[tr_filtered$group_size]
 
+ordiplot(nmds_binary_k3,type="n")
+ordiellipse(nmds_binary_k3, groups = strata, draw = "polygon", kind = "sd", conf = 0.95, lwd = 2, col = NA, border = strata_cols, label = FALSE)
+orditorp(nmds_binary_k3,display="species",col=tr_colors,air=0.1, cex=0.75)
+
+tr_cols = c(
+  "migrant" = "red",
+  "partial migrant" = "orange",
+  "resident" = "blue")
+tr_colors = tr_cols[tr_filtered$group_migrant]
 ordiplot(nmds_binary_k3,type="n")
 ordiellipse(nmds_binary_k3, groups = strata, draw = "polygon", kind = "sd", conf = 0.95, lwd = 2, col = NA, border = strata_cols, label = FALSE)
 orditorp(nmds_binary_k3,display="species",col=tr_colors,air=0.1, cex=0.75)
@@ -339,7 +328,16 @@ rownames(occ) = sites
 colnames(occ) = species
 head(occ)
 
-# Single-stratum indicator analysis 
+# Multi-stratum indicator analysis (De Cáceres, M., Legendre, P., Moretti, M. 2010)
+message("Starting multi-stratum indicator analysis (", Sys.time(), ")"); t_start = Sys.time()
+indval_multigroup = multipatt(occ, strata, duleg = FALSE, control = how(nperm=nperm))
+message("Finished (", Sys.time() - t_start, ")")
+# Indicator species associated with a single stratum are specialists of that stratum, while
+# those associated with a combination of strata are generalists across those strata.
+summary(indval_multigroup, indvalcomp=TRUE)
+indval_multigroup$sign
+
+# Single-stratum indicator analysis (species flip-flop that occur in multiple strata; multi-group analysis is more appropriate)
 message("Starting single-stratum indicator analysis (", Sys.time(), ")"); t_start = Sys.time()
 indval_singlegroup = multipatt(occ, strata, duleg = TRUE, control = how(nperm=nperm))
 message("Finished (", Sys.time() - t_start, ")")
@@ -363,15 +361,6 @@ summary(indval_singlegroup, indvalcomp=TRUE)
 summary(indval_singlegroup, alpha=1)
 # The species that are not selected can be seen via $sign with NA p.value
 indval_singlegroup$sign
-
-# Multi-stratum indicator analysis (this is less ecologically clear?)
-message("Starting multi-stratum indicator analysis (", Sys.time(), ")"); t_start = Sys.time()
-indval_multigroup = multipatt(occ, strata, duleg = FALSE, control = how(nperm=nperm))
-message("Finished (", Sys.time() - t_start, ")")
-# Indicator species associated with a single stratum are specialists of that stratum, while
-# those associated with a combination of strata are generalists across those strata.
-summary(indval_multigroup, indvalcomp=TRUE)
-indval_multigroup$sign
 
 # Estimate richness -------------------------------------------------------------------------
 

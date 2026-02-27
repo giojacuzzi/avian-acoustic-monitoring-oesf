@@ -2,10 +2,8 @@
 # Inspect MSOM results across model variants
 #
 # CONFIG:
-path_msom = "data/cache/models/msom_fp_fp_nest_2026-02-14_07:23:20.rds"
-path_msom = "data/cache/models/msom_fp_fp_diet_2026-02-13_18:14:56.rds"
-# "data/cache/models/msom_groups_multiseason_fp_Miller_habitat_association_2025-11-30_13:01:50.rds"
-# "data/cache/models/msom_all_2026-02-11_19:12:08.rds"
+path_msom = "data/cache/models/msom_fp_fp_nest_2026-02-17_22:04:27.rds"
+# path_msom = "data/cache/models/msom_fp_fp_diet_2026-02-13_18:14:56.rds"
 #
 # OUTPUT:
 out_cache_dir  = "data/cache/4_msom/3_msom_results"
@@ -199,6 +197,32 @@ p = ggplot(species_effects %>% filter(name == "prop_abund_comthin"),
            aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
   geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
   geom_point() + labs(title = "prop_abund_comthin"); print(p)
+
+p = ggplot(species_effects %>% filter(name == "homerange_qmd_mean"),
+           aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
+  geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
+  geom_point() + labs(title = "homerange_qmd_mean"); print(p)
+
+p = ggplot(species_effects %>% filter(name == "homerange_treeden_all_mean"),
+           aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
+  geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
+  geom_point() + labs(title = "homerange_treeden_all_mean"); print(p)
+
+p = ggplot(species_effects %>% filter(name == "focalpatch_area_homeange_pcnt"),
+           aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
+  geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
+  geom_point() + labs(title = "focalpatch_area_homeange_pcnt"); print(p)
+
+p = ggplot(species_effects %>% filter(name == "shape_idx"),
+           aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
+  geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
+  geom_point() + labs(title = "shape_idx"); print(p)
+
+p = ggplot(species_effects %>% filter(name == "elev"),
+           aes(x = coef_mean, y = reorder(common_name, coef_mean), color = group)) +
+  geom_vline(xintercept = 0, color = "gray80") + geom_errorbar(aes(xmin = `coef_2.5%`, xmax = `coef_97.5%`)) +
+  geom_point() + labs(title = "elev"); print(p)
+
 
 # ggplot(species_effects, aes(x = coef_mean, y = name, group = group, color = group)) +
 #   geom_vline(xintercept = 0, color = "gray80") +
@@ -414,14 +438,6 @@ meta_summary = meta_summary %>%
     groups %>% select(group_idx, group) %>% distinct(),
     by = "group_idx"
   )
-
-ggplot() +
-  geom_line(data = predictions, aes(x = idx, y = psi, group = common_name, color = group), alpha = 0.2) +
-  geom_ribbon(data = meta_summary, aes(x = idx, ymin = psi_lower, ymax = psi_upper, fill = group, group = group), alpha = 0.2, inherit.aes = FALSE) +
-  geom_line(data = meta_summary, aes(x = idx, y = psi_mean, color = group, group = group), linewidth = 1.2, inherit.aes = FALSE) +
-  # scale_x_continuous(limits = c(bound_low, bound_high)) +
-  scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
-  labs(x = param_data$name, y = "Occurrence probability")
 
 ggplot() +
   geom_line(data = predictions, aes(x = idx, y = psi, group = common_name, color = group), alpha = 0.2) +

@@ -267,8 +267,8 @@ msom = jags(data = msom_data,
             ) },
             parameters.to.save = params_to_monitor,
             model.file = model_file,
-            # Test run, ETA: 11/25 hr (fp), 3 hr (nofp)
-            n.chains = 3, n.adapt = 200, n.iter = 2000, n.burnin = 200, n.thin = 1, parallel = FALSE,
+            # Test run, ETA: 11/25 hr (fp) 6 hr (parallel fp), 3 hr (nofp)
+            n.chains = 3, n.adapt = 200, n.iter = 2000, n.burnin = 200, n.thin = 1, parallel = TRUE,
             # Formal run, ETA TODO
             # n.chains = 3, n.adapt = 5000, n.iter = 30000, n.burnin = 10000, n.thin = 3, parallel = TRUE, # ETA: TODO
             DIC = FALSE, verbose=TRUE)
