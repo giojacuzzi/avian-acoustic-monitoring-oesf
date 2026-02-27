@@ -47,5 +47,3 @@ roads_wsdot$road_surfa = NA
 roads = rbind(roads_wsdot, roads_wadnr)
 # mapview(roads, zcol = 'road_usgs1') + mapview(aru_sites, label = aru_sites$site)
 
-paved_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway", "Light-Duty Road")))
-

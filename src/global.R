@@ -82,6 +82,9 @@ if (!exists("aru_sites", envir = .GlobalEnv)) {
     mutate(site = tolower(site))
 }
 
+# Define study area as bounding rectangle containing max species home range buffer (6500 m) around sites
+study_area = st_as_sfc(st_bbox(st_buffer(aru_sites, 6500)))
+
 # Table linking unique sampling unit IDs with season/serialno/deploy combinations ("unit_key.csv")
 path_unit_key = "data/unit_key.csv"
 

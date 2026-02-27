@@ -1,11 +1,9 @@
 ## 2_gen_cover_rasters.R #########################################################################################
 # Generate and inspect raster(s) for landscape cover
 #
-# CONFIG:
-overwrite_rast_cover_cache = FALSE
-#
 ## OUTPUT:
-path_rast_cover_clean_out = "data/cache/occurrence_covariates/rast_cover_clean.tif"
+path_out = "data/cache/3_gis/2_gen_cover_rasters"
+path_rast_cover_clean_out = "data/cache/occurrence_covariates/NEW_rast_cover_clean.tif"
 #
 ## INPUT:
 # Base RS-FRIS data (0.1 acre resolution, i.e. ~404m2 or 20.10836 * 20.10836 m grain, roughly 1% of the area of a 100m radius circle)
@@ -13,10 +11,15 @@ path_rast_cover_clean_out = "data/cache/occurrence_covariates/rast_cover_clean.t
 # RS-FRIS 5.0 uses a combination of 2021 and 2022 photogrammetry. 
 # TODO: Calculate on a yearly basis!
 dir_rsfris_version = 'data/environment/rsfris_v4.0' # Only use 2020 for now
+year_baseline = 2020
+path_trait_data = "data/cache/trait_data/trait_data.csv"
 ###########################################################################################################
 
 source("src/global.R")
-source("src/3_gis/1_preprocess_gis_data.R")
+
+if (!dir.exists(path_out)) dir.create(path_out, recursive = TRUE)
+
+species_trait_data = read_csv(path_trait_data, show_col_types = FALSE)
 
 options(mapview.maxpixels = 2117676)
 
@@ -37,83 +40,89 @@ load_raster = function(path_rast) {
   return(r)
 }
 
-##############################################################################
-# Patch delineation
-#
-# Discrete habitat patches are delineated by forest stand developmental stage classes according to O'Hara et al. 1996, Oliver and Larson 1996, and Spies 1997, namely: stand initiation, stem exclusion, understory reinitiation, and old forest
-# Patch boundaries are further delineated by paved roads and watercourses/waterbodies.
-
 # Store site-specific covariate data
 data_plot_scale = aru_sites
 data_plot_scale$hs = FALSE # flag for habitat survey data availability
 
-seral_classes = c("stand initiation", "canopy closure", "stem exclusion", "mature/old forest")
+# Derive land cover stages/strata ---------------------------------------------------------------
 
-# WADNR delineated patch vectors. Manually determined from a combination of aerial imagery and remote sensing.
-vect_patches = st_read('data/environment/GIS Data/Forest Development Strata/AgeStrataFixedDIS_RSFRIS20200130.shp') %>%
-  st_transform(crs_m) %>% janitor::clean_names() %>% mutate(wadnr_stage_vect = stratum %>% str_to_lower()) %>%
-  mutate(stratum = factor(stratum, levels = seral_classes)) %>% select(-stratum)
-data_plot_scale = st_join(data_plot_scale, vect_patches)
+## Developmental stage classifications (e.g. O'Hara et al. 1996, Oliver and Larson 1996, and Spies 1997)
+stages_3 = tibble(
+  class   = c("standinit", "compex", "mature"),
+  age_min = c(0, 25, 80),
+  age_max = c(25, 80, Inf),
+  idx = 1:3
+); print(stages_3)
+stages_4 = tibble(
+  class   = c("standinit", "compex", "underdev", "old"),
+  age_min = c(0, 25, 80, 200),
+  age_max = c(25, 80, 200, Inf),
+  idx = 1:4
+); print(stages_4)
+
+## Management strata (e.g. Minkova)
+strata_4 = tibble(
+  class   = c("thin", "standinit", "compex", "mature"),
+  age_min = c(NA, 0, 25, 80),
+  age_max = c(NA, 25, 80, Inf),
+  idx = 1:4
+); print(strata_4)
+strata_5 = tibble(
+  class   = c("thin", "standinit", "compex", "underdev", "old"),
+  age_min = c(NA, 0, 25,  80, 200),
+  age_max = c(NA, 25, 80, 200, Inf),
+  idx = 1:5
+); print(strata_5)
+
+# WADNR delineated patch polygons. Manually determined from a combination of aerial imagery and remote sensing.
+wadnr_patch_sf = st_read('data/environment/GIS Data/Forest Development Strata/AgeStrataFixedDIS_RSFRIS20200130.shp') %>%
+  st_transform(crs_m) %>% clean_names() %>% mutate(stratum = str_to_lower(stratum)) %>% rename(wadnr_patch_stratum = stratum)
+wadnr_patch_sf$wadnr_patch_stratum[wadnr_patch_sf$wadnr_patch_stratum == "initiation"] = stages_3[['class']][1]
+wadnr_patch_sf$wadnr_patch_stratum[wadnr_patch_sf$wadnr_patch_stratum == "canclose"]   = stages_3[['class']][1] # redefine canclose to initiation
+wadnr_patch_sf$wadnr_patch_stratum[wadnr_patch_sf$wadnr_patch_stratum == "stemex"]     = stages_3[['class']][2]
+wadnr_patch_sf$wadnr_patch_stratum[wadnr_patch_sf$wadnr_patch_stratum == "mature"]     = stages_3[['class']][3]
+data_plot_scale = st_join(data_plot_scale, wadnr_patch_sf)
 
 # Origin year is calculated from multiple data sources using the following logic: Origin year is reported at the pixel-level (1/10th ac scale). The default value is the predicted origin year, based on RS-FRIS models. These models rely on remotely sensed data (LiDAR and DAP) and are constructed primarily from height-to-age relationships. The default RS-FRIS predicted ages are overwritten using the following data, if available:
 # - Tree core data from DNR's historic inventory (FRIS) is used for stands whose origin year is 1900 or earlier.
 # - FRIS tree core data from younger stands (post-1900) or FRIS data based on stratified samples is used only if RS-FRIS data is not available.
 # - Information from the Land Resource Manager system (LRM) is used for completed harvests ('TEMP_RET_REM', 'TEMP_RET_1ST', 'VRH', 'SEEDTREE_INT', 'CLEAR_CUT', 'PATCH_REGEN', 'LANDUSE_CONV', 'SEEDTREE_REM', 'SHELTER_INT', 'SHELTER_REM'). STAND_ORIGIN_DT was used if populated, otherwise FMA_DT (<forest management activity date?>).
 # Data sources are mapped in the "Combined Origin Year Data Source" raster.
-rast_origin = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_ORIGIN_YEAR.img'))
+rast_origin = round(load_raster(paste0(dir_rsfris_version, '/RS_FRIS_ORIGIN_YEAR.img')))
 summary((terra::values(rast_origin)))
+hist(na.omit(values(rast_origin)))
 
-# Flag patches of missing origin year data
-# TODO: Impute patches identified on Desktop pdf from canopy cover, size class, canopy layers, and surrounding classes (see Powell vegetation stages white paper). Also consult ESRI World Imagery Wayback for visual inspection.
+# Flag patches of missing origin year data (these were harvested after baseline year)
 rast_origin_missing = rast_origin
-values(rast_origin_missing)[values(rast_origin_missing) <= 2020] = NA
-values(rast_origin)[values(rast_origin) > 2020] = NA
+rast_origin_missing[rast_origin_missing < (year_baseline + 1)] = NA
+summary((terra::values(rast_origin_missing)))
 
-rast_age = round(2020 - rast_origin)
+# Impute patches
+# (see Powell vegetation stages white paper; also consult ESRI World Imagery Wayback for visual inspection)
+rast_origin[rast_origin >= (year_baseline + 1)] = NA
+# mapview(wadnr_patch_sf) + mapview(rast_origin_missing)
+rast_wadnr_patch = rasterize(
+  vect(wadnr_patch_sf), rast_origin_missing,
+  field = "wadnr_patch_stratum"
+)
 
-# Classify stand developmental stage classes according to O'Hara et al. 1996, Oliver and Larson 1996, and Spies 1997
-stage_classes = c("stand initiation", "stem exclusion", "understory reinitiation", "old forest")
-rast_stage_class = classify(rast_age, matrix(c(
-  0,   25,  1,   # "stand initiation"
-  25,  80,  2,   # "stem exclusion"
-  80, 200,  3,   # "understory reinitiation"
-  200, Inf, 4    # "old forest"
-), ncol = 3, byrow = TRUE), include.lowest = TRUE, right = FALSE)
-rast_stage_class = as.factor(rast_stage_class)
-unique(terra::values(rast_stage_class))
-data_plot_scale$stage = terra::extract(rast_stage_class, vect(data_plot_scale))[, 2]
-data_plot_scale$stage = factor(data_plot_scale$stage, labels = stage_classes)
+rast_missing_masked = mask(rast_wadnr_patch, rast_origin_missing)
+rast_missing_imputed = catalyze(rast_missing_masked)
+rast_missing_imputed[rast_missing_imputed == 1] = year_baseline - stages_3 %>% filter(class == "compex") %>% pull(age_min)
+rast_missing_imputed[rast_missing_imputed == 2] = year_baseline - stages_3 %>% filter(class == "mature") %>% pull(age_min)
+rast_missing_imputed[rast_missing_imputed == 3] = year_baseline - stages_3 %>% filter(class == "standinit") %>% pull(age_min)
 
-# Classify stand seral stage classes
-wadnr_classes = c("stand initiation", "canopy closure", "stem exclusion", "mature/old forest") # classify origin raster based on number of years since 2020
-rast_wadnr_class = classify(rast_age, matrix(c(
-  0,   15,  1,   # "stand initiation"
-  15,  25,  2,   # "canopy closure"
-  25,  80,  3,   # "stem exclusion"
-  80, Inf, 4     # "mature/old forest"
-), ncol = 3, byrow = TRUE), include.lowest = TRUE, right = FALSE)
-rast_wadnr_class = as.factor(rast_wadnr_class)
-unique(terra::values(rast_wadnr_class))
-data_plot_scale$wadnr_stage_rast = terra::extract(rast_wadnr_class, vect(data_plot_scale))[, 2]
-data_plot_scale$wadnr_stage_rast = factor(data_plot_scale$wadnr_stage_rast)
+rast_origin_imputed = cover(rast_missing_imputed, rast_origin)
 
-# Fill in missing patches with WADNR predictions
-rast_impute = mask(rasterize(vect(vect_patches), rast_origin_missing, field = "wadnr_stage_vect"), rast_origin_missing)
-rast_impute = classify(rast_impute, matrix(c(
-  1, 2, 1,    # "initiation" > "stand initiation"
-  3, 4, 2,    # "stemex" > "stem exclusion"
-  0, 1, 2,    # "canclose" > "stem exclusion"
-  2, 3, 3     # "understory reinitiation"
-), ncol = 3, byrow = TRUE), include.lowest = TRUE, right = FALSE)
-mapview(rast_stage_class) + mapview(rast_impute)
-rast_stage_class = cover(rast_impute, rast_stage_class)
+# Calculate age
+rast_age = round(year_baseline - rast_origin_imputed)
 
 # Determine thinning treatment
 poly_thinning_treatment = st_read('data/environment/GIS Data/Forest Development Strata/ThinAfter94NoHarvSinceClipByInitBuf3.shp') %>% 
   st_transform(crs_m) %>% select(TECHNIQUE_, FMA_DT, FMA_STATUS) %>% janitor::clean_names() %>%
   mutate(technique = technique %>% str_to_lower(), fma_status = fma_status %>% str_to_lower()) %>%
   rename(thinning_treatment = technique, thinning_status = fma_status, thinning_date = fma_dt)
-sum(poly_thinning_treatment$thinning_status == "completed") == nrow(poly_thinning_treatment) # check that all treatments are completed
+stopifnot(sum(poly_thinning_treatment$thinning_status == "completed") == nrow(poly_thinning_treatment)) # check that all treatments are completed
 commrcl_thin = poly_thinning_treatment %>% filter(thinning_treatment == 'commrcl_thin') %>% st_union()
 variabl_thin = poly_thinning_treatment %>% filter(thinning_treatment == 'variabl_thin') %>% st_union()
 commrcl_sf = st_sf(
@@ -131,99 +140,146 @@ poly_thinning_treatment = bind_rows(commrcl_sf, variabl_sf)
 data_plot_scale = st_join(data_plot_scale, poly_thinning_treatment)
 table(data_plot_scale$thinning_treatment, useNA = 'ifany')
 
-# Create a "stratum" rast from rast_stage_class,
-rast_stratum = rast_stage_class
+rast_thin = rasterize(vect(poly_thinning_treatment), rast_age, field = "thinning_status")
+rast_thin = as.numeric(rast_thin)
 
-# Overlap rast_stratum with thinning treatment as an additional class
-rast_thinning = rasterize(vect(poly_thinning_treatment), rast(ext(rast_stratum), resolution = res(rast_stratum), crs = crs(rast_stratum)), field = "thinning_status", background = NA)
-values(rast_thinning)[!is.na(values(rast_thinning))] = 5
-rast_stratum = cover(rast_thinning, rast_stratum)
-data_plot_scale$stratum = terra::extract(rast_stratum, vect(data_plot_scale))[, 2]
-table(data_plot_scale$stratum, useNA = 'ifany')
+## Classify cover by age breaks
+
+rast_stage_3 = classify(rast_age, as.matrix(stages_3 %>% select(-class)), include.lowest = TRUE, right = FALSE)
+levels(rast_stage_3) = data.frame(ID = stages_3$idx, stage = stages_3$class)
+data_plot_scale$stage_3 = terra::extract(rast_stage_3, vect(data_plot_scale))[, 2]
+table(data_plot_scale$stage_3)
+
+rast_stage_4 = classify(rast_age, as.matrix(stages_4 %>% select(-class)), include.lowest = TRUE, right = FALSE)
+levels(rast_stage_4) = data.frame(ID = stages_4$idx, stage = stages_4$class)
+data_plot_scale$stage_4 = terra::extract(rast_stage_4, vect(data_plot_scale))[, 2]
+table(data_plot_scale$stage_4)
+
+rast_strata_4 = classify(rast_age, as.matrix(strata_4 %>% filter(class != "thin") %>% select(-class)), include.lowest = TRUE, right = FALSE)
+rast_strata_4 = cover(rast_thin, rast_strata_4)
+levels(rast_strata_4) = data.frame(ID = strata_4$idx, stage = strata_4$class)
+data_plot_scale$stratum_4 = terra::extract(rast_strata_4, vect(data_plot_scale))[, 2]
+table(data_plot_scale$stratum_4)
+
+rast_strata_5 = classify(rast_age, as.matrix(strata_5 %>% filter(class != "thin") %>% select(-class)), include.lowest = TRUE, right = FALSE)
+rast_strata_5 = cover(rast_thin, rast_strata_5)
+levels(rast_strata_5) = data.frame(ID = strata_5$idx, stage = strata_5$class)
+data_plot_scale$stratum_5 = terra::extract(rast_strata_5, vect(data_plot_scale))[, 2]
+table(data_plot_scale$stratum_5)
 
 # TODO: Resolve the small number of sites that are ambiguously classified due to origin age near class boundaries:
 # Dz303i > age 24, stand init / canopy closure / WADNR stemex
 # Ca263i > age 86, understory reinit, WADNR stemex
 # Dp166i > age 24, stand init / canopy closure / WANDR stemex
 
-# From here forward, we use "rast_stratum" as the classification scheme to delineate patches
-mapview(vect_patches) + mapview(poly_thinning_treatment)
-summary(data_plot_scale$stratum)
-mapview(rast_stratum) +
-  mapview(aru_sites, label = aru_sites$site)
+# Assemble cover class raster ---------------------------------------------------------------
 
-# Further delineate patch boundaries by roads, waterbodies, and watercourses
+source("src/3_gis/1_preprocess_gis_data.R")
 
-template = rast(ext(rast_stratum), resolution = res(rast_stratum), crs = crs(rast_stratum))
-watercourse_half_width = res(rast_stratum)[1] / 2
-watercourses_buffered = (st_buffer(boundary_watercourses, dist = watercourse_half_width))
-rast_watercourses = rasterize(vect(watercourses_buffered), template, field = 7, background = NA, touches=TRUE)
-# mapview(rast_watercourses) + mapview(watercourses_buffered)
+# Loop over all strata/stages
+all_raster_list = list(
+  "stage_3" = rast_stage_3,
+  "stage_4" = rast_stage_4,
+  "strata_4" = rast_strata_4,
+  "strata_5" = rast_strata_5
+)
+rast_cover = list()
+for (rast_name in names(all_raster_list)) {
+  message("Assembling cover class raster for: ", rast_name)
+  r = all_raster_list[[rast_name]]
+  print(unique(r))
 
-rast_updated = rast_stratum
-rast_updated = cover(rast_watercourses, rast_updated)
+  # Further delineate patch boundaries by roads, waterbodies, and watercourses
+  template = rast(ext(r), resolution = res(r), crs = crs(r))
+  
+  message("Assembling water cover")
+  
+  watercourse_half_width = res(r)[1] / 2
+  watercourses_buffered = (st_buffer(boundary_watercourses, dist = watercourse_half_width))
+  rast_watercourses = as.factor(rasterize(
+    vect(watercourses_buffered), template, field = "sl_wtrty_c"
+  ))
+  i = nrow(unique(r))+1
+  rast_watercourses[rast_watercourses == 1] = i
+  levels(rast_watercourses) = data.frame(ID = i, stage = "water")
+  r = cover(rast_watercourses, r)
+  
+  rast_waterbodies = rasterize(
+    vect(boundary_waterbodies), template, field = "objectid"
+  )
+  rast_waterbodies[!is.na(rast_waterbodies)] = i
+  levels(rast_waterbodies) = data.frame(ID = i, stage = "water")
+  r = cover(rast_waterbodies, r)
+  
+  # Fill missing water bodies off coast
+  ocean_polyfill = st_polygon(list(rbind(
+    c(-180, -90), c(-124.42, -90), c(-124.42, 47.63), c(-180, 47.63), c(-180, -90)
+  ))) |> st_sfc(crs = 4326) |> st_transform(crs(rast_waterbodies))
+  p = terra::project(vect(ocean_polyfill), crs(rast_waterbodies))
+  mask_r = rasterize(p, rast_waterbodies, field=1, background=NA, touches=TRUE)
+  rast_waterbodies[!is.na(mask_r[])] = i
+  r = cover(rast_waterbodies, r)
+  
+  message("Assembling road cover")
+  
+  # "The Hoh-Clearwater Mainline is our only double-lane mainline, and it is about 26 feet wide for the asphalt surface. If we’re looking at right of way widths, we could easily assume a minimum width of about 50 feet for a 12-foot road, probably a good 60-80 feet for a 14-20 foot wide road, and about 100 feet for the Hoh Mainline. 100 feet might be good for US 101 as well for right of way width, and maybe about 30 feet for actual road surface width."
+  paved_primary_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway", "Light-Duty Road")))
+  road_half_width_primary = max(100 / 2 * conv_ft_to_m, res(r)[1] / 2)
+  # "Our minimum road surface width is going to be 12 feet. That would cover most of our roads. Main arterials/single lane mainlines will have a minimum surface width of 14 feet, with a few up to 20 feet."
+  paved_secondary_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Light-Duty Road")))
+  road_half_width_secondary = max(30 / 2 * conv_ft_to_m, res(r)[1] / 2)
+  
+  paved_roads_primary_buffered = (st_buffer(paved_primary_roads, dist = road_half_width_primary))
+  paved_roads_secondary_buffered = (st_buffer(paved_secondary_roads, dist = road_half_width_secondary))
+  
+  rast_road_paved_primary = rasterize(
+    vect(paved_roads_primary_buffered), template
+  )
+  i = nrow(unique(r))+1
+  rast_road_paved_primary[rast_road_paved_primary == 1] = i
+  levels(rast_road_paved_primary) = data.frame(ID = i, stage = "road_paved")
+  r = cover(rast_road_paved_primary, r)
+  
+  rast_road_paved_secondary = rasterize(
+    vect(paved_roads_secondary_buffered), template
+  )
+  rast_road_paved_secondary[rast_road_paved_secondary == 1] = i
+  levels(rast_road_paved_secondary) = data.frame(ID = i, stage = "road_paved")
+  r = cover(rast_road_paved_secondary, r)
+  
+  message("Cropping to study area")
+  r = crop(r, ext(vect(study_area)))
+  
+  message("Imputing any remaining missing patches with cover class 'other'")
+  rast_other = r
+  rast_other[] = NA
+  i = nrow(unique(r))+1
+  rast_other[is.na(r[])] = i
+  levels(rast_other) = data.frame(ID = i, stage = "other")
+  r = cover(rast_other, r)
+  
+  rast_cover[[rast_name]] = r
+  
+  path_out_rast = paste0(path_out, "/rast_cover_", rast_name, ".tif")
+  writeRaster(r, path_out_rast, overwrite=TRUE)
+  message(crayon::green("Cached raster cover data to:", path_out_rast))
+}
 
-rast_waterbodies = rasterize(vect(boundary_waterbodies), template, field = 7, background = NA, touches=TRUE)
-# mapview(rast_waterbodies) + mapview(boundary_waterbodies)
-
-# Fill missing water bodies off coast
-ocean_polyfill = st_polygon(list(rbind(
-  c(-180, -90), c(-124.42, -90), c(-124.42, 47.63), c(-180, 47.63), c(-180, -90)
-))) |> st_sfc(crs = 4326) |> st_transform(crs(rast_waterbodies))
-p = terra::project(vect(ocean_polyfill), crs(rast_waterbodies))
-mask_r = rasterize(p, rast_waterbodies, field=1, background=NA, touches=TRUE)
-rast_waterbodies[!is.na(mask_r[])] <- 7
-
-rast_updated = cover(rast_waterbodies, rast_updated)
-mapview(rast_updated)
-
-# "The Hoh-Clearwater Mainline is our only double-lane mainline, and it is about 26 feet wide for the asphalt surface. If we’re looking at right of way widths, we could easily assume a minimum width of about 50 feet for a 12-foot road, probably a good 60-80 feet for a 14-20 foot wide road, and about 100 feet for the Hoh Mainline. 100 feet might be good for US 101 as well for right of way width, and maybe about 30 feet for actual road surface width."
-road_half_width_primary = max(100 / 2 * conv_ft_to_m, res(rast_stratum)[1] / 2)
-# mapview(paved_primary_roads) + mapview(st_union(st_buffer(paved_primary_roads, road_half_width_primary)))
-# "Our minimum road surface width is going to be 12 feet. That would cover most of our roads. Main arterials/single lane mainlines will have a minimum surface width of 14 feet, with a few up to 20 feet."
-paved_secondary_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Light-Duty Road")))
-road_half_width_secondary = max(30 / 2 * conv_ft_to_m, res(rast_stratum)[1] / 2)
-# mapview(paved_secondary_roads) + mapview(st_union(st_buffer(paved_secondary_roads, road_half_width_secondary)))
-
-paved_roads_primary_buffered = (st_buffer(paved_primary_roads, dist = road_half_width_primary))
-paved_roads_secondary_buffered = (st_buffer(paved_secondary_roads, dist = road_half_width_secondary))
-rast_paved_roads_primary = rasterize(vect(paved_roads_primary_buffered), template, field = 6, background = NA, touches=TRUE)
-rast_paved_roads_secondary = rasterize(vect(paved_roads_secondary_buffered), template, field = 6, background = NA, touches=TRUE)
-# mapview(rast_paved_roads_primary) + mapview(paved_roads_primary_buffered)
-# mapview(rast_paved_roads_secondary) + mapview(paved_roads_secondary_buffered)
-# mapview(rast_paved_roads_primary) + mapview(rast_paved_roads_secondary)
-rast_updated = cover(rast_paved_roads_primary, rast_updated)
-rast_updated = cover(rast_paved_roads_secondary, rast_updated)
-
-# TODO: Cover impervious surfaces
-
-# Impute any remaining missing patches with cover class 2 (stem exclusion)
-# rast_updated[is.na(rast_updated[])] <- 2
-mapview(rast_updated)
-
-# Crop raster to the study area (bounded by maximum home range size)
-max_homerange_buffers = st_buffer(aru_sites, max(species_trait_data$home_range_radius_m))
-study_region_bbox = st_bbox(st_union(max_homerange_buffers))
-
-r_cropped = crop(rast_updated, ext(study_region_bbox$xmin, study_region_bbox$xmax, study_region_bbox$ymin, study_region_bbox$ymax))
-
-mapview(r_cropped) +
-  mapview(rast_updated) +
+mapview(rast_cover[["strata_5"]]) +
   mapview(aru_sites, label = aru_sites$site) +
-  mapview(st_buffer(aru_sites, 100), col.regions = 'transparent', lwd = 2) +
-  mapview(max_homerange_buffers, col.regions = 'transparent', lwd = 2) +
-  mapview(study_region_bbox)
+  mapview(st_buffer(aru_sites, 100), col.regions = 'transparent', lwd = 2)
 
-rast_updated = r_cropped
+# Clean cover class raster ---------------------------------------------------------------
 
-# Clean raster by generalizing minimum patch area and width
-if (overwrite_rast_cover_cache) {
+min_species_homerange_area_m2 = round(pi * min(species_trait_data$home_range_radius_m)^2,0)
+rast_cover_clean = list()
+for (rast_name in names(all_raster_list)) {
+
+  # Clean raster by generalizing minimum patch area and width
+    
+  message("Cleaning cover raster '", rast_name, "' (current time ", time_start <- Sys.time(), ")")
   
-  message("Generating cover cache (current time ", time_start <- Sys.time(), ")")
-  
-  min_species_homerange_area_m2 = round(pi * min(species_trait_data$home_range_radius_m)^2,0)
-  
-  r = rast_updated
+  r = rast_cover[[rast_name]]
   cell_res = res(r)[1] # cell resolution (in meters)
   min_area = min_species_homerange_area_m2 # OR 0.785 * 1e4 --> e.g. 0.785 hectares to square meters
   min_width = 50 # in meters
@@ -235,8 +291,9 @@ if (overwrite_rast_cover_cache) {
   patch_list = list()
   start_id = 1  # Starting patch ID to ensure uniqueness
   cls = sort(na.omit(unique(values(r))))
+  pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = length(cls), clear = FALSE)
   for (cl in cls) {
-    message("Class: ", cl)
+    # message("Class: ", cl)
     r_class = mask(r, r == cl, maskvalues = FALSE) # Mask only the current class
     r_patches = patches(r_class, directions = 8) # Compute patches for this class only
     # Reclassify patch IDs to be globally unique
@@ -246,15 +303,11 @@ if (overwrite_rast_cover_cache) {
       start_id = start_id + max_patch_id
     }
     patch_list[[as.character(cl)]] <- r_patches
+    pb$tick()
   }
   
   # Merge patch ids for each raster type into one raster
-  patch_ids = cover(patch_list[[1]], patch_list[[2]])
-  patch_ids = cover(patch_ids, patch_list[[3]])
-  patch_ids = cover(patch_ids, patch_list[[4]])
-  patch_ids = cover(patch_ids, patch_list[[5]])
-  patch_ids = cover(patch_ids, patch_list[[6]])
-  patch_ids = cover(patch_ids, patch_list[[7]])
+  patch_ids = Reduce(cover, patch_list)
   
   # Create a raster stack (cover class and patch id)
   patch_stack = c(patch_ids, r)
@@ -263,12 +316,14 @@ if (overwrite_rast_cover_cache) {
   mapview(patch_stack[["patch_id"]], col.regions = viridis) + 
     mapview(patch_stack[["cover_class"]])
   
+  stop("DEBUG")
+  
   # Identify patches with maximum width less than minimum width ##################################################
   message("Identifying patch candidates with negligible width")
   narrow_patches = c()
   pids = unique(na.omit(as.vector(values(patch_stack[['patch_id']]))))
+  pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = length(pids), clear = FALSE)
   for (pid in pids) {
-    print(pid)
     m = trim(classify(patch_stack[['patch_id']], cbind(pid, 1), others = NA)) # Mask patch
     m_vals = as.matrix(m, wide=TRUE)
     
@@ -285,6 +340,7 @@ if (overwrite_rast_cover_cache) {
     if (max_h_run < min_cells_width || max_v_run < min_cells_width) { # Keep if both directions have max run < 3
       narrow_patches = c(narrow_patches, pid)
     }
+    pb$tick()
   }
   
   # Identify patch ids with negligible patch width
@@ -315,7 +371,7 @@ if (overwrite_rast_cover_cache) {
   
   # Reclassify (generalize) negligible patches as the mode of adjacent nearest neighbors
   message("Reclassifying negligible patches as the mode of adjacent nearest neighbors")
-  rast_cover_clean = patch_stack[["cover_class"]]
+  r_clean = patch_stack[["cover_class"]]
   i = 1
   patch_ids_to_generalize = unique(na.omit(values(p)))
   total = length(patch_ids_to_generalize)
@@ -346,29 +402,23 @@ if (overwrite_rast_cover_cache) {
     }
     
     # Replace the small patch cells with the majority class
-    values(rast_cover_clean)[patch_cells] <- majority_class
+    values(r_clean)[patch_cells] <- majority_class
     
     i = i + 1
   }
-  rast_cover_clean[is.nan(rast_cover_clean)] = NA
-  mapview(rast_cover_clean) + mapview(patch_stack[['cover_class']])
+  r_clean[is.nan(r_clean)] = NA
+  # mapview(rast_cover_clean) + mapview(patch_stack[['cover_class']])
   
-  # TODO: Save an alternative that combines understory reinit and old growth into an LSOG category
+  rast_cover_clean[[rast_name]] = r_clean
   
-  # TODO: Save alternative patch ids too
-  
-  message('Saving raster cover data cache ', path_rast_cover_clean_out)
-  dir.create(dirname(path_rast_cover_clean_out), recursive = TRUE, showWarnings = FALSE)
-  writeRaster(rast_cover_clean, path_rast_cover_clean_out, overwrite=TRUE)
-  message(crayon::green("Finished generating cover cache (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)"))
-  
-} else { # overwrite_rast_cover_cache is FALSE
-  message('Loading raster cover data from cache ', path_rast_cover_clean_out)
-  rast_cover_clean = rast(path_rast_cover_clean_out)
+  path_out_rast_clean = paste0(path_out, "/rast_cover_clean_", rast_name, ".tif")
+  writeRaster(r_clean, path_out_rast_clean, overwrite=TRUE)
+  message(crayon::green("Cached raster cover clean data to:", path_out_rast_clean))
 }
-rast_cover_clean = as.factor(rast_cover_clean)
 
-mapview(rast_cover_clean,
+message(crayon::green("Finished generating cover cache (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)"))
+
+mapview(as.factor(rast_cover_clean),
         alpha.regions = 1.0,
         col.regions = c('#90c6bd', '#3c8273', '#d8c18a', '#9b652b', '#b2675e', 'darkgray', '#6495ed')) +
   mapview(aru_sites, label = aru_sites$site) +
