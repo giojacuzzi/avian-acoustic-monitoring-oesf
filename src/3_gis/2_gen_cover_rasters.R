@@ -42,7 +42,6 @@ load_raster = function(path_rast) {
 
 # Store site-specific covariate data
 data_plot_scale = aru_sites
-data_plot_scale$hs = FALSE # flag for habitat survey data availability
 
 # Derive land cover stages/strata ---------------------------------------------------------------
 
@@ -166,11 +165,6 @@ rast_strata_5 = cover(rast_thin, rast_strata_5)
 levels(rast_strata_5) = data.frame(ID = strata_5$idx, stage = strata_5$class)
 data_plot_scale$stratum_5 = terra::extract(rast_strata_5, vect(data_plot_scale))[, 2]
 table(data_plot_scale$stratum_5)
-
-# TODO: Resolve the small number of sites that are ambiguously classified due to origin age near class boundaries:
-# Dz303i > age 24, stand init / canopy closure / WADNR stemex
-# Ca263i > age 86, understory reinit, WADNR stemex
-# Dp166i > age 24, stand init / canopy closure / WANDR stemex
 
 # Assemble cover class raster ---------------------------------------------------------------
 
@@ -316,8 +310,6 @@ for (rast_name in names(all_raster_list)) {
   mapview(patch_stack[["patch_id"]], col.regions = viridis) + 
     mapview(patch_stack[["cover_class"]])
   
-  stop("DEBUG")
-  
   # Identify patches with maximum width less than minimum width ##################################################
   message("Identifying patch candidates with negligible width")
   narrow_patches = c()
@@ -365,7 +357,7 @@ for (rast_name in names(all_raster_list)) {
   mapview(patch_stack[['cover_class']])
   
   r_zero_alt = patch_stack[['cover_class']]
-  values(r_zero_alt)[values(r_zero_alt) != 0] <- NA
+  values(r_zero_alt)[values(r_zero_alt) != 0] = NA
   mapview(r_zero_alt)
   p = patches(r_zero_alt, directions = 8, values=TRUE)
   
@@ -375,15 +367,16 @@ for (rast_name in names(all_raster_list)) {
   i = 1
   patch_ids_to_generalize = unique(na.omit(values(p)))
   total = length(patch_ids_to_generalize)
+  pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = total, clear = FALSE)
   for (small_patch_id in patch_ids_to_generalize) {
-    print(round(i / total, 3))
+    # print(round(i / total, 3))
     
     # mapview(trim(classify(patch_stack[["patch_id"]], cbind(small_patch_id, 1), others = NA)))
     
     patch_cells = which(values(p) == small_patch_id)
     
     # Find adjacent cells to the patch
-    adj_cells = adjacent(rast_stratum, cells = patch_cells, directions = 4, pairs = TRUE)
+    adj_cells = adjacent(r, cells = patch_cells, directions = 4, pairs = TRUE)
     
     # Remove pairs where neighbor is also part of the same patch
     neighbor_cells = adj_cells[, 2]
@@ -405,23 +398,109 @@ for (rast_name in names(all_raster_list)) {
     values(r_clean)[patch_cells] <- majority_class
     
     i = i + 1
+    pb$tick()
   }
   r_clean[is.nan(r_clean)] = NA
-  # mapview(rast_cover_clean) + mapview(patch_stack[['cover_class']])
+  # mapview(r_clean) + mapview(patch_stack[['cover_class']])
   
-  rast_cover_clean[[rast_name]] = r_clean
+  r_clean_fact = r_clean
+  names(r_clean_fact) = names(r)
+  levels(r_clean_fact) = levels(r)
   
+  rast_cover_clean[[rast_name]] = r_clean_fact
+  
+  # Cache clean cover raster
   path_out_rast_clean = paste0(path_out, "/rast_cover_clean_", rast_name, ".tif")
-  writeRaster(r_clean, path_out_rast_clean, overwrite=TRUE)
+  writeRaster(r_clean_fact, path_out_rast_clean, overwrite=TRUE)   
   message(crayon::green("Cached raster cover clean data to:", path_out_rast_clean))
 }
 
+# Overwrite site management strata data with manual logs
+unit_key = read_csv(path_unit_key, show_col_types = FALSE) %>%
+  mutate(site = str_to_lower(site)) %>% mutate(site_agg = str_to_lower(site_agg)) %>%
+  select(site, stratum) %>% filter(stratum != "HARVESTED") %>% distinct() %>%
+  mutate(stratum = dplyr::recode(stratum,
+                          "STAND INIT" = "standinit",
+                          "COMP EXCL"  = "compex",
+                          "THINNED"    = "thin",
+                          "MATURE"     = "mature"))
+
+site_cover_class_sf = data_plot_scale %>%
+  left_join(unit_key, by = "site") %>%  mutate(stratum_4 = coalesce(stratum, stratum_4)) %>% select(-stratum)
+site_cover_class_sf = site_cover_class_sf %>%
+  left_join(unit_key, by = "site") %>%
+  mutate(
+    stratum_5 = if_else(
+      stratum_5 %in% c("standinit", "thin", "compex") & !is.na(stratum),
+      stratum,
+      stratum_5
+    )
+  ) %>%
+  select(-stratum)
+
+# Cache site cover class data
+path_out_site_cover_class_sf = paste0(path_out, "/site_cover_class_sf.rds")
+write_rds(site_cover_class_sf, path_out_site_cover_class_sf)
+message(crayon::green("Cached site cover class sf data to:", path_out_site_cover_class_sf))
+
 message(crayon::green("Finished generating cover cache (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)"))
 
-mapview(as.factor(rast_cover_clean),
-        alpha.regions = 1.0,
-        col.regions = c('#90c6bd', '#3c8273', '#d8c18a', '#9b652b', '#b2675e', 'darkgray', '#6495ed')) +
-  mapview(aru_sites, label = aru_sites$site) +
-  mapview(st_buffer(aru_sites, 100), col.regions = 'transparent', lwd = 2) +
-  mapview(max_homerange_buffers, col.regions = 'transparent', lwd = 2)
+# Compare original vs clean
+plot(rast_cover[["stage_3"]], main = "stage_3 (original)")
+plot(rast_cover_clean[["stage_3"]], main = "stage_3 (clean)")
 
+# View each raster
+plot(rast_cover[["stage_3"]], main = "Developmental stage (3-class)", col = c(
+  "standinit"  = "#d8c18a",
+  "compex"     = "#3c8273",
+  "mature"     = "#9b652b",
+  "water"      = "#6495ed",
+  "road_paved" = "gray50",
+  "other"      = "gray80"
+))
+plot(rast_cover[["stage_4"]], main = "Developmental stage (4-class)", col = c(
+  "standinit"  = "#d8c18a",
+  "compex"     = "#3c8273",
+  "underdev"   = "#9b652b",
+  "old"        = "#5C4033",
+  "water"      = "#6495ed",
+  "road_paved" = "gray50",
+  "other"      = "gray80"
+))
+plot(rast_cover[["strata_4"]], main = "Management strata (4-class)", col = c(
+  "thin"       = "#b2675e",
+  "standinit"  = "#d8c18a",
+  "compex"     = "#3c8273",
+  "mature"     = "#9b652b",
+  "water"      = "#6495ed",
+  "road_paved" = "gray50",
+  "other"      = "gray80"
+))
+plot(rast_cover[["strata_5"]], main = "Managment strata (5-class)", col = c(
+  "thin"       = "#b2675e",
+  "standinit"  = "#d8c18a",
+  "compex"     = "#3c8273",
+  "underdev"   = "#9b652b",
+  "old"        = "#5C4033",
+  "water"      = "#6495ed",
+  "road_paved" = "gray50",
+  "other"      = "gray80"
+))
+
+# Inspect dynamically
+mapview(rast_cover_clean[["strata_5"]],
+        alpha.regions = 1.0,
+        col.regions = c(
+          "thin"       = "#b2675e",
+          "standinit"  = "#d8c18a",
+          "compex"     = "#3c8273",
+          "underdev"   = "#9b652b",
+          "old"        = "#5C4033",
+          "water"      = "#6495ed",
+          "road_paved" = "gray50",
+          "other"      = "gray80"
+        )) +
+  mapview(wadnr_patch_sf) +
+  mapview(poly_thinning_treatment) +
+  mapview(data_plot_scale, label = data_plot_scale$site) +
+  mapview(st_buffer(data_plot_scale, 100), col.regions = 'transparent', lwd = 2)
