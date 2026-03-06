@@ -2,7 +2,7 @@
 # Quantify variables for detection
 #
 ## OUTPUT:
-path_data_out = "data/cache/detection_covariates/data_detection.rds"
+path_data_out = "data/cache/3_gis/6_calc_detection_vars/NEW_data_detection.rds"
 #
 ## INPUT:
 files = list.files("data/environment/climate", pattern = "\\.csv$", full.names = TRUE)

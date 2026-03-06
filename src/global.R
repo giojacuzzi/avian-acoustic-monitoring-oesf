@@ -86,14 +86,59 @@ if (!exists("aru_sites", envir = .GlobalEnv)) {
 study_area = st_as_sfc(st_bbox(st_buffer(aru_sites, 6500)))
 
 # Table linking unique sampling unit IDs with season/serialno/deploy combinations ("unit_key.csv")
-path_unit_key = "data/unit_key.csv"
+path_site_key = "data/site_key.csv"
+
+# Developmental stage classifications (e.g. O'Hara et al. 1996, Oliver and Larson 1996, and Spies 1997)
+stages_3 = tibble(
+  class   = c("standinit", "compex", "mature"),
+  age_min = c(0, 25, 80),
+  age_max = c(25, 80, Inf),
+  idx = 1:3
+); print(stages_3)
+stages_4 = tibble(
+  class   = c("standinit", "compex", "underdev", "old"),
+  age_min = c(0, 25, 80, 200),
+  age_max = c(25, 80, 200, Inf),
+  idx = 1:4
+); print(stages_4)
+
+## Management strata (e.g. Minkova)
+strata_4 = tibble(
+  class   = c("thin", "standinit", "compex", "mature"),
+  age_min = c(NA, 0, 25, 80),
+  age_max = c(NA, 25, 80, Inf),
+  idx = 1:4
+); print(strata_4)
+strata_5 = tibble(
+  class   = c("thin", "standinit", "compex", "underdev", "old"),
+  age_min = c(NA, 0, 25,  80, 200),
+  age_max = c(NA, 25, 80, 200, Inf),
+  idx = 1:5
+); print(strata_5)
 
 # Helper functions -----------------------------------------------------------------------------
 
-pairwise_collinearity = function(vars, threshold = 0.0) {
-  cor_matrix = cor(vars, use = "pairwise.complete.obs", method = "pearson")
+pairwise_collinearity = function(vars, threshold = 0.8) {
+  cor_matrix = cor(vars %>% select(where(is.numeric)), use = "pairwise.complete.obs", method = "pearson")
   cor_matrix[lower.tri(cor_matrix, diag = TRUE)] = NA
   return(collinearity_candidates = subset(as.data.frame(as.table(cor_matrix)), !is.na(Freq) & abs(Freq) >= threshold))
+}
+
+pairwise_collinearity_by_group = function(data_vars, group_var, threshold = 0.8) {
+  candidates_by_group = split(data_vars %>% select(where(is.numeric)), data_vars[[group_var]])
+  collinearity_results = do.call(rbind, lapply(names(candidates_by_group), function(group) {
+    v = candidates_by_group[[group]]
+    v = v[, apply(v, 2, sd, na.rm = TRUE) > 0, drop = FALSE] # Drop zero-variance variables in group
+    if (ncol(v) < 2) return()
+    cor_matrix = cor(v, use = "pairwise.complete.obs", method = "pearson")
+    cor_matrix[lower.tri(cor_matrix, diag = TRUE)] = NA # Keep only upper triangle
+    df = subset(as.data.frame(as.table(cor_matrix)), !is.na(Freq) & abs(Freq) >= threshold)
+    if (nrow(df) > 0) {
+      df[[group_var]] = group
+    }
+    return(df)
+  }))
+  return(collinearity_results)
 }
 
 # Set ggplot theme -----------------------------------------------------------------------------------------------

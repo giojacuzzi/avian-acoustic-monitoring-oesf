@@ -7,14 +7,14 @@ min_prediction_count = 1 # Minimum number of predictions in a survey (i.e. secon
 # OUTPUT:
 # A multidimensional data structure with dimensions [site × survey × season × species], with each
 # element containing a named list of observational data (including survey date and confidence scores)
-path_out_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/community_array_predictions.rds"
-path_out_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/community_array_surveydates.rds"
+path_out_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/NEW_community_array_predictions.rds"
+path_out_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/NEW_community_array_surveydates.rds"
 #
 # INPUT:
 # Cached dataframe of all predictions
-path_prediction_data    = "data/cache/1_pam/2_agg_raw_predictions/prediction_data.feather"
+path_prediction_data    = "data/cache/1_pam/2_agg_raw_predictions/NEW_prediction_data.feather"
 # Cached dataframe of prediction file counts (i.e. recordings) per site-survey
-path_survey_file_counts = "data/cache/1_pam/2_agg_raw_predictions/survey_file_counts.feather"
+path_survey_file_counts = "data/cache/1_pam/2_agg_raw_predictions/NEW_survey_file_counts.feather"
 ##################################################################################################################
 
 source("src/global.R")
@@ -24,7 +24,7 @@ message("Deriving community survey data (current time ", time_start <- format(Sy
 # Load survey file counts
 message("Loading survey file counts from ", path_survey_file_counts)
 survey_file_counts = arrow::read_feather(path_survey_file_counts) %>%
-  group_by(season, unit) %>%
+  group_by(season, site) %>%
   mutate(survey = as.integer(survey_date - min(survey_date)) + 1) %>%
   ungroup()
 
@@ -36,13 +36,13 @@ prediction_data = arrow::read_feather(path_prediction_data) %>% mutate(survey_da
 message("Cleaning data")
 prediction_data_filtered = prediction_data %>% mutate(
   common_name       = tolower(common_name),
-  site              = as.factor(tolower(as.character(unit))),
-  unit_agg          = as.factor(tolower(as.character(unit_agg))),
+  site              = as.factor(tolower(as.character(site))),
+  site_agg          = as.factor(tolower(as.character(site_agg))),
   confidence_source = replace_na(confidence_source, 0.0),
   confidence_target = replace_na(confidence_target, 0.0)
 )
 survey_file_counts_filtered = survey_file_counts %>% mutate(
-  site = as.factor(tolower(as.character(unit)))
+  site = as.factor(tolower(as.character(site)))
 )
 
 ## Manually exclude specific survey(s)
@@ -57,10 +57,10 @@ survey_file_counts_filtered = survey_file_counts_filtered %>% mutate(serialno = 
 prediction_data_filtered    = prediction_data_filtered    %>% mutate(serialno = as.character(serialno)) %>% filter(!startsWith(serialno, "SM2"))
 
 # Remove predictions that are not associated with a sampling site
-predicitions_with_missing_units = prediction_data_filtered %>% filter(is.na(site))
-if (nrow(predicitions_with_missing_units) > 0) {
+predicitions_with_missing_sites = prediction_data_filtered %>% filter(is.na(site))
+if (nrow(predicitions_with_missing_sites) > 0) {
   warning(crayon::yellow("Discarding predictions with missing sites:"))
-  print(crayon::yellow(predicitions_with_missing_units %>% distinct(site, season, deploy, serialno)))
+  print(crayon::yellow(predicitions_with_missing_sites %>% distinct(site, season, deploy, serialno)))
   prediction_data_filtered = prediction_data_filtered %>% filter(!is.na(site))
 }
 

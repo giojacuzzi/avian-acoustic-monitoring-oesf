@@ -1,7 +1,8 @@
 ## 1_preprocess_gis_data.R #########################################################################################
 # Load and preprocess raw GIS data
 #
-# OUTPUT: (various sf objects in local memory)
+# OUTPUT:
+# (various sf objects in local memory)
 #
 ## INPUT:
 path_watercourses = "data/environment/DNR_Hydrography/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation.shp"

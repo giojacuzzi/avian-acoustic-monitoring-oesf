@@ -11,18 +11,18 @@ min_sites_detected = 1 # Minimum number of sites present to retain a species for
 out_cache_dir  = "data/cache/4_msom/1_assemble_msom_data"
 path_out_y     = paste0(out_cache_dir, "/y.rds")
 path_out_xyday = paste0(out_cache_dir, "/xyday.rds")
-path_out_occurrence_predictor_plot_data      = paste0(out_cache_dir, "/occurrence_predictor_plot_data.rds")
-path_out_occurrence_predictor_homerange_data = paste0(out_cache_dir, "/occurrence_predictor_homerange_data.rds")
-path_out_detection_predictor_data            = paste0(out_cache_dir, "/detection_predictor_data.rds")
+path_out_occurrence_predictor_plot_data      = paste0(out_cache_dir, "/NEW_occurrence_predictor_plot_data.rds")
+path_out_occurrence_predictor_homerange_data = paste0(out_cache_dir, "/NEW_occurrence_predictor_homerange_data.rds")
+path_out_detection_predictor_data            = paste0(out_cache_dir, "/NEW_detection_predictor_data.rds")
 #
 # INPUT:
-path_community_array_predictions = "data/cache/1_pam/3_derive_observation_data/community_array_predictions.rds" # TODO: rename cache directory and re-run script 3
-path_community_array_surveydates = "data/cache/1_pam/3_derive_observation_data/community_array_surveydates.rds"
+path_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/NEW_community_array_predictions.rds"
+path_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/NEW_community_array_surveydates.rds"
 path_calibration_results         = "data/cache/1_pam/1_classifier_calibration/calibration_results_raw.csv"
 path_annotations                 = "data/cache/1_pam/1_classifier_calibration/annotations_clean.csv"
-path_predictors_detection        = "data/cache/detection_covariates/data_detection.rds"
-path_plot_scale_data             = "data/cache/habitat_vars/data_plot_scale_sites.rds"
-path_homerange_scale_data        = "data/cache/habitat_vars/data_homerange_scale_sites.rds"
+path_plot_scale_data             = "data/cache/3_gis/3_calc_occurrence_vars/NEW_data_plot_scale_clean_stage_3.rds"
+path_homerange_scale_data        = "data/cache/3_gis/3_calc_occurrence_vars/NEW_data_homerange_scale_clean_stage_3.rds"
+path_predictors_detection        = "data/cache/3_gis/6_calc_detection_vars/NEW_data_detection.rds"
 ##################################################################################################################
 
 source("src/global.R")
@@ -280,13 +280,11 @@ message("Loading detection predictor data")
 detection_data = readRDS(path_predictors_detection) %>% mutate(year = as.character(year)) %>% rename(season = year)
 
 message("Loading local plot scale data from ", path_plot_scale_data)
-occurrence_predictor_plot_data_local = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site)) %>%
-  select(site, elev, dist_road_paved, dist_road_all, dist_watercourse_major, dist_watercourse_all)
+occurrence_predictor_plot_data_local = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site))
 
 s = 'median' # TODO: do occurrence_predictor_plot_data_rs at PLOT scale, not median
 message("Loading remote sensing plot scale data from '", s, "' layer ", path_homerange_scale_data)
-occurrence_predictor_plot_data_rs = readRDS(path_homerange_scale_data)[[s]] %>% arrange(site) %>% mutate(site = tolower(site)) %>%
-  select(site, homerange_qmd_mean, homerange_treeden_all_mean)
+occurrence_predictor_plot_data_rs = readRDS(path_homerange_scale_data)[[s]] %>% arrange(site) %>% mutate(site = tolower(site))
 
 message("Combining all plot scale occurrence predictor data")
 occurrence_predictor_plot_data = occurrence_predictor_plot_data_local %>% full_join(occurrence_predictor_plot_data_rs, by = "site")

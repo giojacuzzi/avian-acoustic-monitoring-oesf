@@ -3,7 +3,6 @@
 #
 ## OUTPUT:
 path_out = "data/cache/3_gis/2_gen_cover_rasters"
-path_rast_cover_clean_out = "data/cache/occurrence_covariates/NEW_rast_cover_clean.tif"
 #
 ## INPUT:
 # Base RS-FRIS data (0.1 acre resolution, i.e. ~404m2 or 20.10836 * 20.10836 m grain, roughly 1% of the area of a 100m radius circle)
@@ -44,34 +43,6 @@ load_raster = function(path_rast) {
 data_plot_scale = aru_sites
 
 # Derive land cover stages/strata ---------------------------------------------------------------
-
-## Developmental stage classifications (e.g. O'Hara et al. 1996, Oliver and Larson 1996, and Spies 1997)
-stages_3 = tibble(
-  class   = c("standinit", "compex", "mature"),
-  age_min = c(0, 25, 80),
-  age_max = c(25, 80, Inf),
-  idx = 1:3
-); print(stages_3)
-stages_4 = tibble(
-  class   = c("standinit", "compex", "underdev", "old"),
-  age_min = c(0, 25, 80, 200),
-  age_max = c(25, 80, 200, Inf),
-  idx = 1:4
-); print(stages_4)
-
-## Management strata (e.g. Minkova)
-strata_4 = tibble(
-  class   = c("thin", "standinit", "compex", "mature"),
-  age_min = c(NA, 0, 25, 80),
-  age_max = c(NA, 25, 80, Inf),
-  idx = 1:4
-); print(strata_4)
-strata_5 = tibble(
-  class   = c("thin", "standinit", "compex", "underdev", "old"),
-  age_min = c(NA, 0, 25,  80, 200),
-  age_max = c(NA, 25, 80, 200, Inf),
-  idx = 1:5
-); print(strata_5)
 
 # WADNR delineated patch polygons. Manually determined from a combination of aerial imagery and remote sensing.
 wadnr_patch_sf = st_read('data/environment/GIS Data/Forest Development Strata/AgeStrataFixedDIS_RSFRIS20200130.shp') %>%
@@ -117,6 +88,7 @@ rast_origin_imputed = cover(rast_missing_imputed, rast_origin)
 rast_age = round(year_baseline - rast_origin_imputed)
 
 # Determine thinning treatment
+# TODO: Check thinning class validity for sites: ca263i (mature), ap022i (standinit), az041i (standinit), 
 poly_thinning_treatment = st_read('data/environment/GIS Data/Forest Development Strata/ThinAfter94NoHarvSinceClipByInitBuf3.shp') %>% 
   st_transform(crs_m) %>% select(TECHNIQUE_, FMA_DT, FMA_STATUS) %>% janitor::clean_names() %>%
   mutate(technique = technique %>% str_to_lower(), fma_status = fma_status %>% str_to_lower()) %>%

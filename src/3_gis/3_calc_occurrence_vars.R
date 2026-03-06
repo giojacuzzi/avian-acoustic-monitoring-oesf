@@ -6,14 +6,14 @@
 pnts_name = "sites" # "sites" or "no_action"
 overwrite_data_plot_scale_cache = TRUE
 overwrite_data_homerange_scale_cache = TRUE
+cover_classification = "clean_stage_3" # e.g. clean_stage_3, strata_4
 #
 ## OUTPUT:
-path_data_plot_scale_out      = paste0("data/cache/habitat_vars/data_plot_scale_", pnts_name, ".rds")
-path_data_homerange_scale_out = paste0("data/cache/habitat_vars/data_homerange_scale_", pnts_name, ".rds")
+path_data_plot_scale_out      = paste0("data/cache/3_gis/3_calc_occurrence_vars/NEW_data_plot_scale_", cover_classification, ".rds")
+path_data_homerange_scale_out = paste0("data/cache/3_gis/3_calc_occurrence_vars/NEW_data_homerange_scale_", cover_classification, ".rds")
 #
 ## INPUT:
-path_trait_data = "data/cache/species_traits/species_traits.csv"
-path_rast_cover = "data/cache/occurrence_covariates/rast_cover_clean.tif"
+path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 # Base RS-FRIS data (0.1 acre resolution, i.e. ~404m2 or 20.10836 * 20.10836 m grain, roughly 1% of the area of a 100m radius circle)
 # RS-FRIS 4.0 uses a combination of 2019 and 2020 photogrammetry.
 # RS-FRIS 5.0 uses a combination of 2021 and 2022 photogrammetry. 
@@ -22,7 +22,8 @@ dir_rsfris_version = 'data/environment/rsfris_v4.0' # Only use 2020 for now
 ###########################################################################################################
 
 source("src/global.R")
-source("src/3_gis/1_preprocess_gis_data.R")
+
+path_rast_cover = paste0("data/cache/3_gis/2_gen_cover_rasters/rast_cover_", cover_classification, ".tif")
 
 options(mapview.maxpixels = 2117676)
 
@@ -31,7 +32,7 @@ pnts = switch(pnts_name,
     # ARU locations
     sites = {
       path_rast_cover = path_rast_cover
-      aru_sites
+      read_rds("data/cache/3_gis/2_gen_cover_rasters/site_cover_class_sf.rds")
     },
     
     # Existing 2020 landscape
@@ -53,7 +54,7 @@ message("Retrieved ", nrow(pnts), " points for '", pnts_name, "'")
 
 message('Loading raster cover data from cache ', path_rast_cover)
 rast_cover = rast(path_rast_cover)
-rast_cover = as.factor(rast_cover)
+# rast_cover = as.factor(rast_cover)
 
 ##############################################################################
 # Study area, sites, boundaries, and helper functions
@@ -94,16 +95,17 @@ summary_stats = function(x, na.rm = TRUE, conversion_factor = 1) {
   return(data.frame(mean = mu, sd = sigma, cv = cv))
 }
 
-# TODO: Get simplified LSOG covers
-
 ##############################################################################
 # Rasters
 
+# TODO
 rast_origin = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_ORIGIN_YEAR.img'))
 rast_origin_missing = rast_origin
 values(rast_origin_missing)[values(rast_origin_missing) <= 2020] = NA
 values(rast_origin)[values(rast_origin) > 2020] = NA
 rast_age = round(2020 - rast_origin)
+
+source("src/3_gis/1_preprocess_gis_data.R")
 
 ##############################################################################
 # Local plot scale covariates
@@ -138,9 +140,12 @@ if (overwrite_data_plot_scale_cache) {
   }
   
   # Elevation [m]
-  pnts = elevatr::get_elev_point(pnts) %>% rename(elev = elevation)
+  # TODO: do this in script #2, and get it from the DAP data, not elevatr
+  pnts = elevatr::get_elev_point(pnts, src = "aws", overwrite = TRUE)
+  mapview(pnts, zcol = "elevation")
 
   # Age (mean and cv) [#]
+  # TODO: do this in script #2
   pnts$age_point = terra::extract(rast_age, vect(pnts))[, 2]
   stats_age      = compute_raster_buffer_value_func(rast_age, pnts, plot_buffer, summary_stats)
   pnts$age_mean = as.numeric(stats_age[,2])
@@ -150,12 +155,6 @@ if (overwrite_data_plot_scale_cache) {
   table(pnts$age_point)
   table(round(pnts$age_mean))
   
-  # Cover class [categorical]
-  pnts$cover_class = terra::extract(rast_cover, vect(pnts))$cover_class
-  
-  # # Thinning treatment [categorical]
-  # pnts$thinning_treatment
-
   if (pnts_name == "sites") {
     # Basal area (all live trees) [m2/ha] TODO: confirm if this is a mean value at local plot level
     pnts = pnts %>% left_join(data_plot %>% select(site, plot_ba_hs = ba_ha_all), by = 'site')
@@ -276,7 +275,7 @@ if (overwrite_data_plot_scale_cache) {
     
     pnts = pnts %>% left_join(tree_div_metrics, by = 'site')
     
-    ggplot(pnts, aes(x = as.factor(cover_class), y = plot_tree_all_diversity)) +
+    ggplot(pnts, aes(x = stratum_4, y = plot_tree_all_diversity)) +
       geom_violin() +
       stat_summary(fun = mean, geom = "point") +
       ggtitle("Tree shannon diversity across strata") + theme_minimal()
@@ -293,18 +292,19 @@ if (overwrite_data_plot_scale_cache) {
     # Understory reinit: tshe dominates, abam establishing, tree size less uniform
     # Old forest: tshe is climax species, abam established
     metric = "plot_tree_all_density_" # "tree_all_density_", "tree_gte10cm_density_"
-    dps_long = pnts %>% select(site, cover_class, starts_with(metric)) %>%
+    dps_long = pnts %>% select(site, stratum_4, starts_with(metric)) %>%
       pivot_longer(cols = starts_with(metric), names_to = "species", values_to = "density") %>%
       mutate(species = gsub(metric, "", species))
     ggplot(dps_long, aes(x = species, y = density, fill = species)) +
       geom_boxplot() +
-      facet_wrap(~ cover_class, scales = "free_y") +
+      facet_wrap(~ stratum_4, scales = "free_y") +
       coord_cartesian(ylim = c(0, 1250)) +
       labs(title = "Tree species density by stage") +
       theme_minimal()
   }
   
   # Distance to roads
+  paved_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway", "Light-Duty Road")))
   dist_road_paved = st_distance(pnts, paved_roads)
   dist_road_paved = apply(dist_road_paved, 1, min)
   pnts$dist_road_paved = dist_road_paved
@@ -345,10 +345,9 @@ if (overwrite_data_plot_scale_cache) {
   # }
   # mapview(rast_cover) + mapview(pnts, label = pnts$site, zcol = 'dist_nearest_edge') + mapview(st_buffer(pnts, 100), col.regions = 'transparent', lwd = 2)
 
-  message('Saving plot scale data cache ', path_data_plot_scale_out)
   dir.create(dirname(path_data_plot_scale_out), recursive = TRUE, showWarnings = FALSE)
   saveRDS(pnts, path_data_plot_scale_out)
-  message(crayon::green("Finished generating plot scale data cache (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), "min )"))
+  message(crayon::green("Cached plot scale data to", path_data_plot_scale_out, "(", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), "min )"))
   
 } else { # overwrite_data_plot_scale_cache is FALSE
   message('Loading plot scale data from cache ', path_data_plot_scale_out)
@@ -364,26 +363,17 @@ if (overwrite_data_homerange_scale_cache) {
   
   data_homerange_scale = list()
   
-  homeranges = species_trait_data %>% select(common_name, home_range_radius_m)
-  message("Homerange buffer min: ",    min(homeranges$home_range_radius_m))
-  message("Homerange buffer median: ", buff_median <- round(median(homeranges$home_range_radius_m),0))
-  message("Homerange buffer mean: ",   buff_mean <- round(mean(homeranges$home_range_radius_m),0))
-  message("Homerange buffer max: ",    buff_max <- round(max(homeranges$home_range_radius_m),0))
-  homeranges = rbind(data.frame(
-    common_name = c("plot", "median", "mean", "max"),
-    home_range_radius_m = c(100, buff_median, buff_mean, buff_max)
-  ), homeranges %>% mutate(home_range_radius_m = round(home_range_radius_m, 0)))
-  
-  # DEBUG
-  # Overwrite homeranges with the median and mean range only for now
-  # homeranges = data.frame(
-  #   common_name = c("min", "median", "mean", "max"),
-  #   home_range_radius_m = c(100, buff_median, buff_mean, buff_max)
-  # )
+  message("Homerange buffer min: ",    min(species_trait_data$home_range_radius_m))
+  message("Homerange buffer median: ", buff_median <- round(median(species_trait_data$home_range_radius_m),0))
+  message("Homerange buffer mean: ",   buff_mean   <- round(mean(species_trait_data$home_range_radius_m),0))
+  message("Homerange buffer max: ",    buff_max    <- round(max(species_trait_data$home_range_radius_m),0))
   homeranges = data.frame(
-    common_name = c("median"),
-    home_range_radius_m = c(buff_median)
+    common_name = c("plot", "median"), # can also do "mean", "max"
+    home_range_radius_m = c(100, buff_median) # buff_mean, buff_max
   )
+  # TODO: calculate species-specific ranges
+  # homeranges = species_trait_data %>% select(common_name, home_range_radius_m)
+  # homeranges = rbind(homeranges, species_trait_data %>% mutate(home_range_radius_m = round(home_range_radius_m, 0)))
   # DEBUG
 
   # TODO: Calculate landscape-level patch size
@@ -513,25 +503,25 @@ if (overwrite_data_homerange_scale_cache) {
           # Age [#]
           # age = summary_stats(values(mask(rast_age, region)), na.rm = TRUE),
           # Basal area [m2/ha]
-          # ba = summary_stats(values(mask(rast_ba, region)), na.rm = TRUE),
+          ba = summary_stats(values(mask(rast_ba, region)), na.rm = TRUE),
           # Tree density (total) [# trees/ha]
           treeden_all = summary_stats(values(mask(rast_treeden_all, region)), na.rm = TRUE),
           # Tree density (large, dbh > 4 in) [# trees/ha]
-          # treeden_gt4inDbh = summary_stats(values(mask(rast_treeden_gt4inDbh, region)), na.rm = TRUE),
+          treeden_gt4inDbh = summary_stats(values(mask(rast_treeden_gt4inDbh, region)), na.rm = TRUE),
           # Tree diameter [cm]
-          qmd = summary_stats(values(mask(rast_qmd, region)), na.rm = TRUE)
+          qmd = summary_stats(values(mask(rast_qmd, region)), na.rm = TRUE),
           # Tree height [m]
-          # htmax = summary_stats(values(mask(rast_htmax, region)), na.rm = TRUE)
+          htmax = summary_stats(values(mask(rast_htmax, region)), na.rm = TRUE),
           # Canopy layers [#]
-          # canopy_layers = summary_stats(values(mask(rast_canopy_layers, region)), na.rm = TRUE),
+          canopy_layers = summary_stats(values(mask(rast_canopy_layers, region)), na.rm = TRUE),
           # Canopy cover [%]
-          # canopy_cover = summary_stats(values(mask(rast_canopy_cover, region)), na.rm = TRUE),
+          canopy_cover = summary_stats(values(mask(rast_canopy_cover, region)), na.rm = TRUE),
           # Canopy closure [%]
-          # canopy_closure = summary_stats(values(mask(rast_canopy_closure, region)), na.rm = TRUE),
+          canopy_closure = summary_stats(values(mask(rast_canopy_closure, region)), na.rm = TRUE),
           # Density of snags > 15" DBH [#/ha]
-          # snagden_gt15dbh = summary_stats(values(mask(rast_snagden_gt15inDbh, region)), na.rm = TRUE),
+          snagden_gt15dbh = summary_stats(values(mask(rast_snagden_gt15inDbh, region)), na.rm = TRUE),
           # Downed wood volume [m3/ha]
-          # downvol = summary_stats(values(mask(rast_downvol, region)), na.rm = TRUE)
+          downvol = summary_stats(values(mask(rast_downvol, region)), na.rm = TRUE)
         )
         # format and discard irrelevant variables
         vars = as.data.frame(vars) %>% select(-ends_with(".sd"))
@@ -569,10 +559,11 @@ if (overwrite_data_homerange_scale_cache) {
       # 
       # # Cover class richness [#]
       # Quantifies the number of cover types present in home range
-      cover_freq = freq(homerange_cover) %>% select(value, count) %>% mutate(value = as.integer(value))
-      cover_freq = data.frame(value = 1:7) %>%
-        left_join(cover_freq, by = "value") %>%
-        mutate(count = ifelse(is.na(count), 0, count))
+      cover_freq = tibble(value = c("thin", "standinit", "compex", "underdev", "old", "mature", "road_paved", "water"), count = 0)
+      cover_freq = cover_freq %>% rows_update(freq(homerange_cover) %>% select(value, count), by = "value", unmatched = "ignore")
+      # cover_freq = data.frame(value = 1:7) %>%
+      #   left_join(cover_freq, by = "value") %>%
+      #   mutate(count = ifelse(is.na(count), 0, count))
       # cover_forest_freq = cover_freq %>% filter(value %in% c(1,2,3,4,5))
       # (cover_richness = cover_freq %>% filter(count != 0) %>% nrow())
       # (cover_forest_richness = cover_forest_freq %>% filter(count != 0) %>% nrow())
@@ -590,77 +581,75 @@ if (overwrite_data_homerange_scale_cache) {
       # (cover_forest_diversity = lsm_l_shdi(homerange_cover_forest) %>% pull(value))
       
       # Proportional abundance of each cover class [%]
-      (prop_abund_standinit = cover_freq %>% filter(value == 1)     %>% pull(count) / ncells_homerange) # "stand initiation" 0-25 yr
-      (prop_abund_stemexcl = cover_freq %>% filter(value == 2)      %>% pull(count) / ncells_homerange) # "stem exclusion" 25-80 yr
-      (prop_abund_undstryreinit = cover_freq %>% filter(value == 3) %>% pull(count) / ncells_homerange) # "understory reinitiation" 80-200 yr
-      (prop_abund_oldgrowth = cover_freq %>% filter(value == 4)     %>% pull(count) / ncells_homerange) # "old-growth forest" 200+ yr
-      (prop_abund_lsog = prop_abund_undstryreinit + prop_abund_oldgrowth) # "late-successional and old growth forest" (80+ yr)
-      
-      (prop_abund_comthin = cover_freq %>% filter(value == 5) %>% pull(count) / ncells_homerange) # "commercial thinning"
-      # (prop_abund_roads = cover_freq %>% filter(value == 6)   %>% pull(count) / ncells_homerange) # "roads"
-      # (prop_abund_water = cover_freq %>% filter(value == 7)   %>% pull(count) / ncells_homerange) # "water"
+      (pcnt_standinit  = cover_freq %>% filter(value == "standinit")  %>% pull(count) / ncells_homerange) # "stand initiation" 0-25 yr
+      (pcnt_compex     = cover_freq %>% filter(value == "compex")     %>% pull(count) / ncells_homerange) # "stem exclusion" 25-80 yr
+      (pcnt_underdev   = cover_freq %>% filter(value == "underdev")   %>% pull(count) / ncells_homerange) # "understory reinitiation" 80-200 yr
+      (pcnt_old        = cover_freq %>% filter(value == "old")        %>% pull(count) / ncells_homerange) # "old-growth forest" 200+ yr
+      (pcnt_mature     = cover_freq %>% filter(value == "mature")     %>% pull(count) / ncells_homerange) # "late-successional and old growth forest" (80+ yr)
+      (pcnt_thin       = cover_freq %>% filter(value == "thin")       %>% pull(count) / ncells_homerange) # "commercial thinning"
+      (pcnt_road_paved = cover_freq %>% filter(value == "road_paved") %>% pull(count) / ncells_homerange) # "roads"
+      (pcnt_water      = cover_freq %>% filter(value == "water")      %>% pull(count) / ncells_homerange) # "water"
       
       # Aggregation index [#]
       # Quantifies degree of habitat contiguity versus fragmentation
       # Equals 0 when the patch types are maximally disaggregated (i.e., when there are no like adjacencies); AI increases as the landscape is increasingly aggregated and equals 100 when the landscape consists of a single patch.
-      # (aggregation_idx = lsm_l_ai(homerange_cover, directions = 8) %>% pull(value))
+      (aggregation_idx = lsm_l_ai(homerange_cover, directions = 8) %>% pull(value))
       
       # Shape index [#]
       # Quantifies patch shape complexity
       # Equals 1 if all patches are squares. Increases, without limit, as the shapes of patches become more complex.
       (shape_idx = lsm_l_shape_mn(homerange_cover, directions = 8) %>% pull(value))
       
-      # # Contrast-weighted edge density [m/ha]
-      # # The density of patch edges weighted by their contrast
-      # # Equals 0 when there is no edge in the landscape (i.e. landscape consists of a single patch). Increases as the amount of edge in the landscape increases and/or as the contrast in edges increase (i.e. contrast weight approaches 1).
-      # max_ht_m = max(values(rast_htmax), na.rm = TRUE)
-      # homerange_height = mask(crop(rast_htmax, homerange_and_edge_buffer), homerange_and_edge_buffer)
-      # # mapview(hr_patch_ids) + mapview(homerange_height)
-      # 
-      # height_aligned = resample(homerange_height, hr_patch_ids, method = "bilinear")
-      # zonal_means = zonal(height_aligned, hr_patch_ids, fun = "median", na.rm = TRUE) # TODO: consider min instead
-      # 
-      # if (nrow(zonal_means) > 1) {
-      #   # Equals the sum of the lengths (m) of each edge segment in the landscape multiplied by the
-      #   # corresponding contrast weight, divided by the total landscape area (m2), converted to hectares.
-      #   colnames(zonal_means) = c('class', 'height')
-      #   # mapview(classify(hr_patch_ids, rcl = zonal_means))
-      #   edge_lengths = get_adjacencies(hr_patch_ids, neighbourhood = 8, what = "unlike", upper = FALSE)[[1]] * res(hr_patch_ids)[1]
-      #   heights = zonal_means$height
-      #   names(heights) = zonal_means$class
-      #   height_diff_matrix = outer(heights, heights, FUN = function(x, y) abs(x - y))
-      #   
-      #   # Weights are derived from proportion of difference in height relative to the maximum potential difference in height (Hou and Walz 2016, Huang et al. 2014)
-      #   # d = 0 --> 0 m difference
-      #   # d = 1 --> max m difference (i.e. maximum tree height of entire landscape)
-      #   weights = height_diff_matrix / max_ht_m
-      #   homerange_rast_area = ncells_homerange * res(homerange_cover)[1] * res(homerange_cover)[2] * conv_m2_to_ha
-      #   (density_edge_cw = sum(edge_lengths * weights, na.rm = TRUE) / homerange_rast_area)
-      # } else { 
-      #   # Only one patch type
-      #   (density_edge_cw = 0.0)
-      # }
-      # density_edge_cw = set_units(density_edge_cw, 'm/ha')
+      # Contrast-weighted edge density [m/ha]
+      # The density of patch edges weighted by their contrast
+      # Equals 0 when there is no edge in the landscape (i.e. landscape consists of a single patch). Increases as the amount of edge in the landscape increases and/or as the contrast in edges increase (i.e. contrast weight approaches 1).
+      max_ht_m = max(values(rast_htmax), na.rm = TRUE)
+      homerange_height = mask(crop(rast_htmax, homerange_and_edge_buffer), homerange_and_edge_buffer)
+      # mapview(hr_patch_ids) + mapview(homerange_height)
+
+      height_aligned = resample(homerange_height, hr_patch_ids, method = "bilinear")
+      zonal_means = zonal(height_aligned, hr_patch_ids, fun = "median", na.rm = TRUE) # TODO: consider min instead
+
+      if (nrow(zonal_means) > 1) {
+        # Equals the sum of the lengths (m) of each edge segment in the landscape multiplied by the
+        # corresponding contrast weight, divided by the total landscape area (m2), converted to hectares.
+        colnames(zonal_means) = c('class', 'height')
+        # mapview(classify(hr_patch_ids, rcl = zonal_means))
+        edge_lengths = get_adjacencies(hr_patch_ids, neighbourhood = 8, what = "unlike", upper = FALSE)[[1]] * res(hr_patch_ids)[1]
+        heights = zonal_means$height
+        names(heights) = zonal_means$class
+        height_diff_matrix = outer(heights, heights, FUN = function(x, y) abs(x - y))
+
+        # Weights are derived from proportion of difference in height relative to the maximum potential difference in height (Hou and Walz 2016, Huang et al. 2014)
+        # d = 0 --> 0 m difference
+        # d = 1 --> max m difference (i.e. maximum tree height of entire landscape)
+        weights = height_diff_matrix / max_ht_m
+        homerange_rast_area = ncells_homerange * res(homerange_cover)[1] * res(homerange_cover)[2] * conv_m2_to_ha
+        (density_edge_cw = sum(edge_lengths * weights, na.rm = TRUE) / homerange_rast_area)
+      } else {
+        # Only one patch type
+        (density_edge_cw = 0.0)
+      }
+      density_edge_cw = set_units(density_edge_cw, 'm/ha')
       
-      
-      # # Density of roads (paved and all) [m/ha]
-      # homerange_buffer_area_ha = set_units(st_area(homerange_buffer), ha)
-      # homerange_roads_paved = st_intersection(st_geometry(st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway", "Light-Duty Road")))), homerange_buffer)
-      # homerange_roads = st_intersection(st_geometry(st_make_valid(roads)), homerange_buffer)
-      # homerange_roads_paved_length = sum(st_length(homerange_roads_paved))
-      # homerange_roads_length = sum(st_length(homerange_roads))
-      # (density_roads_paved = homerange_roads_paved_length / homerange_buffer_area_ha)
-      # (density_roads = homerange_roads_length / homerange_buffer_area_ha)
-      # # mapview(homerange_roads_paved) + mapview(homerange_roads) + mapview(homerange_buffer) + homerange_cover
-      # 
-      # # Density of streams (type 1-3 and all types) [m/ha]
-      # homerange_streams_major = st_intersection(st_geometry(st_make_valid(watercourses %>% filter(sl_wtrty_c %in% c(1, 2, 3)))), homerange_buffer)
-      # homerange_streams = st_intersection(st_geometry(st_make_valid(watercourses)), homerange_buffer)
-      # homerange_streams_major_length = sum(st_length(homerange_streams_major))
-      # homerange_streams_length = sum(st_length(homerange_streams))
-      # (density_streams_major = homerange_streams_major_length / homerange_buffer_area_ha)
-      # (density_streams = homerange_streams_length / homerange_buffer_area_ha)
-      # # mapview(homerange_streams_major) + mapview(homerange_streams) + mapview(homerange_buffer) + homerange_cover
+      # Density of roads (paved and all) [m/ha]
+      homerange_buffer_area_ha = set_units(st_area(homerange_buffer), ha)
+      homerange_roads_paved = st_intersection(st_geometry(st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway", "Light-Duty Road")))), homerange_buffer)
+      homerange_roads = st_intersection(st_geometry(st_make_valid(roads)), homerange_buffer)
+      homerange_roads_paved_length = sum(st_length(homerange_roads_paved))
+      homerange_roads_length = sum(st_length(homerange_roads))
+      (density_roads_paved = homerange_roads_paved_length / homerange_buffer_area_ha)
+      (density_roads = homerange_roads_length / homerange_buffer_area_ha)
+      # mapview(homerange_roads_paved) + mapview(homerange_roads) + mapview(homerange_buffer) + homerange_cover
+
+      # Density of streams (type 1-3 and all types) [m/ha]
+      homerange_streams_major = st_intersection(st_geometry(st_make_valid(watercourses %>% filter(sl_wtrty_c %in% c(1, 2, 3)))), homerange_buffer)
+      homerange_streams = st_intersection(st_geometry(st_make_valid(watercourses)), homerange_buffer)
+      homerange_streams_major_length = sum(st_length(homerange_streams_major))
+      homerange_streams_length = sum(st_length(homerange_streams))
+      (density_streams_major = homerange_streams_major_length / homerange_buffer_area_ha)
+      (density_streams = homerange_streams_length / homerange_buffer_area_ha)
+      # mapview(homerange_streams_major) + mapview(homerange_streams) + mapview(homerange_buffer) + homerange_cover
       
       if (pnts_name == "sites") {
         site = pnts[j, ] %>% pull(site)
@@ -682,21 +671,21 @@ if (overwrite_data_homerange_scale_cache) {
         # cover_forest_evenness,
         # cover_diversity,
         # cover_forest_diversity,
-        prop_abund_standinit,
-        prop_abund_stemexcl,
-        prop_abund_undstryreinit,
-        prop_abund_oldgrowth,
-        prop_abund_lsog,
-        prop_abund_comthin,
-        # prop_abund_roads,
-        # prop_abund_water,
-        # aggregation_idx,
-        shape_idx
-        # density_edge_cw,
-        # density_roads_paved,
-        # density_roads,
-        # density_streams_major,
-        # density_streams
+        pcnt_standinit,
+        pcnt_compex,
+        pcnt_underdev,
+        pcnt_old,
+        pcnt_mature,
+        pcnt_thin,
+        pcnt_road_paved,
+        pcnt_water,
+        aggregation_idx,
+        shape_idx,
+        density_edge_cw,
+        density_roads_paved,
+        density_roads,
+        density_streams_major,
+        density_streams
       ), final_df)
       
       data_homerange_scale_species = rbind(data_homerange_scale_species, final_df)
@@ -720,10 +709,9 @@ if (overwrite_data_homerange_scale_cache) {
     
     data_homerange_scale[[scale]] = data_homerange_scale_species
   }
-  message('Saving homerange data cache ', path_data_homerange_scale_out)
   dir.create(dirname(path_data_homerange_scale_out), recursive = TRUE, showWarnings = FALSE)
   saveRDS(data_homerange_scale, path_data_homerange_scale_out)
-  message(crayon::green("Finished generating homerange data cache (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), "min )"))
+  message(crayon::green("Cached homerange data cache to", path_data_homerange_scale_out, "(", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), "min )"))
   
 } else { # overwrite_data_homerange_scale_cache is FALSE
   message('Loading homerange scale data from cache ', path_data_homerange_scale_out)

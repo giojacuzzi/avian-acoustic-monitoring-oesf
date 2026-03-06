@@ -37,7 +37,7 @@ y = readRDS(path_y)
 # Inspect group membership ---------------------------------------------------------------------
 
 ggplot(groups %>% left_join(species_traits, by = "common_name"), aes(x = 1, fill = group_nest)) + geom_bar(position = "fill")
-ggplot(groups %>% left_join(species_traits, by = "common_name"), aes(x = 1, fill = group_nest)) + geom_bar(position = "fill")
+ggplot(groups %>% left_join(species_traits, by = "common_name"), aes(x = 1, fill = group_migrant)) + geom_bar(position = "fill")
 ggplot(groups %>% left_join(species_traits, by = "common_name"), aes(x = 1, fill = group_status)) + geom_bar(position = "fill")
 
 # Visualize results ---------------------------------------------------------------------

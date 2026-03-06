@@ -7,7 +7,6 @@ out_cache_dir  = "data/cache/4_msom/4_community_comp"
 # INPUT:
 path_msom = "data/cache/models/msom_nofp_all_2026-02-12_19:37:00.rds"
 path_trait_data = "data/cache/trait_data/trait_data.csv"
-path_unit_key = "data/unit_key.csv"
 ##################################################################################################################
 
 source("src/global.R")
@@ -19,8 +18,8 @@ source("src/global.R")
 message("Loading species trait data from ", path_trait_data)
 species_traits = read_csv(path_trait_data, show_col_types = FALSE)
 
-message("Loading site unit key from ", path_unit_key)
-unit_key = read_csv(path_unit_key, show_col_types = FALSE) %>% rename(site = unit) %>% mutate(site = str_to_lower(site))
+message("Loading site key from ", path_site_key)
+site_key = read_csv(path_site_key, show_col_types = FALSE) %>% mutate(site = str_to_lower(site))
 
 message("Loading data for multi-species occupancy model ", path_msom)
 model_data = readRDS(path_msom)
@@ -32,7 +31,7 @@ sites = model_data$sites
 species = model_data$species
 seasons = c("2020", "2021", "2022", "2023") # TODO: get from model_data
 
-strata = as.factor(unit_key$stratum[ match(sites, unit_key$site) ])
+strata = as.factor(site_key$stratum[ match(sites, site_key$site) ])
 
 # Composition PERMANOVA and NMDS ---------------------------------------------------------------------
 
@@ -186,7 +185,7 @@ nmds_binary_k2 # Stress should be < 0.2 for interpretable results
 # No systematic curvature → suggests axes adequately represent dissimilarity
 stressplot(nmds_binary_k2)
 
-strata = unit_key$stratum[ match(sites, unit_key$site) ]
+strata = site_key$stratum[ match(sites, site_key$site) ]
 strata_cols = c(
   "COMP EXCL"  = "forestgreen",
   "MATURE"     = "tan4",
@@ -370,7 +369,8 @@ J = dim(z)[2] # n sites
 T = dim(z)[3] # n seasons
 I = dim(z)[4] # n species
 
-for (grouping in c("group_all", "group_migrant", "group_nest", "group_size", "group_diet")) {
+richness_results = list()
+for (grouping in c("group_all", "group_migrant", "group_nest", "group_size")) {
   message("Calculating richness for grouping: ", grouping)
   
   species_group = tibble(
@@ -401,7 +401,7 @@ for (grouping in c("group_all", "group_migrant", "group_nest", "group_size", "gr
   rownames(year_richness) = seasons
   colnames(year_richness) = species_group %>% arrange(group_idx) %>% pull(group) %>% unique()
   
-  d = as_tibble(site_richness, rownames = "site") %>% left_join(unit_key %>% select(site, stratum), by = "site")
+  d = as_tibble(site_richness, rownames = "site") %>% left_join(site_key %>% select(site, stratum), by = "site")
   dl = d %>% pivot_longer(cols = where(is.numeric), names_to = "group", values_to = "richness") %>% 
     mutate(stratum = factor(stratum, levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE")))
   
@@ -410,4 +410,67 @@ for (grouping in c("group_all", "group_migrant", "group_nest", "group_size", "gr
     scale_fill_brewer(palette = "Set2") +  # optional, nice color palette
     facet_wrap(~ group, scales = "free_y") +
     labs(title = grouping, x = "Site", y = "Species richness", fill = "Guild"); print(p)
+  
+  richness_results[[grouping]] = site_richness
 }
+
+# Estimate functional richness -------------------------------------------------------------------------
+
+library(FD)
+
+# Keep only traits
+st = species_traits %>% filter(common_name %in% colnames(occ))
+traits <- st %>% as.data.frame() %>% select(mass, group_migrant, group_nest, group_diet)
+# Row names = species
+rownames(traits) <- st$common_name
+
+comm <- occ[, rownames(traits)]
+
+# Sum occurrences per species
+species_totals <- colSums(comm)
+
+# See which species have zero occurrences
+absent_species <- names(species_totals[species_totals == 0])
+absent_species
+
+# Keep only species present in at least one site
+present_species <- names(species_totals[species_totals > 0])
+
+comm2 <- comm[, present_species]
+traits2 <- traits[present_species, ]
+traits2 <- traits2 %>%
+  mutate(across(where(is.character), as.factor))
+
+fd <- dbFD(x = traits2,
+           a = comm2,
+           calc.FRic = TRUE,      # Compute functional richness
+           corr = "cailliez",     # Correction for negative eigenvalues in PCoA
+           stand.x = TRUE, # Standardize traits
+           m = 10)        
+
+# Functional richness per site
+fric <- fd$FRic
+
+# Optional: functional evenness and divergence
+feve <- fd$FEve
+fdiv <- fd$FDiv
+
+# Combine into a data frame
+site_FD <- data.frame(
+  site = rownames(comm2),
+  FRic = fric,
+  FEve = feve,
+  FDiv = fdiv
+)
+site_FD = site_FD %>% left_join(site_key %>% select(site, stratum))
+head(site_FD)
+
+ggplot(site_FD, aes(x = stratum, y = FDiv, color = stratum)) +
+  geom_boxplot()
+
+taxonomic_richness = data.frame(richness_results[["group_all"]])
+taxonomic_richness$site = rownames(richness_results[["group_all"]])
+taxonomic_richness$TRic = taxonomic_richness$all
+
+ggplot(left_join(site_DF, taxonomic_richness), aes(x = TRic, y = FDiv)) +
+  geom_point(shape = 1)

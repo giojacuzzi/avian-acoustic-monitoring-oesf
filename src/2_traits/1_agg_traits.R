@@ -2,7 +2,7 @@
 # Aggregate species functional traits into a single dataframe
 #
 ## OUTPUT:
-path_out = "data/cache/trait_data/trait_data.csv"
+path_out = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 #
 ## INPUT:
 path_avonet      = "data/traits/AVONET Supplementary dataset 1.xlsx"
@@ -75,6 +75,18 @@ trait_data = trait_data %>% mutate(nesting_guild_cornell = str_to_lower(nesting_
   group_nest = case_when(
     (nesting_guild_cornell %in% c("tree"))   ~ "tree",
     (nesting_guild_cornell %in% c("cavity")) ~ "cavity",
+    (nesting_guild_cornell %in% c("ground")) ~ "ground",
+    (nesting_guild_cornell %in% c("shrub"))  ~ "shrub",
+    TRUE ~ "other" # building, burrow, cliff
+  )
+)
+
+# Nesting guild with primary/secondary cavity delineation
+trait_data = trait_data %>% mutate(nesting_guild_cornell = str_to_lower(nesting_guild_cornell)) %>% mutate(
+  group_nest_ps = case_when(
+    (nesting_guild_cornell %in% c("tree"))   ~ "tree",
+    (nesting_guild_cornell %in% c("cavity_primary"))   ~ "cavity_p",
+    (nesting_guild_cornell %in% c("cavity_secondary")) ~ "cavity_s",
     (nesting_guild_cornell %in% c("ground")) ~ "ground",
     (nesting_guild_cornell %in% c("shrub"))  ~ "shrub",
     TRUE ~ "other" # building, burrow, cliff
