@@ -4,6 +4,7 @@
 # CONFIG:
 path_msom = "data/cache/models/msom_fp_fp_nest_2026-02-17_22:04:27.rds"
 # path_msom = "data/cache/models/msom_fp_fp_diet_2026-02-13_18:14:56.rds"
+# path_msom = "data/cache/models/msom_pcnt_fp_fp_all.rds"
 #
 # OUTPUT:
 out_cache_dir  = "data/cache/4_msom/3_msom_results"
@@ -121,7 +122,7 @@ ggplot(species_baselines %>% filter(startsWith(param, "u")), aes(x = prob, y = r
 message("Summarizing occupancy parameters")
 
 # Get occupancy hyperparameters
-param_families <- c("alpha", "delta")
+param_families <- c("alpha")
 combined_occ_effects <- map_dfr(c(path_msom), function(m) {
   
   groups_m <- groups %>% arrange(common_name)
@@ -373,7 +374,7 @@ ggplot() +
 
 
 # Multiple dimension "delta" covariate
-effect_name = "prop_abund_standinit"
+effect_name = "prop_abund_lsog"
 
 message("Marginal responses for ", effect_name)
 s = "american robin"
@@ -439,16 +440,17 @@ meta_summary = meta_summary %>%
     by = "group_idx"
   )
 
-ggplot() +
+p = ggplot() +
   geom_line(data = predictions, aes(x = idx, y = psi, group = common_name, color = group), alpha = 0.2) +
   geom_ribbon(data = meta_summary, aes(x = idx, ymin = psi_lower, ymax = psi_upper, fill = group, group = group), alpha = 0.2, inherit.aes = FALSE) +
   geom_line(data = meta_summary, aes(x = idx, y = psi_mean, color = group, group = group), linewidth = 1.2, inherit.aes = FALSE) +
   # scale_x_continuous(limits = c(bound_low, bound_high)) +
   facet_wrap(~ group) +
   scale_y_continuous(limits = c(0.0, 1.0), breaks = c(0, 0.25, 0.5, 0.75, 1.0)) +
-  labs(x = param_data$name, y = "Occurrence probability")
+  labs(x = param_data$name, y = "Occurrence probability"); print(p)
 
 ####################
-
 # TODO: Compare models with different community groupings
 # "If uncertainty with groupings is substantial (i.e. precision without any grouping is highest), this may be due to a smaller group sample sizes or species being “less sensitive to grouping because they are much more adept at utilizing different habitats… [and] are capable of enduring landscape changes and disturbances… or there are many factors influencing species habitat preferences… [and] species are responding to different covariates based on more than one classification scheme"
+####################
+

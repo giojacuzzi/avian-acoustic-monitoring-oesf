@@ -1,53 +1,66 @@
 ## 2_msom_mcmc.R #########################################################################################
-# Fit a multispecies occupancy model using MCMC
+# Fit a multispecies occupancy model using MCMC with stage as a continuous % variable, using compex as the baseline reference
 #
 ## CONFIG:
-grouping = "nest" # Species grouping ("all", "diet", "nest" ...)
+grouping = "all" # Species grouping ("all", "diet", "nest", "nest_ps" ...)
 model_type = "nofp" # nofp, fp
-param_alpha_names = c(
+param_alpha_stage = "stratum_4"
+param_alpha_season = "season"
+param_alpha_point_names = c(
   "elevation",
   "dist_road_paved",
-  "dist_watercourse_major",
-  "homerange_treeden_gt4in_dbh_mean",
-  "homerange_qmd_mean"
+  "dist_watercourse_major"
 )
-param_delta_names = c(
-  "aggregation_idx",
-  "density_edge_cw",
-  "prop_abund_comthin",
-  "prop_abund_lsog",
-  "prop_abund_standinit"
+param_alpha_plot_names = c( # stage-specific effects
+  # "ba_mean",
+  "tree_acre_6_mean",
+  "qmd_6_mean",
+  # "ht_t100_mean", # ~ 
+  # "ht_t100_cv",   # ~
+  # "sdi_sum_mean", # ~
+  "bap_hwd_mean"
+  # "canopy_cover_mean", # ~ tree_acre_6_mean
+  # "canopy_cover_cv",   # ~ 
+  # "canopy_layers_mean" # ~
+  # "cfvol_ddwm_mean"    # ~ qmd_6_mean
 )
-param_beta_names = c(
+param_alpha_homerange_names = c(
+  "pcnt_standinit",
+  "pcnt_thin",
+  "pcnt_mature"
+  # "density_edge_cw", # ~ pcnt_standinit
+  # "aggregation_idx"  # ~ various pcnt covers depending on scale (very small [western flycatcher] or large [bald eagle])
+  # "shape_idx"        # ~ various pcnt covers depending on scale
+)
+param_beta_point_names = c(
   "yday",
   "prcp_mm_day",
   "tmax_deg_c"
 )
-OVERRIDE_SPECIES_SCALE_WITH_MEDIAN = TRUE # DEBUG
 #
 ## OUTPUT:
 dir_out = "data/cache/models"
 #
 ## INPUT:
 path_y                                   = "data/cache/4_msom/1_assemble_msom_data/y.rds"
-path_occurrence_predictor_plot_data      = "data/cache/4_msom/1_assemble_msom_data/occurrence_predictor_plot_data.rds"
-path_occurrence_predictor_homerange_data = "data/cache/4_msom/1_assemble_msom_data/occurrence_predictor_homerange_data.rds"
-path_detection_predictor_data            = "data/cache/4_msom/1_assemble_msom_data/detection_predictor_data.rds"
-path_trait_data                          = "data/cache/trait_data/trait_data.csv"
+path_occurrence_predictor_plot_data      = "data/cache/4_msom/1_assemble_msom_data/V2_occurrence_predictor_plot_data.rds"
+path_occurrence_predictor_homerange_data = "data/cache/4_msom/1_assemble_msom_data/V2_occurrence_predictor_homerange_data.rds"
+path_detection_predictor_data            = "data/cache/4_msom/1_assemble_msom_data/V2_detection_predictor_data.rds"
+path_trait_data                          = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 ###########################################################################################################
 
 source("src/global.R")
 
 if (model_type == "nofp") {
-  model_file = "src/4_msom/msom.txt"
+  model_file = "src/4_msom/msom_pcnt.txt"
 } else if (model_type == "fp") {
-  model_file = "src/4_msom/msom_fp.txt"
+  model_file = "src/4_msom/msom_pcnt_fp.txt"
 } else {
   stop("ERROR: Unsupported model type")
 }
 
 model_name = tools::file_path_sans_ext(basename(model_file))
-path_out = paste0(dir_out, "/", model_name, "_", model_type, "_", grouping, "_", format(Sys.time(), "%Y-%m-%d_%H:%M:%S"), ".rds")
+path_out = paste0(dir_out, "/", model_name, "_", model_type, "_", grouping, ".rds")
 if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
 
 # Load dependencies ----------------------------------------------------------------------------
@@ -72,73 +85,82 @@ seasons = dimnames(y)$season
 surveys = dimnames(y)$survey
 sites   = dimnames(y)$site
 
+stopifnot(all(occurrence_predictor_plot_data$site == sites))
+stopifnot(all(occurrence_predictor_homerange_data$site == sites))
+stopifnot(all(detection_predictor_data$site == sites))
+
 # Prepare occurrence plot scale covariate data ----------------------------------------------------------------------
 
+# Categorical stage/stratum
+stages = occurrence_predictor_plot_data %>% mutate(stratum_4 = factor(stratum_4)) %>% select(stratum_4) %>% mutate(stage_idx = as.integer(stratum_4))
+# NOTE: Redefine 'compex' as idx 1, i.e. baseline stratum
+stages$stage_idx = as.numeric(
+  factor(stages$stratum_4, levels = c("compex", "standinit", "mature", "thin"))
+)
+
+# Season
+season_data_list = list((scale(1:length(seasons))))
+param_season_data = tibble(
+  param = c("alpha_season"),
+  name = "season",
+  data = c(season_data_list)
+)
+
 # Store alpha parameter ID, variable name, and standardize data to have mean 0, standard deviation 1
-param_alpha_data = tibble(param = paste0("alpha", 1:length(param_alpha_names)), name  = param_alpha_names)
-param_alpha_data = param_alpha_data %>% rowwise() %>% mutate(data = list(scale(occurrence_predictor_plot_data[[name]]))) %>% ungroup()
-n_alpha_params = nrow(param_alpha_data)
+param_alpha_point_data = tibble(param = paste0("alpha_point", 1:length(param_alpha_point_names)), name = param_alpha_point_names)
+param_alpha_point_data = param_alpha_point_data %>% rowwise() %>% mutate(data = list(scale(occurrence_predictor_plot_data[[name]]))) %>% ungroup()
+n_alpha_point_params = nrow(param_alpha_point_data)
+
+param_alpha_plot_data = tibble(param = paste0("alpha_plot", 1:length(param_alpha_plot_names)), name = param_alpha_plot_names)
+param_alpha_plot_data = param_alpha_plot_data %>% rowwise() %>% mutate(data = list(scale(occurrence_predictor_plot_data[[name]]))) %>% ungroup()
+n_alpha_plot_params = nrow(param_alpha_plot_data)
 
 # Prepare occurrence homerange scale covariate data ----------------------------------------------------------------------
 
 # Standardize species names of occ homerange data
 names(occurrence_predictor_homerange_data)[names(occurrence_predictor_homerange_data) == "western flycatcher"] = "pacific-slope flycatcher"
 
-# Store minimum (i.e. floor) plot homerange data for those species who have smaller estimated home range sizes
-if (!OVERRIDE_SPECIES_SCALE_WITH_MEDIAN) {
-  occ_data_homerange_floor = occurrence_predictor_homerange_data[['plot']] %>% filter(site %in% dimnames(y)$site)
-  stopifnot(dimnames(y)$site == occ_data_homerange_floor$site)
+# Enforce minimum homerange scale to plot scale
+occ_p_hr_data_plot_floor = occurrence_predictor_homerange_data[["plot"]]
+for (i in species) {
+  fields = names(occurrence_predictor_homerange_data[[i]])
+  buffer_radius_m = occurrence_predictor_homerange_data[[i]]$buffer_radius_m[1]
+  if (buffer_radius_m < 100) {
+    occurrence_predictor_homerange_data[[i]] = occ_p_hr_data_plot_floor |> select(dplyr::all_of(fields))
+    occurrence_predictor_homerange_data[[i]]$scale = species[i]
+  }
 }
 
-# Store median plot homerange data for debugging
-occ_data_homerange_median = occurrence_predictor_homerange_data[['median']] %>% filter(site %in% dimnames(y)$site)
-stopifnot(dimnames(y)$site == occ_data_homerange_median$site)
-
 # Store delta parameter ID, variable name, and standardized data in species-specific matricies
-delta_data = setNames(vector('list', length(param_delta_names)), param_delta_names)
-for (param in param_delta_names) {
+alpha_homerange_data = setNames(vector('list', length(param_alpha_homerange_names)), param_alpha_homerange_names)
+for (param in param_alpha_homerange_names) {
   message(param)
   
-  species_delta_data = setNames(vector('list', length(species)), species)
+  species_alpha_data = setNames(vector('list', length(species)), species)
   
   for (i in 1:length(species)) {
     species_name = species[i]
     # message(i, " ", species_name)
-    if (OVERRIDE_SPECIES_SCALE_WITH_MEDIAN) {
-      param_data = occ_data_homerange_median %>% select(site, all_of(param))
-    } else {
-      # discard data for irrelevant sites
-      species_occ_data = occ_data_homerange[[species_name]] %>% filter(site %in% dimnames(y)$site)
-      # check that data are aligned with observation matrix by site
-      stopifnot(dimnames(y)$site == species_occ_data$site)
-      if (unique(species_occ_data %>% pull(buffer_radius_m)) >= 100) {
-        param_data = species_occ_data %>% select(site, all_of(param))
-      } else {
-        param_data = occ_data_homerange_floor %>% select(site, all_of(param))
-      }
-    }
-    species_delta_data[[species_name]] = scale(param_data[[param]])
+    # discard data for irrelevant sites
+    species_occ_data = occurrence_predictor_homerange_data[[species_name]] %>% filter(site %in% dimnames(y)$site)
+    # check that data are aligned with observation matrix by site
+    stopifnot(dimnames(y)$site == species_occ_data$site)
+    param_data = species_occ_data %>% select(site, all_of(param))
+    species_alpha_data[[species_name]] = scale(param_data[[param]])
   }
-  delta_data[[param]] = species_delta_data
+  alpha_homerange_data[[param]] = species_alpha_data
 }
-param_delta_data = tibble(param = paste0("delta", 1:length(param_delta_names)), name  = param_delta_names)
-param_delta_data = param_delta_data %>% rowwise() %>% mutate(data = list(delta_data[[name]])) %>% ungroup()
-n_delta_params = nrow(param_delta_data)
+param_alpha_homerange_data = tibble(param = paste0("alpha_homerange", 1:length(param_alpha_homerange_names)), name  = param_alpha_homerange_names)
+param_alpha_homerange_data = param_alpha_homerange_data %>% rowwise() %>% mutate(data = list(alpha_homerange_data[[name]])) %>% ungroup()
+n_alpha_homerange_params = nrow(param_alpha_homerange_data)
 
 # Prepare detection covariate data ----------------------------------------------------------------------------
 
 # Store beta parameter ID, variable name, and standardize data to have mean 0, standard deviation 1
-param_beta_data = tibble(param = paste0("beta", seq_along(detection_predictor_data)), name = param_beta_names)
-param_beta_data = param_beta_data %>% rowwise() %>%
+param_beta_point_data = tibble(param = paste0("beta_point", seq_along(detection_predictor_data)), name = param_beta_point_names)
+param_beta_point_data = param_beta_point_data %>% rowwise() %>%
   mutate(data = list(scale(unlist(detection_predictor_data[[name]], use.names = FALSE)))) %>% ungroup()
-n_beta_params = nrow(param_beta_data)
-
-# season_data_list = list((scale(1:length(seasons))))
-# param_season_data = tibble(
-#   param = c("alphaseason", "betaseason"),
-#   name = "season",
-#   data = c(season_data_list, season_data_list)
-# )
+n_beta_point_params = nrow(param_beta_point_data)
 
 # Assign species group membership ------------------------------------------------------------------------------
 
@@ -171,12 +193,13 @@ Kmax = max(K)
 Tseason = length(seasons)
 I = length(species)
 G = length(unique(groups$group_idx))
+S = length(unique(stages$stage_idx))
 
 # "JAGS dcat() requires integer categories 1..L. Miller's paper uses y = 0 (no detect), 1 (uncertain), 2 (certain). You must recode your y input to JAGS so the values are 1=no detect, 2=uncertain, 3=certain. I will assume that mapping in the code below. If you prefer to keep 0/1/2 in R, transform before sending data to JAGS: y_jags <- y + 1."
 if (model_type == "fp") {
   y = y + 1
 } else {
-  y[y == 2] <- 1
+  y[y == 2] = 1
 }
 
 msom_data = list(
@@ -187,29 +210,32 @@ msom_data = list(
   I = I,                    # number of species observed
   G = G,                    # number of species groups
   group = groups$group_idx, # species group membership
+  S = S,                    # number of site stages
+  stage = stages$stage_idx, # site stage membership
   y = y                     # observed (detection-nondetection) data matrix
 )
 # Add alpha parameters
-for (a in seq_len(n_alpha_params)) {
-  msom_data[[paste0("x_", param_alpha_data$param[a])]] <- as.vector(param_alpha_data$data[[a]])
+for (a in seq_len(n_alpha_point_params)) {
+  msom_data[[paste0("x_", param_alpha_point_data$param[a])]] <- as.vector(param_alpha_point_data$data[[a]])
 }
-# Add delta parameters
-for (d in seq_len(n_delta_params)) {
-  param_data_new = do.call(cbind, param_delta_data %>% filter(name == param_delta_data$name[d]) %>% pull(data) %>% .[[1]])
-  msom_data[[paste0("x_", param_delta_data$param[d])]] = param_data_new
+for (a in seq_len(n_alpha_plot_params)) {
+  msom_data[[paste0("x_", param_alpha_plot_data$param[a])]] <- as.vector(param_alpha_plot_data$data[[a]])
 }
-# TODO: Add season parameter
-# msom_data[["x_alphaseason"]] = as.vector(param_season_data$data[[1]])
-# msom_data[["x_betaseason"]] = as.vector(param_season_data$data[[1]])
+for (a in seq_len(n_alpha_homerange_params)) {
+  param_data_new = do.call(cbind, param_alpha_homerange_data %>% filter(name == param_alpha_homerange_data$name[a]) %>% pull(data) %>% .[[1]])
+  msom_data[[paste0("x_", param_alpha_homerange_data$param[a])]] = param_data_new
+}
+# Season
+msom_data[["x_season"]] = as.vector(param_season_data$data[[1]])
 
 # Add beta parameters
-for (b in seq_len(n_beta_params)) {
-  arr = detection_predictor_data[[param_beta_data$name[1]]]
-  vec = as.vector(param_beta_data$data[[b]]) # flatten to 1D
+for (b in seq_len(n_beta_point_params)) {
+  arr = detection_predictor_data[[param_beta_point_data$name[1]]]
+  vec = as.vector(param_beta_point_data$data[[b]]) # flatten to 1D
   
   stopifnot(length(vec) == prod(dim(arr)))  # safety check
   
-  msom_data[[paste0("x_", param_beta_data$param[b])]] = array(
+  msom_data[[paste0("x_", param_beta_point_data$param[b])]] = array(
     vec,
     dim = dim(arr),
     dimnames = dimnames(arr)
@@ -217,6 +243,51 @@ for (b in seq_len(n_beta_params)) {
 }
 
 str(msom_data)
+
+# Check predictor correlation -------------------------------------------------------
+
+# Do not retain any predictors with correlation coefficients > 0.8
+threshold = 0.8
+x_alpha_names = grep("^x_alpha", names(msom_data), value = TRUE)
+x_alpha_names = setdiff(x_alpha_names, grep("^x_alpha_homerange", x_alpha_names, value = TRUE))
+x_alpha = msom_data[x_alpha_names] |> as.data.frame() |> as_tibble()
+x_alpha$stage = msom_data$stage
+
+# Check for correlation among point- and plot-scale predictors
+pairwise_collinearity(x_alpha, threshold)
+
+# Check for correlation among homerange predictors across all species spatial scales
+x_alpha_homerange_names = grep("^x_alpha_homerange", names(msom_data), value = TRUE)
+for (i in 1:length(species)) {
+  species_name = species[i]
+  x_alpha_homerange = msom_data[x_alpha_homerange_names] |> imap_dfc(~ tibble(!!.y := .x[, i]))
+  x_alpha_all = cbind(x_alpha, x_alpha_homerange)
+  pc = pairwise_collinearity_by_group(x_alpha_all, "stage", threshold)
+  if (nrow(pc)) {
+    message(yellow("Correlation >", threshold, "for", species_name, "radius =", 
+                   unique(occurrence_predictor_homerange_data[[species_name]]$buffer_radius_m)))
+    print(pc)
+  }
+}
+
+# Check among all predictors, using median homerange values
+for (s in c('plot', 'median')) {
+  message("Multicollinearity at '", s, "' homerange scale")
+  x_alpha_homerange = occurrence_predictor_homerange_data[[s]][param_alpha_homerange_names]
+  x_alpha_all = cbind(x_alpha, x_alpha_homerange)
+  
+  message("Pairwise collinearity for all predictors across all stages:")
+  print(pairwise_collinearity(x_alpha_all |> select(-stage), threshold))
+  message("Pairwise collinearity by stage for all predictors:")
+  print(pairwise_collinearity_by_group(x_alpha_all, "stage", threshold))
+  
+  # VIF analysis for multicollinearity (consider dropping variable(s) with high VIF values (> 10))
+  message("VIF analysis for multicollinearity (all):")
+  model = lm(rep(1, nrow(x_alpha_all |> select(-stage))) ~ ., data = x_alpha_all |> select(-stage))
+  print(sort(vif(model)))
+}
+
+# Initialize JAGS ----------------------------------------------------------------------------
 
 # Initialize latent occupancy state z[i] as 1 if a detection occurred at site i, and 0 otherwise
 z = array(NA, dim = c(length(sites), length(seasons), length(species)), dimnames = list(sites, seasons, species))
@@ -228,45 +299,51 @@ for (j in seq_along(sites)) {
   }
 }
 
+# Initial values to avoid data/model conflicts
+init_vals = list(z = z)
+# "This model has multimodal likelihood, resulting in identical support for different parameter values. We addressed this issue by constraining the parameters so that p11 > p10, an assumption that is supported by the validation  data at the chosen threshold17. We imposed this constraint by providing arbitrarily chosen starting values that  align with this condition (0.7 for p11 and 0.1 for p10)23." 
+if (model_type == "fp") {
+  # informative priors necessary to avoid invalid PPC log(0) values
+  init_vals[["v"]] = rep(logit(0.70), length(species))
+  init_vals[["w"]] = rep(logit(0.05), length(species))
+}
+
+# Monitor parameter values
 params_to_monitor = c(
   "mu.u", "sigma.u", "u",
+  # "mu.alpha_stage", "sigma.alpha_stage", "alpha_stage",
+  "mu.alpha_season", "sigma.alpha_season", "alpha_season",
+  paste0("mu.alpha_point",     1:n_alpha_point_params),     paste0("sigma.alpha_point", 1:n_alpha_point_params),        paste0("alpha_point", 1:n_alpha_point_params),
+  paste0("mu.alpha_plot",      1:n_alpha_plot_params),      paste0("sigma.alpha_plot", 1:n_alpha_plot_params),          paste0("alpha_plot", 1:n_alpha_plot_params),
+  paste0("mu.alpha_homerange", 1:n_alpha_homerange_params), paste0("sigma.alpha_homerange", 1:n_alpha_homerange_params), paste0("alpha_homerange", 1:n_alpha_homerange_params),
   "mu.v", "sigma.v", "v",
-  paste0("mu.alpha", 1:n_alpha_params), paste0("sigma.alpha", 1:n_alpha_params), paste0("alpha", 1:n_alpha_params),
-  paste0("mu.delta", 1:n_delta_params), paste0("sigma.delta", 1:n_delta_params), paste0("delta", 1:n_delta_params),
-  paste0("mu.beta",  1:n_beta_params),  paste0("sigma.beta",  1:n_beta_params),  paste0("beta",  1:n_beta_params),
+  paste0("mu.beta_point",      1:n_beta_point_params),      paste0("sigma.beta_point",  1:n_beta_point_params),         paste0("beta_point",  1:n_beta_point_params),
   "D_obs", "D_sim", "z"
 )
-
 if (model_type == "fp") {
   params_to_monitor = c(params_to_monitor,
                         "mu.w", "sigma.w", "w",
                         "mu.b", "sigma.b", "b")
 }
 
-# Run JAGS ----------------------------------------------------------------------------------------------------
-
 message("Model file:", model_file)
 
 message("\n", "System CPU: "); print(as.data.frame(t(benchmarkme::get_cpu())))
 message("System RAM: "); print(benchmarkme::get_ram())
 
+# Run JAGS ----------------------------------------------------------------------------------------------------
+
 message("Running JAGS (current time ", time_start <- Sys.time(), ")")
 
 msom = jags(data = msom_data,
-            inits = function() { list( # initial values to avoid data/model conflicts
-              z = z,
-              # DEBUG
-              # "This model has multimodal likelihood, resulting in identical support for different parameter values. We addressed this issue by constraining the parameters so that p11 > p10, an assumption that is supported by the validation  data at the chosen threshold17. We imposed this constraint by providing arbitrarily chosen starting values that  align with this condition (0.7 for p11 and 0.1 for p10)23." 
-              v = rep(logit(0.70), length(species)), # informative priors necessary to avoid invalid PPC log(0) values
-              w = rep(logit(0.05), length(species))
-              # DEBUG
-            ) },
+            inits = function() { init_vals },
             parameters.to.save = params_to_monitor,
             model.file = model_file,
-            # Test run, ETA: 11/25 hr (fp) 6 hr (parallel fp), 3 hr (nofp)
-            n.chains = 3, n.adapt = 200, n.iter = 2000, n.burnin = 200, n.thin = 1, parallel = TRUE,
-            # Formal run, ETA TODO
-            # n.chains = 3, n.adapt = 5000, n.iter = 30000, n.burnin = 10000, n.thin = 3, parallel = TRUE, # ETA: TODO
+            # Test run, ETA: 6 hr (parallel fp), 1.5 hr (nofp)
+            # n.chains = 2, n.adapt = 200, n.iter = 2000, n.burnin = 200, n.thin = 1, parallel = TRUE,
+            n.chains = 2, n.adapt = 400, n.iter = 4000, n.burnin = 400, n.thin = 1, parallel = TRUE, # 3 hr nofp
+            # Formal run, ETA unknown
+            # n.chains = 3, n.adapt = 5000, n.iter = 30000, n.burnin = 10000, n.thin = 3, parallel = TRUE,
             DIC = FALSE, verbose=TRUE)
 
 message("Finished running JAGS (", round(msom$mcmc.info$elapsed.mins / 60, 2), " hr)")
@@ -310,6 +387,45 @@ if (nrow(suspected_nonconvergence) > 1) {
 p_val = mean(msom$sims.list$D_sim > msom$sims.list$D_obs)
 message("Baysian p-value (deviance): ", round(p_val,3))
 
+# Write results to cache
+msom_results = list(
+  msom              = msom,
+  msom_summary      = msom_summary,
+  p_val             = p_val,
+  param_alpha_data  = list(
+    param_alpha_stage = param_alpha_stage,
+    param_alpha_season = param_alpha_season,
+    param_alpha_point_data = param_alpha_point_data,
+    param_alpha_plot_data = param_alpha_plot_data,
+    param_alpha_homerange_data = param_alpha_homerange_data
+  ),
+  param_beta_data = list(
+    param_beta_point_data = param_beta_point_data
+  ),
+  sites   = sites,
+  seasons = seasons,
+  species = species,
+  groups  = groups,
+  stages  = stages
+)
+saveRDS(msom_results, file = path_out)
+message(crayon::green("Cached model and results to", path_out, "-", format(structure(file.info(path_out)$size, class = "object_size"), units = "auto")))
+
+# INSPECT MSOM ===============================================================================
+
+stop("READY FOR INSPECTION")
+
+model_data = read_rds(path_out)
+msom = model_data$msom
+stages = model_data$stages
+groups = model_data$groups
+species = model_data$species
+param_alpha_stage = model_data$param_alpha_data$param_alpha_stage
+param_alpha_season = model_data$param_alpha_data$param_alpha_season
+param_alpha_point_data = model_data$param_alpha_data$param_alpha_point_data
+param_alpha_plot_data = model_data$param_alpha_data$param_alpha_plot_data
+param_alpha_homerange_data = model_data$param_alpha_data$param_alpha_homerange_data
+
 if (FALSE) {
   # "Examine trace plots for good mixing and convergence among chains. Each chain is displayed in a different colour. This means random paths exploring a lot of the parameter space on the y-axis without a clear pattern and each chain converging on the same value."
   MCMCvis::MCMCtrace(msom$samples, ISB = FALSE, pdf = TRUE, exact = TRUE, post_zm = TRUE, type = 'trace', Rhat = TRUE, n.eff = TRUE)
@@ -318,25 +434,110 @@ if (FALSE) {
   MCMCvis::MCMCtrace(msom$samples, ISB = FALSE, pdf = TRUE, exact = TRUE, post_zm = TRUE, type = 'density', Rhat = TRUE, n.eff = TRUE, ind = TRUE)
 }
 
-# Inspect the mean and 95% BCI of hyperparameter estimates
-whiskerplot(msom, c(paste0('mu.', param_alpha_data$param)))
-whiskerplot(msom, c(paste0('mu.', param_delta_data$param)))
-whiskerplot(msom, c(paste0('mu.', param_beta_data$param)))
+match_s = stages %>% distinct() %>% arrange(stage_idx)
+match_g = groups %>% select(group, group_idx) %>% distinct() %>% arrange(group_idx)
+match_i = tibble(species = species, species_idx = 1:length(species))
 
-# Write results to cache
-msom_results = list(
-  msom              = msom,
-  msom_summary      = msom_summary,
-  p_val             = p_val,
-  param_alpha_data  = param_alpha_data,
-  param_delta_data  = param_delta_data,
-  # param_season_data = param_season_data, # TODO: Add unique season param for both occ and detect
-  param_beta_data   = param_beta_data,
-  sites             = sites,
-  seasons           = seasons,
-  species           = species,
-  groups            = groups
-)
-saveRDS(msom_results, file = path_out)
-message(crayon::green("Cached model and results to", path_out, "-", format(structure(file.info(path_out)$size, class = "object_size"), units = "auto")))
+# Inspect the mean and 95% BCI of hyperparameter estimates
+whiskerplot(msom, 'mu.u')
+# whiskerplot(msom, 'mu.alpha_stage')
+whiskerplot(msom, c(paste0('mu.', param_alpha_plot_data$param)))
+whiskerplot(msom, c(paste0('mu.', param_alpha_point_data$param)))
+whiskerplot(msom, c(paste0('mu.', param_alpha_homerange_data$param)))
+whiskerplot(msom, 'mu.alpha_season')
+
+whiskerplot(msom, 'mu.v')
+whiskerplot(msom, c(paste0('mu.', param_beta_point_data$param)))
+
+{
+  mu_alpha_homerange = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
+    filter(str_starts(parameter, "mu.alpha_homerange")) %>%
+    mutate(param = str_extract(parameter, "alpha_homerange\\d+")) %>%
+    mutate(
+      p = as.integer(str_match(parameter, "mu\\.alpha_homerange(\\d+)\\[(\\d+)\\]")[,2]),
+      g = as.integer(str_match(parameter, "mu\\.alpha_homerange(\\d+)\\[(\\d+)\\]")[,3])
+    ) %>% left_join(param_alpha_homerange_data %>% select(param, name), by = c("param")) %>%
+    left_join(match_g, by = c("g" = "group_idx"))
+  ggplot(mu_alpha_homerange, aes(x = mean, y = name, color = group)) +
+    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5))
+  
+  alpha_homerange = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
+    filter(str_starts(parameter, "alpha_homerange")) %>%
+    mutate(param = str_extract(parameter, "alpha_homerange\\d+")) %>%
+    mutate(
+      p = as.integer(str_match(parameter, "alpha_homerange(\\d+)\\[(\\d+)\\]")[,2]),
+      i = as.integer(str_match(parameter, "alpha_homerange(\\d+)\\[(\\d+)\\]")[,3])
+    ) %>% left_join(param_alpha_homerange_data %>% select(param, name), by = c("param")) %>% left_join(match_i, by = c("i" = "species_idx")) %>% left_join(groups, by = c("species" = "common_name"))
+  ggplot(alpha_homerange %>% filter(name == "pcnt_standinit") %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group)) +
+    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5)) +
+    labs(title = "pcnt_standinit") + theme(legend.position = "bottom")
+  ggplot(alpha_homerange %>% filter(name == "pcnt_mature") %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group)) +
+    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5)) +
+    labs(title = "pcnt_mature") + theme(legend.position = "bottom")
+  ggplot(alpha_homerange %>% filter(name == "pcnt_thin") %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group)) +
+    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5)) +
+    labs(title = "pcnt_thin") + theme(legend.position = "bottom")
+  
+  mu_alpha_plot = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
+    filter(str_starts(parameter, "mu.alpha_plot")) %>%
+    mutate(param = str_extract(parameter, "alpha_plot\\d+")) %>%
+    mutate(
+      p = as.integer(str_match(parameter, "mu\\.alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,2]),
+      s = as.integer(str_match(parameter, "mu\\.alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,3]),
+      g = as.integer(str_match(parameter, "mu\\.alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,4])
+    ) %>% left_join(param_alpha_plot_data %>% select(param, name), by = c("param")) %>%
+    left_join(match_s, by = c("s" = "stage_idx")) %>% left_join(match_g, by = c("g" = "group_idx"))
+  ggplot(mu_alpha_plot, aes(x = mean, y = name, color = group, shape = stratum_4)) +
+    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5))
+  
+  alpha_plot = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
+    filter(str_starts(parameter, "alpha_plot")) %>%
+    mutate(param = str_extract(parameter, "alpha_plot\\d+")) %>%
+    mutate(
+      p = as.integer(str_match(parameter, "alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,2]),
+      s = as.integer(str_match(parameter, "alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,3]),
+      i = as.integer(str_match(parameter, "alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,4])
+    ) %>% left_join(param_alpha_plot_data %>% select(param, name), by = c("param")) %>%
+    left_join(match_s, by = c("s" = "stage_idx")) %>% left_join(match_i, by = c("i" = "species_idx")) %>% left_join(groups, by = c("species" = "common_name"))
+  ggplot(alpha_plot %>% filter(name == "qmd_6_mean", stratum_4 == "thin") %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group, shape = stratum_4)) +
+    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5)) +
+    labs(title = "alpha_plot x stratum_4") + theme(legend.position = "bottom")
+  
+  mu_alpha_point = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
+    filter(str_starts(parameter, "mu.alpha_point")) %>%
+    mutate(param = str_extract(parameter, "alpha_point\\d+")) %>%
+    mutate(
+      p = as.integer(str_match(parameter, "mu\\.alpha_point(\\d+)\\[(\\d+)\\]")[,2]),
+      g = as.integer(str_match(parameter, "mu\\.alpha_point(\\d+)\\[(\\d+)\\]")[,3])
+    ) %>% left_join(param_alpha_point_data %>% select(param, name), by = c("param")) %>%
+    left_join(match_g, by = c("g" = "group_idx"))
+  ggplot(mu_alpha_point, aes(x = mean, y = name, color = group)) +
+    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5))
+  
+  mu_alpha_season = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
+    filter(str_starts(parameter, "mu.alpha_season")) %>%
+    mutate(
+      g = as.integer(str_match(parameter, "mu\\.alpha_season\\[(\\d+)\\]")[,2])
+    ) %>% left_join(match_g, by = c("g" = "group_idx"))
+  ggplot(mu_alpha_season, aes(x = mean, y = parameter, color = group)) +
+    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5))
+  
+  alpha_season = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
+    filter(str_starts(parameter, "alpha_season")) %>%
+    mutate(
+      i = as.integer(str_match(parameter, "alpha_season\\[(\\d+)\\]")[,2])
+    ) %>% left_join(match_i, by = c("i" = "species_idx")) %>% left_join(groups, by = c("species" = "common_name"))
+  ggplot(alpha_season %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group)) +
+    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5)) +
+    labs(title = "season") + theme(legend.position = "bottom")
+}
 

@@ -11,18 +11,19 @@ min_sites_detected = 1 # Minimum number of sites present to retain a species for
 out_cache_dir  = "data/cache/4_msom/1_assemble_msom_data"
 path_out_y     = paste0(out_cache_dir, "/y.rds")
 path_out_xyday = paste0(out_cache_dir, "/xyday.rds")
-path_out_occurrence_predictor_plot_data      = paste0(out_cache_dir, "/NEW_occurrence_predictor_plot_data.rds")
-path_out_occurrence_predictor_homerange_data = paste0(out_cache_dir, "/NEW_occurrence_predictor_homerange_data.rds")
-path_out_detection_predictor_data            = paste0(out_cache_dir, "/NEW_detection_predictor_data.rds")
+path_out_occurrence_predictor_plot_data      = paste0(out_cache_dir, "/V2_occurrence_predictor_plot_data.rds")
+path_out_occurrence_predictor_homerange_data = paste0(out_cache_dir, "/V2_occurrence_predictor_homerange_data.rds")
+path_out_detection_predictor_data            = paste0(out_cache_dir, "/V2_detection_predictor_data.rds")
 #
 # INPUT:
-path_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/NEW_community_array_predictions.rds"
-path_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/NEW_community_array_surveydates.rds"
+path_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_predictions.rds"
+path_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_surveydates.rds"
 path_calibration_results         = "data/cache/1_pam/1_classifier_calibration/calibration_results_raw.csv"
 path_annotations                 = "data/cache/1_pam/1_classifier_calibration/annotations_clean.csv"
-path_plot_scale_data             = "data/cache/3_gis/3_calc_occurrence_vars/NEW_data_plot_scale_clean_stage_3.rds"
-path_homerange_scale_data        = "data/cache/3_gis/3_calc_occurrence_vars/NEW_data_homerange_scale_clean_stage_3.rds"
-path_predictors_detection        = "data/cache/3_gis/6_calc_detection_vars/NEW_data_detection.rds"
+# TODO: Parse by year!
+path_plot_scale_data       = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_2020_clean_strata_4.rds"
+path_homerange_scale_data  = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_2020_clean_strata_4.rds"
+path_predictors_detection  = "data/cache/3_gis/6_calc_detection_vars/V2_data_detection.rds"
 ##################################################################################################################
 
 source("src/global.R")
@@ -36,6 +37,7 @@ calibration_results = read_csv(path_calibration_results, show_col_types = FALSE)
 
 message("Loading site confirmation annotations from ", path_annotations)
 annotations = read_csv(path_annotations, show_col_types = FALSE)
+annotations$site = annotations$site_agg # combine co-located sites 
 
 message("Loading community survey date array from ", path_community_array_surveydates)
 community_array_surveydates = readRDS(path_community_array_surveydates)
@@ -269,6 +271,20 @@ for (t in dimnames(y)[['season']]) {
   
 }
 
+# Remove columns where every entry is NA across all sites, seasons, and species
+na_cols_strict_y = which(apply(y, 2, function(col) all(is.na(col))))
+na_survey_names  = colnames(y)[na_cols_strict_y]
+all(diff(na_cols_strict_y) == 1)
+y = y[, -na_cols_strict_y, , ]
+dim(y)
+
+na_cols_strict_x = which(apply(x_yday, 2, function(col) all(is.na(col))))
+na_survey_names  = colnames(x_yday)[na_cols_strict_x]
+all(diff(na_cols_strict_x) == 1)
+stopifnot(all(na_cols_strict_y == na_cols_strict_x))
+x_yday = x_yday[, -na_cols_strict_x, ]
+dim(x_yday)
+
 # Load predictor data dependencies ----------------------------------------------------------------------------------------------
 
 species = dimnames(y)$species
@@ -282,14 +298,14 @@ detection_data = readRDS(path_predictors_detection) %>% mutate(year = as.charact
 message("Loading local plot scale data from ", path_plot_scale_data)
 occurrence_predictor_plot_data_local = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site))
 
-s = 'median' # TODO: do occurrence_predictor_plot_data_rs at PLOT scale, not median
+s = 'plot'
 message("Loading remote sensing plot scale data from '", s, "' layer ", path_homerange_scale_data)
 occurrence_predictor_plot_data_rs = readRDS(path_homerange_scale_data)[[s]] %>% arrange(site) %>% mutate(site = tolower(site))
 
 message("Combining all plot scale occurrence predictor data")
 occurrence_predictor_plot_data = occurrence_predictor_plot_data_local %>% full_join(occurrence_predictor_plot_data_rs, by = "site")
 
-message("Loading median homerange scale data")
+message("Loading homerange scale data")
 occurrence_predictor_homerange_data = readRDS(path_homerange_scale_data)
 occurrence_predictor_homerange_data = map(occurrence_predictor_homerange_data, ~ .x %>% arrange(site) %>% mutate(site = tolower(site)))
 names(occurrence_predictor_homerange_data) = tolower(names(occurrence_predictor_homerange_data))

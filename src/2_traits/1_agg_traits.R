@@ -51,7 +51,7 @@ eltontraits = read_csv(path_eltontraits, show_col_types = FALSE) %>% clean_names
 
 message("Loading guilds from ", path_guilds)
 guilds = read_csv(path_guilds, show_col_types = FALSE) %>% clean_names() %>%
-  mutate(common_name = tolower(common_name)) %>% select(common_name, foraging_guild_cornell, nesting_guild_cornell, conservation_cornell)
+  mutate(common_name = tolower(common_name)) %>% select(common_name, foraging_guild_cornell, nesting_guild_cornell, nesting_guild_cornell_ps, conservation_cornell)
 
 message("Loading metadata from ", path_metadata)
 metadata = read.csv(path_metadata, nrows = 107) %>% clean_names() %>%
@@ -82,14 +82,16 @@ trait_data = trait_data %>% mutate(nesting_guild_cornell = str_to_lower(nesting_
 )
 
 # Nesting guild with primary/secondary cavity delineation
-trait_data = trait_data %>% mutate(nesting_guild_cornell = str_to_lower(nesting_guild_cornell)) %>% mutate(
+trait_data = trait_data %>% mutate(nesting_guild_cornell_ps = str_to_lower(nesting_guild_cornell_ps)) %>% mutate(
   group_nest_ps = case_when(
-    (nesting_guild_cornell %in% c("tree"))   ~ "tree",
-    (nesting_guild_cornell %in% c("cavity_primary"))   ~ "cavity_p",
-    (nesting_guild_cornell %in% c("cavity_secondary")) ~ "cavity_s",
-    (nesting_guild_cornell %in% c("ground")) ~ "ground",
-    (nesting_guild_cornell %in% c("shrub"))  ~ "shrub",
-    TRUE ~ "other" # building, burrow, cliff
+    (nesting_guild_cornell_ps %in% c("tree"))   ~ "tree",
+    (nesting_guild_cornell_ps %in% c("cavity_primary"))   ~ "cavity_p",
+    (nesting_guild_cornell_ps %in% c("cavity_secondary")) ~ "cavity_s",
+    (nesting_guild_cornell_ps %in% c("ground")) ~ "ground",
+    (nesting_guild_cornell_ps %in% c("shrub"))  ~ "shrub",
+    (nesting_guild_cornell_ps %in% c("burrow"))  ~ "burrow",
+    (nesting_guild_cornell_ps %in% c("cliff"))  ~ "cliff",
+    TRUE ~ "other" # building, cliff
   )
 )
 

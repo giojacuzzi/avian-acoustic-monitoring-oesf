@@ -7,8 +7,8 @@ min_prediction_count = 1 # Minimum number of predictions in a survey (i.e. secon
 # OUTPUT:
 # A multidimensional data structure with dimensions [site × survey × season × species], with each
 # element containing a named list of observational data (including survey date and confidence scores)
-path_out_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/NEW_community_array_predictions.rds"
-path_out_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/NEW_community_array_surveydates.rds"
+path_out_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_predictions.rds"
+path_out_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_surveydates.rds"
 #
 # INPUT:
 # Cached dataframe of all predictions
@@ -36,14 +36,24 @@ prediction_data = arrow::read_feather(path_prediction_data) %>% mutate(survey_da
 message("Cleaning data")
 prediction_data_filtered = prediction_data %>% mutate(
   common_name       = tolower(common_name),
-  site              = as.factor(tolower(as.character(site))),
-  site_agg          = as.factor(tolower(as.character(site_agg))),
+  site              = tolower(as.character(site)),
+  site_agg          = tolower(as.character(site_agg)),
   confidence_source = replace_na(confidence_source, 0.0),
   confidence_target = replace_na(confidence_target, 0.0)
 )
 survey_file_counts_filtered = survey_file_counts %>% mutate(
-  site = as.factor(tolower(as.character(site)))
+  site = tolower(as.character(site))
 )
+
+# Combine co-located sites
+s = site_key %>% filter(site != site_agg) %>% select(site, site_agg) %>% distinct()
+s_site = unique(s$site)
+s_site_agg = unique(s$site_agg)
+lookup = site_key %>% select(site, site_agg) %>% distinct()
+survey_file_counts_filtered = survey_file_counts_filtered %>% left_join(lookup, by = "site") %>% mutate(site = site_agg) %>% select(-site_agg)
+length(unique(survey_file_counts_filtered$site))
+prediction_data_filtered = prediction_data_filtered %>% mutate(site = site_agg) %>% select(-site_agg)
+length(unique(prediction_data_filtered$site))
 
 ## Manually exclude specific survey(s)
 # Incomplete and redone in a later deployment

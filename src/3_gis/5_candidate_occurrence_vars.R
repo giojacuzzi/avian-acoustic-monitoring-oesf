@@ -2,17 +2,17 @@
 # Finalize candidate set of variables for occurrence
 #
 ## INPUT:
-path_data_plot_scale      = "data/cache/3_gis/3_calc_occurrence_vars/NEW_data_plot_scale_clean_stage_3.rds"
-path_data_homerange_scale = "data/cache/3_gis/3_calc_occurrence_vars/NEW_data_homerange_scale_clean_stage_3.rds"
+path_plot_scale_data       = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_2020_clean_strata_4.rds"
+path_homerange_scale_data  = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_2020_clean_strata_4.rds"
 ###########################################################################################################
 
 source("src/global.R")
 
-message('Loading plot scale data from cache ', path_data_plot_scale)
-data_plot_scale = readRDS(path_data_plot_scale)
+message('Loading plot scale data from cache ', path_plot_scale_data)
+data_plot_scale = readRDS(path_plot_scale_data)
 
-message('Loading homerange scale data from cache ', path_data_homerange_scale)
-data_homerange_scale = readRDS(path_data_homerange_scale)
+message('Loading homerange scale data from cache ', path_homerange_scale_data)
+data_homerange_scale = readRDS(path_homerange_scale_data)
 
 # path_rast_cover_clean = "data/cache/occurrence_covariates/rast_cover_clean.tif"
 # message('Loading raster cover data from cache ', path_rast_cover_clean)
@@ -104,8 +104,8 @@ sort(vif(model))
 ### Collinearity analysis - local plot scale variables from remote sensing
 message("Assessing collinearity among variables at local plot scale (remote sensing)")
 
-var_candidates_plotscale_rs = data_homerange_scale[['plot']] %>% select(-buffer_radius_m) # NOTE: 'plot' == 100m radius
-var_candidates_plotscale_rs = var_candidates_plotscale_rs %>% left_join(var_candidates_plotscale_hs %>% select(site, stage_3), by = "site")
+var_candidates_plotscale_rs = data_homerange_scale[['plot']] %>% select(-buffer_radius_m, -scale) # NOTE: 'plot' == 100m radius
+# var_candidates_plotscale_rs = var_candidates_plotscale_rs %>% left_join(var_candidates_plotscale_hs %>% select(site, stage_3), by = "site")
 
 # A priori reduce list of candidate plot scale variables (remove irrelevant variables)
 var_candidates_plotscale_rs = var_candidates_plotscale_rs %>% select(-all_of(c(

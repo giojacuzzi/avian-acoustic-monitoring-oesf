@@ -2,7 +2,7 @@
 # Quantify variables for detection
 #
 ## OUTPUT:
-path_data_out = "data/cache/3_gis/6_calc_detection_vars/NEW_data_detection.rds"
+path_data_out = "data/cache/3_gis/6_calc_detection_vars/V2_data_detection.rds"
 #
 ## INPUT:
 files = list.files("data/environment/climate", pattern = "\\.csv$", full.names = TRUE)
@@ -17,7 +17,10 @@ data = files %>%
     d
   }) %>% bind_rows() %>% select(site, everything()) %>% janitor::clean_names()
 
-# TODO: Add year
+# Combine co-located sites
+lookup = site_key %>% select(site, site_agg) %>% distinct()
+data = data %>% left_join(lookup, by = "site")
+data = data %>% mutate(site = site_agg) %>% select(-site_agg)
 
 message(crayon::green("Saving detection covariate data cache", path_data_out))
 dir.create(dirname(path_data_out), recursive = TRUE, showWarnings = FALSE)

@@ -148,6 +148,34 @@ between_turnover %>% arrange(desc(mean_diss))
 
 # Forth corner? https://besjournals.onlinelibrary.wiley.com/doi/10.1111/2041-210X.12163
 
+# LCBD and SCBD
+library(adespatial)
+beta_results = beta.div(z_binary, method = "sorensen", nperm = 999)
+
+beta_total <- beta_results$beta
+LCBD <- beta_results$LCBD
+p_LCBD <- beta_results$p.LCBD
+
+site_results <- data.frame(
+  site = rownames(z_binary),
+  LCBD = LCBD,
+  p_value = p_LCBD
+)
+site_results$significant <- site_results$p_value <= 0.05
+
+sig_sites = site_results %>% left_join(site_key %>% select(site, stratum) %>% distinct(), by = "site") %>% filter(significant == TRUE) %>% arrange(stratum)
+table(sig_sites$stratum)
+
+z_hel <- decostand(z_binary, method = "hellinger")
+beta_results_hel <- beta.div(z_hel, method = "euclidean")  # method = "none" uses Euclidean variance
+SCBD <- beta_results_hel$SCBD
+
+species_results <- data.frame(
+  species = species,
+  SCBD = SCBD
+)
+species_results <- species_results[order(-species_results$SCBD), ]
+
 # TODO: Functional trait differences? 
 
 # NMDS ----------------------------------------------------------------------------------

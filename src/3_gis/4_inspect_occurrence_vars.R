@@ -2,8 +2,8 @@
 # Inspect variables for occurrence
 #
 ## INPUT:
-path_plot_scale_data       = "data/cache/3_gis/3_calc_occurrence_vars/NEW_data_plot_scale_clean_stage_3.rds"
-path_homerange_scale_data  = "data/cache/3_gis/3_calc_occurrence_vars/NEW_data_homerange_scale_clean_stage_3.rds"
+path_plot_scale_data       = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_2020_clean_strata_4.rds"
+path_homerange_scale_data  = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_2020_clean_strata_4.rds"
 ###########################################################################################################
 
 source("src/global.R")
@@ -12,74 +12,87 @@ data_plot_scale = readRDS(path_plot_scale_data)
 data_homerange_scale = readRDS(path_homerange_scale_data)
 
 # DEBUG: Distribution of median homerange scale cover proportions
-debug_scale = "median" # or "median"
+debug_scale = "pileated woodpecker" # or "median"
 hist(data_homerange_scale[[debug_scale]]$pcnt_standinit)
 hist(data_homerange_scale[[debug_scale]]$pcnt_compex)
 hist(data_homerange_scale[[debug_scale]]$pcnt_mature)
+hist(data_homerange_scale[[debug_scale]]$pcnt_thin)
 
 df_long = data_homerange_scale[[debug_scale]] %>%
-  select(site, pcnt_standinit, pcnt_compex, pcnt_mature, pcnt_road_paved, pcnt_water) %>%
+  select(site, pcnt_standinit, pcnt_compex, pcnt_mature, pcnt_thin, pcnt_road_paved, pcnt_water) %>%
   pivot_longer(cols = starts_with("pcnt_"), names_to = "class", values_to = "percent")
 site_order = data_homerange_scale[[debug_scale]] %>% arrange(desc(pcnt_compex)) %>% pull(site)
 df_long = df_long %>% mutate(site = factor(site, levels = site_order))
 ggplot(df_long, aes(x = percent, y = site, fill = class)) +
   geom_bar(stat = "identity", position = "fill") +
   scale_x_continuous(labels = scales::percent_format()) +
-  scale_fill_manual(values = c("darkgreen", "brown", "gray", "orange", "royalblue")) + labs(title = debug_scale)
+  scale_fill_manual(values = c("darkgreen", "brown", "gray", "orange", "purple", "royalblue")) + labs(title = debug_scale)
 # DEBUG
 
 # Compare plot-scale data measured via habitat survey vs remote sensing -------------------------------
 
 data_total = full_join(st_drop_geometry(data_plot_scale), data_homerange_scale[['plot']], by = 'site')
 
-comparison_plot = function(x, y, s, title, x_lab = "Habitat survey", y_lab = "Remote sensing") {
+comparison_plot = function(d, x_lab, y_lab, y_conv = 1, s, title) {
+  x = d[[x_lab]]
+  y = d[[y_lab]] * y_conv
   r =   cor(x, y, use = "complete.obs", method = "pearson")
   rho = cor(x, y, use = "complete.obs", method = "spearman")
   ggplot() +
     geom_abline(slope = 1, color = "gray") +
     geom_point(aes(x = x, y = y), shape = 1) +
-    geom_text_repel(aes(x = x, y = y, label = s), size = 2) +
+    # geom_text_repel(aes(x = x, y = y, label = s), size = 2) +
     xlim(0, max(x, y, na.rm = TRUE)) +
     ylim(0, max(x, y, na.rm = TRUE)) +
     labs(
-      title = title, subtitle = paste0("(r = ", round(r, 2), ", rho = ", round(rho, 2), ")"),
-      x = x_lab, y = y_lab
+      title = paste(x_lab, "x", y_lab), subtitle = paste0("(r = ", round(r, 2), ", rho = ", round(rho, 2), ")"), x = x_lab, y = y_lab
     )
 }
 
-p_ba = comparison_plot(data_total$plot_ba_hs, data_total$homerange_ba_mean, data_total$site, "Basal area [m2/ha]")
+# BA
+p_ba_ba      = comparison_plot(data_total, "plot_ba_hs", "ba_mean",      conv_ft2peracre_to_m2perha, data_total$site); p_ba_ba
+p_ba_ba_4    = comparison_plot(data_total, "plot_ba_hs", "ba_4_mean",    conv_ft2peracre_to_m2perha, data_total$site); p_ba_ba_4
+p_ba_ba_6    = comparison_plot(data_total, "plot_ba_hs", "ba_6_mean",    conv_ft2peracre_to_m2perha, data_total$site); p_ba_ba_6
+p_ba_ba_t100 = comparison_plot(data_total, "plot_ba_hs", "ba_t100_mean", conv_ft2peracre_to_m2perha, data_total$site); p_ba_ba_t100
+# QMD all
+p_qmd_qmd      = comparison_plot(data_total, "plot_qmd_all_hs", "qmd_mean",      conv_in_to_cm, data_total$site); p_qmd_qmd
+p_qmd_qmd_6    = comparison_plot(data_total, "plot_qmd_all_hs", "qmd_6_mean",    conv_in_to_cm, data_total$site); p_qmd_qmd_6
+p_qmd_qmd_t100 = comparison_plot(data_total, "plot_qmd_all_hs", "qmd_t100_mean", conv_in_to_cm, data_total$site); p_qmd_qmd_t100
+# QMD > 10 cm DBH
+p_qmd10_qmd     = comparison_plot(data_total, "plot_qmd_gt10cmDbh_hs", "qmd_mean",      conv_in_to_cm, data_total$site); p_qmd10_qmd
+p_qmd10_qmd_6   = comparison_plot(data_total, "plot_qmd_gt10cmDbh_hs", "qmd_6_mean",    conv_in_to_cm, data_total$site); p_qmd10_qmd_6
+p_qmd10_qmdt100 = comparison_plot(data_total, "plot_qmd_gt10cmDbh_hs", "qmd_t100_mean", conv_in_to_cm, data_total$site); p_qmd10_qmdt100
+# Tree density all
+p_td_ta = comparison_plot(data_total, "plot_treeden_all_hs", "tree_acre_mean",    conv_peracre_to_perha, data_total$site); p_td_ta
+# Tree density > 10 cm DBH
+p_td10_ta    = comparison_plot(data_total, "plot_treeden_gt10cmDbh_hs", "tree_acre_mean",    conv_peracre_to_perha, data_total$site); p_td10_ta
+p_td10_ta_4  = comparison_plot(data_total, "plot_treeden_gt10cmDbh_hs", "tree_acre_4_mean",  conv_peracre_to_perha, data_total$site); p_td10_ta_4
+p_td10_ta_6  = comparison_plot(data_total, "plot_treeden_gt10cmDbh_hs", "tree_acre_6_mean",  conv_peracre_to_perha, data_total$site); p_td10_ta_6
+# Height
+p_ht_htmax   = comparison_plot(data_total, "plot_ht_hs", "htmax_mean",   conv_ft_to_m, data_total$site); p_ht_htmax
+p_ht_ht_t40  = comparison_plot(data_total, "plot_ht_hs", "ht_t40_mean",  conv_ft_to_m, data_total$site); p_ht_ht_t40
+p_ht_ht_t100 = comparison_plot(data_total, "plot_ht_hs", "ht_t100_mean", conv_ft_to_m, data_total$site); p_ht_ht_t100
+# Snag density
+p_snag_snag_20 = comparison_plot(data_total, "plot_snagden_hs", "snag_acre_20_mean", conv_peracre_to_perha, data_total$site); p_snag_snag_20
+p_snag_snag_30 = comparison_plot(data_total, "plot_snagden_hs", "snag_acre_30_mean", conv_peracre_to_perha, data_total$site); p_snag_snag_30
+# Down wood
+p_down_ddwm = comparison_plot(data_total, "plot_downvol_hs", "cfvol_ddwm_mean", conv_ft3peracre_to_m3perha, data_total$site); p_down_ddwm
 
-p_tdl = comparison_plot((data_total$plot_treeden_gt10cmDbh_hs), (data_total$homerange_treeden_gt4in_dbh_mean), data_total$site, "Density (DBH > 10 cm) [#/ha]")
-
-p_tda = comparison_plot(data_total$plot_treeden_all_hs, data_total$homerange_treeden_all_mean, data_total$site, "Density (all) [#/ha]")
-
-p_qmd = comparison_plot(data_total$plot_qmd_all_hs, data_total$homerange_qmd_mean, data_total$site, "Quadratic mean diameter [cm]")
-
-p_h = comparison_plot(data_total$plot_ht_hs, data_total$homerange_htmax_mean, data_total$site, "Height mean [cm]")
-
-# TODO: plot_ht_cv_hs appears erroneous?
-data_total$plot_ht_cv_hs = data_total$plot_ht_cv_hs/100
-p_hcv = comparison_plot(data_total$plot_ht_cv_hs, data_total$homerange_htmax_cv, data_total$site, "Height CV [cm]")
-
-p_ds = comparison_plot(data_total$plot_snagden_hs, data_total$homerange_snagden_gt15dbh_mean, data_total$site, "Snag density [#/ha]")
-
-p_dwv = comparison_plot(data_total$plot_downvol_hs, data_total$homerange_downvol_mean, data_total$site, "Downed wood volume [m3/ha]")
-
-p_1to1_HsRs = (p_ba  | p_tdl | p_tda) /
-  (p_qmd | p_h   | p_hcv) /
-  (p_ds  | p_dwv | plot_spacer()) + plot_annotation(title = "Fig 2")
-p_1to1_HsRs
+# p_1to1_HsRs = (p_ba  | p_tdl | p_tda) /
+#   (p_qmd | p_h   | p_hcv) /
+#   (p_ds  | p_dwv | plot_spacer()) + plot_annotation(title = "Fig 2")
+# p_1to1_HsRs
 
 # Correlation heatmaps
 
-survey_vars <- data_total %>%
-  select(plot_ba_hs, plot_treeden_gt10cmDbh_hs, plot_treeden_all_hs, plot_qmd_all_hs, plot_ht_hs, plot_ht_cv_hs, plot_snagden_hs, plot_downvol_hs) #%>% log1p()
+survey_vars = data_total %>%
+  select(plot_ba_hs, plot_qmd_all_hs, plot_qmd_gt10cmDbh_hs, plot_treeden_all_hs, plot_treeden_gt10cmDbh_hs, plot_ht_hs, plot_snagden_hs, plot_downvol_hs)
 
-rs_vars <- data_total %>%
-  select(homerange_ba_mean, homerange_treeden_gt4in_dbh_mean, homerange_treeden_all_mean, homerange_qmd_mean, homerange_htmax_mean, homerange_htmax_cv, homerange_snagden_gt15dbh_mean, homerange_downvol_mean) #%>% log1p()
+rsfris_vars = data_total %>%
+  select(ba_mean, ba_4_mean, ba_6_mean, ba_t100_mean, qmd_mean, qmd_6_mean, qmd_t100_mean, qmd_mean, qmd_6_mean, qmd_t100_mean, tree_acre_mean, tree_acre_4_mean, tree_acre_6_mean, htmax_mean, ht_t40_mean, ht_t100_mean, snag_acre_20_mean, snag_acre_30_mean, cfvol_ddwm_mean)
 
 method = "spearman"
-cor_mat <- cor(survey_vars, rs_vars, method = method, use = "pairwise.complete.obs")
+cor_mat <- cor(survey_vars, rsfris_vars, method = method, use = "pairwise.complete.obs")
 
 # Step 3: Reshape for ggplot heatmap
 cor_df <- as.data.frame(as.table(cor_mat))
@@ -112,6 +125,12 @@ ggplot(cor_df, aes(x = HS, y = RS, fill = correlation)) +
        y = "Remote sensing",
        x = "Habitat survey") +
   plot_annotation(title = "Fig 4")
+
+# Best remote sensing proxies:
+# BA                 -> ba_mean
+# QMD all/>10"       -> qmd_6_mean or qmd_t100_mean
+# Tree density > 10" -> tree_acre_4_mean or tree_acre_6_mean
+# Height             -> ht_t100_mean
 
 # Investigate plot-scale variables across strata -----------------------------------------------------
 
@@ -200,20 +219,20 @@ p_uvv = ggplot(data_total, aes(x = stratum_4, y = plot_understory_vol, fill = st
   geom_boxplot() +
   labs(subtitle = 'Understory veg vol [m3/ha]')
 
-p_cc = ggplot(data_total, aes(x = stratum_4, y = homerange_canopy_cover_mean, fill = stratum_4)) +
+p_cc = ggplot(data_total, aes(x = stratum_4, y = canopy_cover_mean, fill = stratum_4)) +
   geom_boxplot() +
   labs(subtitle = 'Canopy cover (mean) [%]')
-ggplot(data_total, aes(x = age_mean, y = homerange_canopy_cover_mean, fill = stratum_4)) +
+ggplot(data_total, aes(x = age_mean, y = canopy_cover_mean, fill = stratum_4)) +
   geom_point() + geom_smooth() +
   labs(subtitle = 'Canopy cover (mean) [%]')
-p_cccv = ggplot(data_total, aes(x = stratum_4, y = homerange_canopy_cover_cv, fill = stratum_4)) +
+p_cccv = ggplot(data_total, aes(x = stratum_4, y = canopy_cover_cv, fill = stratum_4)) +
   geom_boxplot() +
   labs(subtitle = 'Canopy cover (cv) [#]')
-ggplot(data_total, aes(x = age_mean, y = homerange_canopy_cover_cv, fill = stratum_4)) +
+ggplot(data_total, aes(x = age_mean, y = canopy_cover_cv, fill = stratum_4)) +
   geom_point() + geom_smooth() +
   labs(subtitle = 'Canopy cover (cv) [#]')
 
-p_cl = ggplot(data_total, aes(x = stratum_4, y = homerange_canopy_layers_mean, fill = stratum_4)) +
+p_cl = ggplot(data_total, aes(x = stratum_4, y = canopy_layers_mean, fill = stratum_4)) +
   geom_boxplot() +
   labs(subtitle = 'Canopy layers (mean) [#]')
 
@@ -223,7 +242,7 @@ p_strata_structure = (p_ba | p_h | p_hcv) /
   (p_cc | p_cccv | p_tdl | p_tds) /
   (p_tda | p_qmdl | p_qmds | p_qmda) /
   (p_ds | p_dwv | p_uvc | p_uvv) + plot_annotation(title = "Fig 1")
-p_strata_structure + plot_layout(guides = "collect") &  # collect legends
+p_strata_structure + plot_layout(guides = "collect") +
   theme(axis.text.x = element_blank(),
         axis.title.x = element_blank(),
         axis.title.y = element_blank(),

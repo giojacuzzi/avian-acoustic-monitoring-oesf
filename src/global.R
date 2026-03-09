@@ -51,11 +51,9 @@ if (!exists("pkgs", envir = .GlobalEnv)) {
 
 # Class labels ------------------------------------------------------------------------------------
 
-if (!exists("class_labels", envir = .GlobalEnv)) {
-  class_labels = readLines("data/models/ensemble/ensemble_class_labels.txt") %>% tolower() %>% tibble(label = .) %>%
-    separate(label, into = c("scientific_name", "common_name"), sep = "_", extra = "merge", fill  = "right", remove = FALSE) %>%
-    select(label, common_name, scientific_name)
-}
+class_labels = readLines("data/models/ensemble/ensemble_class_labels.txt") %>% tolower() %>% tibble(label = .) %>%
+  separate(label, into = c("scientific_name", "common_name"), sep = "_", extra = "merge", fill  = "right", remove = FALSE) %>%
+  select(label, common_name, scientific_name)
 
 # GIS data ----------------------------------------------------------------------------------------
 
@@ -87,6 +85,19 @@ study_area = st_as_sfc(st_bbox(st_buffer(aru_sites, 6500)))
 
 # Table linking unique sampling unit IDs with season/serialno/deploy combinations ("unit_key.csv")
 path_site_key = "data/site_key.csv"
+site_key = read_csv(path_site_key, show_col_types = FALSE) %>% mutate(
+  site = str_to_lower(site),
+  site_agg = str_to_lower(site_agg)
+)
+
+# RS-FRIS versions per year
+# 4.0 - "as flown" 2019-2020
+# 5.0 - "as flown" 2021-2022
+# 5.1 - depletion updates for DNR lands through 9/1/2024
+rsfris_version_years = data.frame(
+  year =    c(2020,  2021,  2022,  2023),
+  version = c("4.0", "5.0", "5.0", "5.0")
+)
 
 # Developmental stage classifications (e.g. O'Hara et al. 1996, Oliver and Larson 1996, and Spies 1997)
 stages_3 = tibble(
@@ -139,6 +150,16 @@ pairwise_collinearity_by_group = function(data_vars, group_var, threshold = 0.8)
     return(df)
   }))
   return(collinearity_results)
+}
+
+# Load a raster, cropped, projected, and masked to the study area
+load_raster = function(path_rast) {
+  r = rast(path_rast)
+  sa_r = vect(st_transform(study_area, crs(r)))
+  r = crop(r, sa_r)
+  r = mask(r, sa_r)
+  r = project(r, crs_m_rast)
+  return(r)
 }
 
 # Set ggplot theme -----------------------------------------------------------------------------------------------

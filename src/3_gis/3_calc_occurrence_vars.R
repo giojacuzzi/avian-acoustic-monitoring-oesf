@@ -1,29 +1,33 @@
 ## 3_calc_occurrence_vars.R ###############################################################################
 # Quantify variables for occurrence
 # NOTE: "hs" refers to data collected from in-person habitat surveys, while "rs" refers to data derived via remote-sensing imagery.
+# ETA: 16 hours
 #
 # CONFIG:
 pnts_name = "sites" # "sites" or "no_action"
 overwrite_data_plot_scale_cache = TRUE
 overwrite_data_homerange_scale_cache = TRUE
-cover_classification = "clean_stage_3" # e.g. clean_stage_3, strata_4
+cover_classification = "clean_strata_4" # e.g. clean_stage_3, strata_4
+t = 2021 # year: 2020, 2021, 2022, 2023
 #
 ## OUTPUT:
-path_data_plot_scale_out      = paste0("data/cache/3_gis/3_calc_occurrence_vars/NEW_data_plot_scale_", cover_classification, ".rds")
-path_data_homerange_scale_out = paste0("data/cache/3_gis/3_calc_occurrence_vars/NEW_data_homerange_scale_", cover_classification, ".rds")
+path_data_plot_scale_out      = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_", t, "_", cover_classification, ".rds")
+path_data_homerange_scale_out = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_", t, "_", cover_classification, ".rds")
 #
 ## INPUT:
+path_rast_cover       = paste0("data/cache/3_gis/2_gen_cover_rasters/rast_cover_", t, "_", cover_classification, ".tif")
+path_site_cover_class = paste0("data/cache/3_gis/2_gen_cover_rasters/site_cover_class_", t, "_sf.rds")
 path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 # Base RS-FRIS data (0.1 acre resolution, i.e. ~404m2 or 20.10836 * 20.10836 m grain, roughly 1% of the area of a 100m radius circle)
 # RS-FRIS 4.0 uses a combination of 2019 and 2020 photogrammetry.
 # RS-FRIS 5.0 uses a combination of 2021 and 2022 photogrammetry. 
-# TODO: Calculate on a yearly basis!
-dir_rsfris_version = 'data/environment/rsfris_v4.0' # Only use 2020 for now
 ###########################################################################################################
 
-source("src/global.R")
+source("src/3_gis/1_preprocess_gis_data.R")
 
-path_rast_cover = paste0("data/cache/3_gis/2_gen_cover_rasters/rast_cover_", cover_classification, ".tif")
+message("Calculating occurrence variables for year ", t)
+version = rsfris_version_years %>% filter(year == t) %>% pull(version)
+rsfris_version_path = paste0("data/environment/rsfris_study_area/", version)
 
 options(mapview.maxpixels = 2117676)
 
@@ -32,7 +36,7 @@ pnts = switch(pnts_name,
     # ARU locations
     sites = {
       path_rast_cover = path_rast_cover
-      read_rds("data/cache/3_gis/2_gen_cover_rasters/site_cover_class_sf.rds")
+      read_rds(path_site_cover_class)
     },
     
     # Existing 2020 landscape
@@ -50,7 +54,22 @@ pnts = switch(pnts_name,
 )
 message("Retrieved ", nrow(pnts), " points for '", pnts_name, "'")
 
-# TODO: Ensure that aru site locations are correctly positioned within patches (i.e. not near edges so as to get incorrect covariate estimates)
+# Ensure that aru site locations are correctly positioned within patches (i.e. not near edges so as to get incorrect covariate estimates)
+# Overwrite thinning class validity for sites: ca263i (mature), ap022i (standinit), az041i (standinit)
+pnts[pnts$site == "ca263i", ]
+pnts[pnts$site == "ap022i", "stratum_4"] = "standinit"
+pnts[pnts$site == "ap022i", "stratum_5"] = "standinit"
+pnts[pnts$site == "az041i", "stratum_4"] = "standinit"
+pnts[pnts$site == "az041i", "stratum_5"] = "standinit"
+
+# Combine co-located sites
+s = site_key %>% filter(site != site_agg) %>% select(site, site_agg) %>% distinct()
+s_site = unique(s$site)
+s_site_agg = unique(s$site_agg)
+mapview(pnts %>% filter(site %in% c(s_site, s_site_agg)))
+lookup = site_key %>% select(site, site_agg) %>% distinct()
+pnts_alt = pnts %>% left_join(lookup, by = "site")
+pnts = pnts_alt %>% filter(site == site_agg) %>% select(-site_agg)
 
 message('Loading raster cover data from cache ', path_rast_cover)
 rast_cover = rast(path_rast_cover)
@@ -85,27 +104,27 @@ compute_raster_buffer_value_func = function(raster, points, buffer_distance, fun
 summary_stats = function(x, na.rm = TRUE, conversion_factor = 1) {
   if (length(x) == 0) return(c(mean = NA, sd = NA, cv = NA))
   x = x * conversion_factor
-  mu = mean(x, na.rm = na.rm)
-  sigma = sd(x, na.rm = na.rm)
+  med    = median(x, na.rm = na.rm)
+  mu     = mean(x, na.rm = na.rm)
+  sigma  = sd(x, na.rm = na.rm)
   if (!is.na(mu) && mu == 0) {
     cv = NA
   } else {
     cv = sigma / mu
   }
-  return(data.frame(mean = mu, sd = sigma, cv = cv))
+  return(data.frame(median = med, mean = mu, sd = sigma, cv = cv))
 }
 
 ##############################################################################
-# Rasters
+# Rasters and sf objects
 
-# TODO
-rast_origin = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_ORIGIN_YEAR.img'))
+rast_origin = load_raster(paste0(rsfris_version_path, '/ORIGIN_YEAR.tif'))
 rast_origin_missing = rast_origin
-values(rast_origin_missing)[values(rast_origin_missing) <= 2020] = NA
-values(rast_origin)[values(rast_origin) > 2020] = NA
-rast_age = round(2020 - rast_origin)
+values(rast_origin_missing)[values(rast_origin_missing) <= t] = NA
+values(rast_origin)[values(rast_origin) > t] = NA
+rast_age = round(t - rast_origin)
 
-source("src/3_gis/1_preprocess_gis_data.R")
+paved_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway", "Light-Duty Road")))
 
 ##############################################################################
 # Local plot scale covariates
@@ -140,9 +159,8 @@ if (overwrite_data_plot_scale_cache) {
   }
   
   # Elevation [m]
-  # TODO: do this in script #2, and get it from the DAP data, not elevatr
-  pnts = elevatr::get_elev_point(pnts, src = "aws", overwrite = TRUE)
-  mapview(pnts, zcol = "elevation")
+  rast_elevation = load_raster("data/environment/elevation/elevation.tif")
+  pnts$elevation = extract(rast_elevation, vect(pnts))[,2]
 
   # Age (mean and cv) [#]
   # TODO: do this in script #2
@@ -304,7 +322,6 @@ if (overwrite_data_plot_scale_cache) {
   }
   
   # Distance to roads
-  paved_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway", "Light-Duty Road")))
   dist_road_paved = st_distance(pnts, paved_roads)
   dist_road_paved = apply(dist_road_paved, 1, min)
   pnts$dist_road_paved = dist_road_paved
@@ -326,8 +343,8 @@ if (overwrite_data_plot_scale_cache) {
   pnts$dist_watercourse_all = dist_watercourse_all
   # mapview(pnts, zcol = "dist_watercourse_all") + mapview(watercourses)
   
-  # # Distance to nearest edge [m]
-  # # For each site, find its patch, then find the distance to the nearest non-patch cell
+  # Distance to nearest edge [m]
+  # For each site, find its patch, then find the distance to the nearest non-patch cell
   # hr_patch_ids = patches(rast_cover, directions=8, values=TRUE)
   # pnts$dist_nearest_edge = NA
   # for (i in 1:nrow(pnts)) {
@@ -341,7 +358,7 @@ if (overwrite_data_plot_scale_cache) {
   #   distances = sqrt((na_coords[,1] - d_coords[1])^2 + (na_coords[,2] - d_coords[2])^2)
   #   min_dist = min(distances)
   #   pnts[i, 'dist_nearest_edge'] = min_dist
-  #   # mapview(d) + mapview(m) + mapview(st_buffer(d, 100), col.regions = 'transparent', lwd = 2)
+    # mapview(d) + mapview(m) + mapview(st_buffer(d, 100), col.regions = 'transparent', lwd = 2)
   # }
   # mapview(rast_cover) + mapview(pnts, label = pnts$site, zcol = 'dist_nearest_edge') + mapview(st_buffer(pnts, 100), col.regions = 'transparent', lwd = 2)
 
@@ -367,40 +384,66 @@ if (overwrite_data_homerange_scale_cache) {
   message("Homerange buffer median: ", buff_median <- round(median(species_trait_data$home_range_radius_m),0))
   message("Homerange buffer mean: ",   buff_mean   <- round(mean(species_trait_data$home_range_radius_m),0))
   message("Homerange buffer max: ",    buff_max    <- round(max(species_trait_data$home_range_radius_m),0))
-  homeranges = data.frame(
-    common_name = c("plot", "median"), # can also do "mean", "max"
+  # Calculate species-specific ranges
+  homeranges = species_trait_data %>% select(common_name, home_range_radius_m) %>% mutate(home_range_radius_m = round(home_range_radius_m, 0)) %>% rename(scale = common_name)
+  homeranges = rbind(data.frame(
+    scale = c("plot", "median"), # can also do "mean", "max"
     home_range_radius_m = c(100, buff_median) # buff_mean, buff_max
-  )
-  # TODO: calculate species-specific ranges
-  # homeranges = species_trait_data %>% select(common_name, home_range_radius_m)
-  # homeranges = rbind(homeranges, species_trait_data %>% mutate(home_range_radius_m = round(home_range_radius_m, 0)))
-  # DEBUG
+  ), homeranges)
 
   # TODO: Calculate landscape-level patch size
   
   ## Load forest structure rasters
   message("Loading forest structure rasters")
   
-  # Basal area [ft2/acre] --> [m2/ha]
-  rast_ba = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_BA_EXPORT.tif')) * 0.229568
-  # Tree density (total) [#/acre] --> [#/ha]
-  rast_treeden_all = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_TREE_ACRE.img'))  * conv_peracre_to_perha
-  # Tree density (DBH > 4 in) [#/acre]-->[#/ha]
-  rast_treeden_gt4inDbh = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_TREE_ACRE_4.img')) * conv_peracre_to_perha
-  # Tree quadratic mean diameter [in]-->[cm]
-  rast_qmd = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_QMD.img')) * conv_in_to_cm
-  # Tree height (max) [ft]-->[m]
-  rast_htmax = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_HTMAX.img')) * conv_ft_to_m
-  # Canopy layers [#]
-  rast_canopy_layers = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_CANOPY_LAYERS.img'))
-  # Canopy cover [%]
-  rast_canopy_cover = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_COVER.img'))
-  # Canopy closure [%]
-  rast_canopy_closure = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_CLOSURE.img'))
-  # Density of snags > 15" DBH [#/acre] --> [#/ha]
-  rast_snagden_gt15inDbh = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_SNAG_ACRE_15.img')) * conv_peracre_to_perha
-  # Downed wood volume [ft3/acre] --> [m3/ha]
-  rast_downvol = load_raster(paste0(dir_rsfris_version, '/RS_FRIS_CFVOL_DDWM.img')) * 0.069968
+  rast_htmax = load_raster(paste0(rsfris_version_path, '/HTMAX.tif'))
+  
+  rast_rsfris = list(
+    # BA      - Basal area of all trees                [ft2/acre] --> [m2/ha]
+    rast_BA = load_raster(paste0(rsfris_version_path, '/BA.tif')),
+    # BA_4    - Basal area of trees > 4" DBH           [ft2/acre] --> [m2/ha]
+    rast_BA_4 = load_raster(paste0(rsfris_version_path, '/BA_4.tif')),
+    # BA_6    - Basal area of trees > 6" DBH           [ft2/acre] --> [m2/ha]
+    rast_BA_6 = load_raster(paste0(rsfris_version_path, '/BA_6.tif')),
+    # BA_T100 - Basal area 100 largest trees per acre  [ft2/acre] --> [m2/ha]
+    rast_BA_T100 = load_raster(paste0(rsfris_version_path, '/BA_T100.tif')),
+    # BAP_HWD - Percent of trees of a hardwood species [%]
+    rast_BAP_HWD = load_raster(paste0(rsfris_version_path, '/BAP_HWD.tif')),
+    # CANOPY_LAYERS - Count of distinct canopy layers [#]
+    rast_CANOPY_LAYERS = load_raster(paste0(rsfris_version_path, '/CANOPY_LAYERS.tif')),
+    # COVER - Canopy cover [%]
+    rast_CANOPY_COVER = load_raster(paste0(rsfris_version_path, '/COVER.tif')),
+    # CFVOL_DDWM - Down and dead woody materials [ft3/acre] --> [m3/ha]
+    rast_CFVOL_DDWM = load_raster(paste0(rsfris_version_path, '/CFVOL_DDWM.tif')),
+    # HT_T40 - Height 40 largest trees per acre [ft]-->[m]
+    rast_HT_T40 = load_raster(paste0(rsfris_version_path, '/HT_T40.tif')),
+    # HT_T100 - Height 100 largest trees per acre [ft]-->[m]
+    rast_HT_T100 = load_raster(paste0(rsfris_version_path, '/HT_T100.tif')),
+    # HTMAX - Maximum tree height [ft]-->[m]
+    rast_HTMAX = load_raster(paste0(rsfris_version_path, '/HTMAX.tif')),
+    # QMD - Quadramtic mean diameter [in]-->[cm]
+    rast_QMD = load_raster(paste0(rsfris_version_path, '/QMD.tif')),
+    # QMD_6 - Quadratic mean diameter of trees > 6" DBH [in]-->[cm]
+    rast_QMD_6 = load_raster(paste0(rsfris_version_path, '/QMD_6.tif')),
+    # QMD_T100 - Quadratic mean diameter of 100 largest trees per acre [in]-->[cm]
+    rast_QMD_T100 = load_raster(paste0(rsfris_version_path, '/QMD_T100.tif')),
+    # SDI_SUM - Reineke's stand density index using summation method [#]
+    rast_SDI_SUM = load_raster(paste0(rsfris_version_path, '/SDI_SUM.tif')),
+    # SNAG_ACRE_20 - Number of snags per acre > 20" DBH [#/acre] --> [#/ha]
+    rast_SNAG_ACRE_20 = load_raster(paste0(rsfris_version_path, '/SNAG_ACRE_20.tif')),
+    # SNAG_ACRE_30 - Number of snags per acre > 30" DBH [#/acre] --> [#/ha]
+    rast_SNAG_ACRE_30 = load_raster(paste0(rsfris_version_path, '/SNAG_ACRE_30.tif')),
+    # TREE_ACRE - Number of trees per acre [#/acre] --> [#/ha]
+    rast_TREE_ACRE = load_raster(paste0(rsfris_version_path, '/TREE_ACRE.tif')),
+    # TREE_ACRE_4 - Number of trees per acre > 4" DBH [#/acre] --> [#/ha]
+    rast_TREE_ACRE_4 = load_raster(paste0(rsfris_version_path, '/TREE_ACRE_4.tif')),
+    # TREE_ACRE_6 - Number of trees per acre > 6" DBH [#/acre] --> [#/ha]
+    rast_TREE_ACRE_6 = load_raster(paste0(rsfris_version_path, '/TREE_ACRE_6.tif')),
+    # TREE_ACRE_20 - Number of trees per acre > 20" DBH [#/acre] --> [#/ha]
+    rast_TREE_ACRE_20 = load_raster(paste0(rsfris_version_path, '/TREE_ACRE_20.tif')),
+    # TREE_ACRE_30 - Number of trees per acre > 30" DBH [#/acre] --> [#/ha]
+    rast_TREE_ACRE_30 = load_raster(paste0(rsfris_version_path, '/TREE_ACRE_30.tif'))
+  )
   
   # "Edge influences on distributions of organisms or factors affecting organisms (such as predation and nest parasitism) are concentrated within 50m of the edge." (Kremaster L. & Bunnell F. L. (1999) Edge effects: Theory, evidence and implications to management of western North American forests. In: Forest Fragmentation: Wildlife and Management Implications (eds J. Wisniewski, J. A. Rochelle & L. Lehmann) pp. 117–53. Leiden, Boston, MA.)
   core_area_buffer = 50 # meters
@@ -409,11 +452,12 @@ if (overwrite_data_homerange_scale_cache) {
   # Calculate per scale according to predicted home range size
   message("Calculating homerange variables across all scales")
   for (i in 1:nrow(homeranges)) {
-    scale = homeranges[i,'common_name']
+    scale = homeranges[i,'scale']
     homerange_buffer_size = homeranges[i,'home_range_radius_m']
     message("Scale '", scale, "', home range buffer size: ", homerange_buffer_size)
     
     data_homerange_scale_species = data.frame()
+    data_homerange_scale_species_list = list()
     
     # For each point...
     pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = nrow(pnts), clear = FALSE)
@@ -469,7 +513,7 @@ if (overwrite_data_homerange_scale_cache) {
       ## Focal patch scale
       
       # Focal patch cover class
-      (focalpatch_cover = terra::extract(rast_cover, vect(pnt))[,2])
+      # (focalpatch_cover = terra::extract(rast_cover, vect(pnt))[,2])
 
       # Focal patch area [ha]
       ncells_focal_patch = sum(values(rast_focal_patch), na.rm = TRUE)
@@ -487,47 +531,33 @@ if (overwrite_data_homerange_scale_cache) {
       # ncells_focal_patch_core = sum(!is.na(values(focal_patch_core)))
       # (focal_patch_core_area = ncells_focal_patch_core * prod(res(rast_focal_patch)) * conv_m2_to_ha)
       
-      # Structural variables (across focal patch, then across homerange)
-      results_list = list()
-      regions = list(
-        # focalpatch = rast_focal_patch,
-        homerange  = rast_homerange # TODO: PREVENT THE NEED FOR CONSTANT RESAMPLING
-      )
-      for (k in seq_along(regions)) {
-        region_name = names(regions)[k]
-        # message("Calculating forest structural variables for: ", region_name)
-        region = resample(regions[[k]], rast_age, method = "near") # align region to raster data
-        # print(sum(!is.na(values(region))))
-        
-        vars = c(
-          # Age [#]
-          # age = summary_stats(values(mask(rast_age, region)), na.rm = TRUE),
-          # Basal area [m2/ha]
-          ba = summary_stats(values(mask(rast_ba, region)), na.rm = TRUE),
-          # Tree density (total) [# trees/ha]
-          treeden_all = summary_stats(values(mask(rast_treeden_all, region)), na.rm = TRUE),
-          # Tree density (large, dbh > 4 in) [# trees/ha]
-          treeden_gt4inDbh = summary_stats(values(mask(rast_treeden_gt4inDbh, region)), na.rm = TRUE),
-          # Tree diameter [cm]
-          qmd = summary_stats(values(mask(rast_qmd, region)), na.rm = TRUE),
-          # Tree height [m]
-          htmax = summary_stats(values(mask(rast_htmax, region)), na.rm = TRUE),
-          # Canopy layers [#]
-          canopy_layers = summary_stats(values(mask(rast_canopy_layers, region)), na.rm = TRUE),
-          # Canopy cover [%]
-          canopy_cover = summary_stats(values(mask(rast_canopy_cover, region)), na.rm = TRUE),
-          # Canopy closure [%]
-          canopy_closure = summary_stats(values(mask(rast_canopy_closure, region)), na.rm = TRUE),
-          # Density of snags > 15" DBH [#/ha]
-          snagden_gt15dbh = summary_stats(values(mask(rast_snagden_gt15inDbh, region)), na.rm = TRUE),
-          # Downed wood volume [m3/ha]
-          downvol = summary_stats(values(mask(rast_downvol, region)), na.rm = TRUE)
+      # Structural variables (across plot)
+      if (scale == "plot") {
+        message(yellow("NOTE: Calculating structrual RSFRIS variables for only the plot scale"))
+        results_list = list()
+        regions = list(
+          # focalpatch = rast_focal_patch,
+          homerange  = rast_homerange
         )
-        # format and discard irrelevant variables
-        vars = as.data.frame(vars) %>% select(-ends_with(".sd"))
-        results_list[[region_name]] = vars
+        for (k in seq_along(regions)) {
+          region_name = names(regions)[k]
+          # message("Calculating forest structural variables for: ", region_name)
+          region = resample(regions[[k]], rast_age, method = "near") # align region to raster data
+          # print(sum(!is.na(values(region))))
+          
+          # Calculate summary stats for all rsfris rasters
+          vars = lapply(
+            rast_rsfris,
+            function(r) summary_stats(values(mask(r, region)), na.rm = TRUE)
+          )
+          names(vars) = sub("^rast_", "", names(vars))
+          
+          # format and discard irrelevant variables
+          vars = as.data.frame(vars)
+          results_list[[region_name]] = vars
+        }
+        plot_rsfris_df = do.call(cbind, unname(results_list)) %>% clean_names()
       }
-      final_df = do.call(cbind, results_list) %>% janitor::clean_names()
       
       ## Homerange scale metrics
       
@@ -651,17 +681,10 @@ if (overwrite_data_homerange_scale_cache) {
       (density_streams = homerange_streams_length / homerange_buffer_area_ha)
       # mapview(homerange_streams_major) + mapview(homerange_streams) + mapview(homerange_buffer) + homerange_cover
       
-      if (pnts_name == "sites") {
-        site = pnts[j, ] %>% pull(site)
-        final_df = cbind(data.frame(
-          site = site
-        ), final_df)
-      }
-      
-      final_df = cbind(data.frame(
+      final_df = data.frame(
         scale = scale,
         buffer_radius_m = homerange_buffer_size,
-        focalpatch_cover,
+        # focalpatch_cover,
         focalpatch_area_homeange_pcnt,
         # focalpatch_core_area_homeange_pcnt,
         # focalpatch_isolation,
@@ -686,11 +709,20 @@ if (overwrite_data_homerange_scale_cache) {
         density_roads,
         density_streams_major,
         density_streams
-      ), final_df)
+      )
       
-      data_homerange_scale_species = rbind(data_homerange_scale_species, final_df)
+      if (scale == "plot") {
+        final_df = cbind(final_df, plot_rsfris_df)
+      }
+      
+      if (pnts_name == "sites") {
+        final_df$site = pnts[j, ] %>% pull(site)
+      }
+      
+      data_homerange_scale_species_list[[j]] = final_df
       pb$tick()
     }
+    data_homerange_scale_species = bind_rows(data_homerange_scale_species_list)
     # Rprof(NULL)
     # summaryRprof("my_profile.out")
     
