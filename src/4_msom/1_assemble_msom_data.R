@@ -11,16 +11,15 @@ min_sites_detected = 1 # Minimum number of sites present to retain a species for
 out_cache_dir  = "data/cache/4_msom/1_assemble_msom_data"
 path_out_y     = paste0(out_cache_dir, "/y.rds")
 path_out_xyday = paste0(out_cache_dir, "/xyday.rds")
-path_out_occurrence_predictor_plot_data      = paste0(out_cache_dir, "/V2_occurrence_predictor_plot_data.rds")
-path_out_occurrence_predictor_homerange_data = paste0(out_cache_dir, "/V2_occurrence_predictor_homerange_data.rds")
-path_out_detection_predictor_data            = paste0(out_cache_dir, "/V2_detection_predictor_data.rds")
+path_out_occurrence_predictor_plot_data      = paste0(out_cache_dir, "/V3_occurrence_predictor_plot_data.rds")
+path_out_occurrence_predictor_homerange_data = paste0(out_cache_dir, "/V3_occurrence_predictor_homerange_data.rds")
+path_out_detection_predictor_data            = paste0(out_cache_dir, "/V3_detection_predictor_data.rds")
 #
 # INPUT:
 path_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_predictions.rds"
 path_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_surveydates.rds"
 path_calibration_results         = "data/cache/1_pam/1_classifier_calibration/calibration_results_raw.csv"
 path_annotations                 = "data/cache/1_pam/1_classifier_calibration/annotations_clean.csv"
-# TODO: Parse by year!
 path_plot_scale_data       = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_2020_clean_strata_4.rds"
 path_homerange_scale_data  = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_2020_clean_strata_4.rds"
 path_predictors_detection  = "data/cache/3_gis/6_calc_detection_vars/V2_data_detection.rds"
@@ -295,20 +294,30 @@ sites   = dimnames(y)$site
 message("Loading detection predictor data")
 detection_data = readRDS(path_predictors_detection) %>% mutate(year = as.character(year)) %>% rename(season = year)
 
-message("Loading local plot scale data from ", path_plot_scale_data)
-occurrence_predictor_plot_data_local = readRDS(path_plot_scale_data) %>% sf::st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site))
+occ_pred_data_plot = list()
+occ_pred_data_homerange = list()
+for (t in seasons) {
+  
+  path_plot_scale_data = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_", t, "_clean_strata_4.rds")
+  message("Loading local plot scale data from ", path_plot_scale_data)
+  occurrence_predictor_plot_data_local = readRDS(path_plot_scale_data) %>% st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site))
+  
+  s = 'plot'
+  path_homerange_scale_data = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_", t, "_clean_strata_4.rds")
+  message("Loading remote sensing plot scale data from '", s, "' layer ", path_homerange_scale_data)
+  occurrence_predictor_plot_data_rs = readRDS(path_homerange_scale_data)[[s]] %>% arrange(site) %>% mutate(site = tolower(site))
+  
+  message("Combining all plot scale occurrence predictor data")
+  occurrence_predictor_plot_data = occurrence_predictor_plot_data_local %>% full_join(occurrence_predictor_plot_data_rs, by = "site")
 
-s = 'plot'
-message("Loading remote sensing plot scale data from '", s, "' layer ", path_homerange_scale_data)
-occurrence_predictor_plot_data_rs = readRDS(path_homerange_scale_data)[[s]] %>% arrange(site) %>% mutate(site = tolower(site))
-
-message("Combining all plot scale occurrence predictor data")
-occurrence_predictor_plot_data = occurrence_predictor_plot_data_local %>% full_join(occurrence_predictor_plot_data_rs, by = "site")
-
-message("Loading homerange scale data")
-occurrence_predictor_homerange_data = readRDS(path_homerange_scale_data)
-occurrence_predictor_homerange_data = map(occurrence_predictor_homerange_data, ~ .x %>% arrange(site) %>% mutate(site = tolower(site)))
-names(occurrence_predictor_homerange_data) = tolower(names(occurrence_predictor_homerange_data))
+  message("Loading homerange scale data from ", path_homerange_scale_data)
+  occurrence_predictor_homerange_data = readRDS(path_homerange_scale_data)
+  occurrence_predictor_homerange_data = map(occurrence_predictor_homerange_data, ~ .x %>% arrange(site) %>% mutate(site = tolower(site)))
+  names(occurrence_predictor_homerange_data) = tolower(names(occurrence_predictor_homerange_data))
+  
+  occ_pred_data_plot[[t]] = occurrence_predictor_plot_data
+  occ_pred_data_homerange[[t]] = occurrence_predictor_homerange_data
+}
 
 # Discard any sites not surveyed ---------------------------------------------------------------------------------
 
@@ -323,7 +332,7 @@ if (length(sites_not_surveyed) > 0) {
 }
 
 # Discard sites with no environmental data
-sites_missing_environmental_data = setdiff(sites, occurrence_predictor_plot_data$site)
+sites_missing_environmental_data = setdiff(sites, unique(do.call(c, lapply(occ_pred_data_plot, function(x) x$site))))
 if (length(sites_missing_environmental_data) > 0) {
   message("Discarding ", length(sites_missing_environmental_data), " sites with missing environmental data:")
   print(sites_missing_environmental_data)
@@ -359,17 +368,21 @@ message(crayon::green("Cached species observation histories 'y' to", path_out_y)
 # Assemble all occurrence predictor data -------------------------------------------------------------------------
 
 # Conform occurrence data sites with surveyed sites
-occurrence_predictor_plot_data = occurrence_predictor_plot_data %>% filter(site %in% sites) # discard data for irrelevant sites
-stopifnot(dimnames(y)[["site"]] == occurrence_predictor_plot_data$site)    # check that covariate data are aligned with observation matrix by site
-for (r in names(occurrence_predictor_homerange_data)) {
-  occurrence_predictor_homerange_data[[r]] = occurrence_predictor_homerange_data[[r]] %>% filter(site %in% sites)
-  stopifnot(dimnames(y)[["site"]] == occurrence_predictor_homerange_data[[r]]$site)
+for (t in names(occ_pred_data_plot)) {
+  occ_pred_data_plot[[t]] = occ_pred_data_plot[[t]] %>% filter(site %in% sites) # discard data for irrelevant sites
+  stopifnot(dimnames(y)[["site"]] == occ_pred_data_plot[[t]]$site) # check that covariate data are aligned with observation matrix by site
+}
+for (t in names(occ_pred_data_homerange)) {
+  for (r in names(occ_pred_data_homerange[[t]])) {
+    occ_pred_data_homerange[[t]][[r]] = occ_pred_data_homerange[[t]][[r]] %>% filter(site %in% sites)
+    stopifnot(dimnames(y)[["site"]] == occ_pred_data_homerange[[t]][[r]]$site)
+  }
 }
 
 # Cache
-saveRDS(occurrence_predictor_plot_data, path_out_occurrence_predictor_plot_data)
+saveRDS(occ_pred_data_plot, path_out_occurrence_predictor_plot_data)
 message(crayon::green("Cached occurrence predictor plot data to", path_out_occurrence_predictor_plot_data))
-saveRDS(occurrence_predictor_homerange_data, path_out_occurrence_predictor_homerange_data)
+saveRDS(occ_pred_data_homerange, path_out_occurrence_predictor_homerange_data)
 message(crayon::green("Cached occurrence predictor homerange data to", path_out_occurrence_predictor_homerange_data))
 
 # Assemble all detection predictor data --------------------------------------------------------------------------
