@@ -3,7 +3,7 @@
 #
 ## CONFIG:
 grouping = "all" # Species grouping ("all", "diet", "nest", "nest_ps" ...)
-model_type = "nofp" # nofp, fp
+model_type = "fp" # nofp, fp
 param_alpha_stage = "stratum_4"
 param_alpha_season = "season"
 param_alpha_point_names = c(
@@ -423,7 +423,6 @@ if (model_type == "fp") {
 # Monitor parameter values
 params_to_monitor = c(
   "mu.u", "sigma.u", "u",
-  # "mu.alpha_stage", "sigma.alpha_stage", "alpha_stage",
   "mu.alpha_season", "sigma.alpha_season", "alpha_season",
   paste0("mu.alpha_point",     1:n_alpha_point_params),     paste0("sigma.alpha_point", 1:n_alpha_point_params),        paste0("alpha_point", 1:n_alpha_point_params),
   paste0("mu.alpha_plot",      1:n_alpha_plot_params),      paste0("sigma.alpha_plot", 1:n_alpha_plot_params),          paste0("alpha_plot", 1:n_alpha_plot_params),
@@ -451,9 +450,9 @@ msom = jags(data = msom_data,
             inits = function() { init_vals },
             parameters.to.save = params_to_monitor,
             model.file = model_file,
-            # Test run, ETA: 6 hr (parallel fp), 1.5 hr (nofp)
-            # n.chains = 2, n.adapt = 200, n.iter = 2000, n.burnin = 200, n.thin = 1, parallel = FALSE,
-            n.chains = 2, n.adapt = 500, n.iter = 5000, n.burnin = 500, n.thin = 1, parallel = TRUE, # 3 hr nofp
+            # Test run, ETA: 7 hr (fp), 1.5 hr (nofp)
+            n.chains = 2, n.adapt = 200, n.iter = 2000, n.burnin = 200, n.thin = 1, parallel = FALSE,
+            # n.chains = 2, n.adapt = 500, n.iter = 5000, n.burnin = 500, n.thin = 1, parallel = TRUE, # 3 hr nofp
             # Formal run, ETA unknown
             # n.chains = 3, n.adapt = 5000, n.iter = 30000, n.burnin = 10000, n.thin = 3, parallel = TRUE,
             DIC = FALSE, verbose=TRUE)
@@ -616,7 +615,7 @@ whiskerplot(msom, c(paste0('mu.', param_beta_point_data$param)))
       i = as.integer(str_match(parameter, "alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,4])
     ) %>% left_join(param_alpha_plot_data %>% select(param, name), by = c("param")) %>%
     left_join(match_s, by = c("s" = "stage_idx")) %>% left_join(match_i, by = c("i" = "species_idx")) %>% left_join(groups, by = c("species" = "common_name"))
-  ggplot(alpha_plot %>% filter(name == "qmd_6_mean", stratum_4 == "thin") %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group, shape = stratum_4)) +
+  ggplot(alpha_plot %>% filter(name == "tree_acre_6_mean", stratum_4 == "mature") %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group, shape = stratum_4)) +
     geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
     geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5)) +
     labs(title = "alpha_plot x stratum_4") + theme(legend.position = "bottom")

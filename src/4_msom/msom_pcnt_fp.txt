@@ -14,11 +14,14 @@ model {
     # Covariate effects on occurrence
     for (s in 1:S) { # estimate stage-specific plot-scale effects for each stage
       mu.alpha_plot1[s,g]      ~ dnorm(0, 1/2.25^2)
-      # mu.alpha_plot2[s,g]      ~ dnorm(0, 1/2.25^2)
+      mu.alpha_plot2[s,g]      ~ dnorm(0, 1/2.25^2)
+      mu.alpha_plot3[s,g]      ~ dnorm(0, 1/2.25^2)
       sigma.alpha_plot1[s,g]   ~ dt(0, 1/2.25^2, 1) T(0,)
       sigma.alpha_plot2[s,g]   ~ dt(0, 1/2.25^2, 1) T(0,)
+      sigma.alpha_plot3[s,g]   ~ dt(0, 1/2.25^2, 1) T(0,)
       tau.alpha_plot1[s,g]     <- 1 / pow(sigma.alpha_plot1[s,g], 2)
       tau.alpha_plot2[s,g]     <- 1 / pow(sigma.alpha_plot2[s,g], 2)
+      tau.alpha_plot3[s,g]     <- 1 / pow(sigma.alpha_plot3[s,g], 2)
     }
   
     mu.alpha_season[g]     ~ dnorm(0, 1/2.25^2)   
@@ -28,8 +31,7 @@ model {
     mu.alpha_homerange1[g] ~ dnorm(0, 1/2.25^2)
     mu.alpha_homerange2[g] ~ dnorm(0, 1/2.25^2)
     mu.alpha_homerange3[g] ~ dnorm(0, 1/2.25^2)
-    mu.alpha_homerange4[g] ~ dnorm(0, 1/2.25^2)
-  
+
     sigma.alpha_season[g]     ~ dt(0, 1/2.25^2, 1) T(0,)
     sigma.alpha_point1[g]     ~ dt(0, 1/2.25^2, 1) T(0,)
     sigma.alpha_point2[g]     ~ dt(0, 1/2.25^2, 1) T(0,)
@@ -37,7 +39,6 @@ model {
     sigma.alpha_homerange1[g] ~ dt(0, 1/2.25^2, 1) T(0,)
     sigma.alpha_homerange2[g] ~ dt(0, 1/2.25^2, 1) T(0,)
     sigma.alpha_homerange3[g] ~ dt(0, 1/2.25^2, 1) T(0,)
-    sigma.alpha_homerange4[g] ~ dt(0, 1/2.25^2, 1) T(0,)
   
     tau.alpha_season[g]     <- 1 / pow(sigma.alpha_season[g], 2)
     tau.alpha_point1[g]     <- 1 / pow(sigma.alpha_point1[g], 2)
@@ -46,7 +47,6 @@ model {
     tau.alpha_homerange1[g] <- 1 / pow(sigma.alpha_homerange1[g], 2)
     tau.alpha_homerange2[g] <- 1 / pow(sigma.alpha_homerange2[g], 2)
     tau.alpha_homerange3[g] <- 1 / pow(sigma.alpha_homerange3[g], 2)
-    tau.alpha_homerange4[g] <- 1 / pow(sigma.alpha_homerange4[g], 2)
 
     # Detection (unconfirmed true-positive)
     mu.v[g]    ~ dnorm(0, 1/2.25^2)
@@ -89,13 +89,13 @@ model {
     alpha_homerange1[i] ~ dnorm(mu.alpha_homerange1[group[i]],tau.alpha_homerange1[group[i]])
     alpha_homerange2[i] ~ dnorm(mu.alpha_homerange2[group[i]],tau.alpha_homerange2[group[i]])
     alpha_homerange3[i] ~ dnorm(mu.alpha_homerange3[group[i]],tau.alpha_homerange3[group[i]])
-    alpha_homerange4[i] ~ dnorm(mu.alpha_homerange4[group[i]],tau.alpha_homerange4[group[i]])
     alpha_season[i] ~ dnorm(mu.alpha_season[group[i]],tau.alpha_season[group[i]])
     
     # Stage-specific covariates
     for (s in 1:S) {
       alpha_plot1[s,i] ~ dnorm(mu.alpha_plot1[s,group[i]], tau.alpha_plot1[s,group[i]])
-      # alpha_plot2[s,i] ~ dnorm(mu.alpha_plot2[s,group[i]], tau.alpha_plot2[s,group[i]])
+      alpha_plot2[s,i] ~ dnorm(mu.alpha_plot2[s,group[i]], tau.alpha_plot2[s,group[i]])
+      alpha_plot3[s,i] ~ dnorm(mu.alpha_plot3[s,group[i]], tau.alpha_plot3[s,group[i]])
     }
 
     # Unconfirmed true positive detection
@@ -121,15 +121,15 @@ model {
       for (j in 1:J) { # for each site j
   
         logit(psi[j,t,i]) <- u[i] +
-                             alpha_plot1[stage[j],i] * x_alpha_plot1[j] +
-                             # alpha_plot2[stage[j],i] * x_alpha_plot2[j] +
-                             alpha_point1[i] * x_alpha_point1[j] +
-                             alpha_point2[i] * x_alpha_point2[j] +
-                             alpha_point3[i] * x_alpha_point3[j] +
-                             alpha_homerange1[i] * x_alpha_homerange1[j,i] +
-                             alpha_homerange2[i] * x_alpha_homerange2[j,i] +
-                             alpha_homerange3[i] * x_alpha_homerange3[j,i] +
-                             alpha_homerange4[i] * x_alpha_homerange4[j,i] +
+                             alpha_plot1[stage[j],i] * x_alpha_plot1[j,t] +
+                             alpha_plot2[stage[j],i] * x_alpha_plot2[j,t] +
+                             alpha_plot3[stage[j],i] * x_alpha_plot3[j,t] +
+                             alpha_point1[i] * x_alpha_point1[j,t] +
+                             alpha_point2[i] * x_alpha_point2[j,t] +
+                             alpha_point3[i] * x_alpha_point3[j,t] +
+                             alpha_homerange1[i] * x_alpha_homerange1[j,t,i] +
+                             alpha_homerange2[i] * x_alpha_homerange2[j,t,i] +
+                             alpha_homerange3[i] * x_alpha_homerange3[j,t,i] +
                              alpha_season[i] * x_season[t]
   
         z[j,t,i] ~ dbern(psi[j,t,i])
