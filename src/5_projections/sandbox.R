@@ -11,60 +11,37 @@ riu = st_read("data/environment/rs_fris/Polygon_RS-FRIS/Polygon_RS-FRIS.shp")
 study_area_proj <- st_transform(study_area, st_crs(riu))
 riu_crop <- riu[st_intersects(riu, study_area_proj, sparse = FALSE), ]
 
-# ACT
+# UPDATE
 
-st_layers("data/projections/FEIS_ACT_FGDB_20160201.gdb")
+path = "data/environment/oesf_rdeis_sof_act_20110419.gdb"
+st_layers(path)
 
-act_table <- st_read(
-  "data/projections/FEIS_ACT_FGDB_20160201.gdb",
-  layer = "FEIS_ACT_20150806"
-)
+# State of the forest (developmental stages)
 
-act_poly <- st_read(
-  "data/projections/FEIS_ACT_FGDB_20160201.gdb",
-  layer = "R12302010_5TH"
-)
+sof = st_read(dsn = path, layer = "sof")
+str(sof)
 
-names(act_poly)
-names(act_table)
+study_area_proj = st_transform(study_area, st_crs(sof))
+sof_decade_0 = sof %>% filter(DECADE == 0, ALTERNATIVE == "Landscape")
+sof_decade_0_crop = sof_decade_0[st_intersects(sof_decade_0, study_area_proj, sparse = FALSE), ]
+str(sof_decade_0_crop)
 
-str(act_poly)
-str(act_table)
+grp = factor(sof_decade_0_crop$OESF_SDS_GROUPED)
+pal = setNames(rainbow(nlevels(grp)), levels(grp))
+plot(st_geometry(sof_decade_0_crop), col = pal[grp], border = NA)
+legend("topright", legend = names(pal), fill = pal, cex = 0.7)
 
-study_area_proj <- st_transform(study_area, st_crs(act_poly))
-act_poly_crop <- act_poly[st_intersects(act_poly, study_area_proj, sparse = FALSE), ]
-mapview(act_poly_crop)
+# Activities (thinning and harvest)
 
-table(act_table$ALTERNATIVE)
-length(unique(act_poly$REMSOFT_ID))
+act = st_read(dsn = path, layer = "act")
+str(act)
+study_area_proj = st_transform(study_area, st_crs(act))
+act_decade_1 = act %>% filter(DECADE == 1, ALTERNATIVE == "Landscape")
+act_decade_1_crop = act_decade_1[st_intersects(act_decade_1, study_area_proj, sparse = FALSE), ]
+str(act_decade_1_crop)
 
-str(act_poly_crop)
-str(act_table)
-
-# Forestry activities during decades 1 and 2 under Pathway alternative
-test = full_join(act_poly_crop, act_table %>%
-                   filter(ALTERNATIVE == "Pathway") %>%
-                   select(REMSOFT_ID, ACT_DECADE), by = "REMSOFT_ID")
-mapview(test %>% filter(ACT_DECADE == 1), col.regions = "blue") +
-  mapview(test %>% filter(ACT_DECADE == 2), col.regions = "red")
-
-test = full_join(act_poly_crop, act_table %>%
-                   filter(ALTERNATIVE == "Pathway") %>%
-                   select(REMSOFT_ID, ACT_DECADE, HARVEST_TYPE_NM), by = "REMSOFT_ID")
-mapview(test %>% filter(ACT_DECADE == 1), zcol = "HARVEST_TYPE_NM")
-
-# Pathway
-
-st_layers("data/projections/pathwayFGDB_20160106.gdb")
-
-poly = st_read(
-  "data/projections/pathwayFGDB_20160106.gdb",
-  layer = "fcPATHWAY_picks_20160106"
-)
-
-names(poly)
-str(poly)
-
-study_area_proj <- st_transform(study_area, st_crs(poly))
-poly_crop <- poly[st_intersects(poly, study_area_proj, sparse = FALSE), ]
-mapview(poly_crop) + mapview(study_area_proj)
+mapview(act_decade_1_crop, zcol = "HARVEST_TYPE_NM")
+grp = factor(act_decade_1_crop$HARVEST_TYPE_NM)
+pal = setNames(rainbow(nlevels(grp)), levels(grp))
+plot(st_geometry(act_decade_1_crop), col = pal[grp], border = NA)
+legend("topright", legend = names(pal), fill = pal, cex = 0.7)
