@@ -51,7 +51,7 @@ eltontraits = read_csv(path_eltontraits, show_col_types = FALSE) %>% clean_names
 
 message("Loading guilds from ", path_guilds)
 guilds = read_csv(path_guilds, show_col_types = FALSE) %>% clean_names() %>%
-  mutate(common_name = tolower(common_name)) %>% select(common_name, foraging_guild_cornell, nesting_guild_cornell, nesting_guild_cornell_ps, conservation_cornell)
+  mutate(common_name = tolower(common_name)) %>% select(common_name, foraging_guild_cornell, nesting_guild_cornell, nesting_guild_cornell_ps, conservation_cornell, association_phalan)
 
 message("Loading metadata from ", path_metadata)
 metadata = read.csv(path_metadata, nrows = 107) %>% clean_names() %>%
@@ -110,9 +110,9 @@ trait_data = trait_data %>% mutate(
 # Foraging habitat / substrate
 trait_data = trait_data %>% mutate(
   group_forage_substrate = case_when(
-    (foraging_guild_cornell %in% c("aerial forager", "soaring", "flycatching", "hovering", "aerial dive")) ~ "aerial",
-    (foraging_guild_cornell %in% c("foliage gleaner"))                                                     ~ "gleaner",
-    TRUE                                                                                                   ~ foraging_guild_cornell
+    (foraging_guild_cornell %in% c("soaring", "flycatching", "hovering", "aerial dive")) ~ "aerial forager",
+    (foraging_guild_cornell %in% c("surface dive"))                                      ~ "aquatic forager",
+    TRUE                                                                                 ~ foraging_guild_cornell
   )
 )
 
@@ -126,9 +126,10 @@ trait_data = trait_data %>%
   )
 )
 
-# TODO: Habitat association (e.g. early seral vs old-forest)
+# Habitat association (e.g. early seral vs old-forest)
+# Phalan et al. 2018
 trait_data = trait_data %>% mutate(
-  group_habitat = "TODO"
+  group_habitat = str_to_lower(association_phalan)
 )
 
 # TODO: WADNR species of concern

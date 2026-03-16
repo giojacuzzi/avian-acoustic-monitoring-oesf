@@ -100,7 +100,7 @@ p_SR = ggplot(site_richness_strata, aes(x = strata, y = richness, fill = strata)
 ## Functional diversity (functional dispersion)
 
 # Select traits
-trait_matrix = species_traits %>% as.data.frame() %>% select(mass, group_migrant, group_nest_ps, group_diet)
+trait_matrix = species_traits %>% as.data.frame() %>% select(group_nest_ps, group_forage_substrate, group_diet, group_migrant, mass)
 rownames(trait_matrix) = species_traits$common_name
 
 # Subset species to those with at least one occurrence
@@ -163,31 +163,6 @@ kruskal.test(FDis ~ strata, data = FDis) # Double-check with Kruskal for non-nor
 # Tukey pairwise test
 TukeyHSD(model) # All pairwise comparisons except COMP EXCL-THINNED are significantly different
 
-# Functional composition, as measured by the community-level weighted means of trait values,
-# which for continuous trais is the mean trait value of all species present in the community,
-# and for categorical traits the abundance of each individual class, i.e. the proportion.
-cwms = functcomp(trait_matrix, community_matrix, CWM.type = "all")  # default
-cwm_df = data.frame(cwms, strata = strata)
-cwm_df$strata = factor(cwm_df$strata, levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE"))
-
-ggplot(cwm_df, aes(x = strata, y = mass, fill = strata)) +
-  geom_boxplot() + scale_fill_manual(values = strata_cols)
-
-cwm_nest_ps = cwm_df %>%
-  select(starts_with("group_nest_ps"), strata) %>%
-  pivot_longer(cols = -strata, names_to = "type", values_to = "proportion")
-ggplot(cwm_nest_ps, aes(x = strata, y = proportion, fill = fct_rev(type))) +
-  geom_bar(stat = "identity", position = "fill") +
-  scale_fill_brewer(palette = "Set2") +
-  scale_y_continuous(labels = scales::percent_format())
-
-cwm_migrant = cwm_df %>%
-  select(starts_with("group_migrant"), strata) %>%
-  pivot_longer(cols = -strata, names_to = "type", values_to = "proportion")
-ggplot(cwm_migrant, aes(x = strata, y = proportion, fill = type)) +
-  geom_bar(stat = "identity", position = "fill") +
-  scale_y_continuous(labels = scales::percent_format())
-
 ## Fourth-corner analysis
 #
 # The fourth-corner method measures and test relationships between
@@ -198,6 +173,7 @@ ggplot(cwm_migrant, aes(x = strata, y = proportion, fill = type)) +
 R = data.frame(strata = strata)
 L = as.data.frame(community_matrix)
 Q = as.data.frame(trait_matrix)
+Q$group_forage_substrate = factor(Q$group_forage_substrate)
 Q$group_migrant = factor(Q$group_migrant)
 Q$group_nest_ps = factor(Q$group_nest_ps)
 Q$group_diet = factor(Q$group_diet)
@@ -230,6 +206,71 @@ for (nest_type in colnames(tab)) {
 }
 results$p_adj = p.adjust(results$p_value, method = "holm") # Adjust for multiple testing
 (overrep_nest = results %>% filter(p_adj < 0.05))
+
+# Which foraging strategies are associated with which stages?
+dat_long = L %>% mutate(site = rownames(L), strata = R$strata) %>% pivot_longer(cols = -c(site, strata), names_to = "species", values_to = "occ") %>% filter(occ > 0)  # keep only present species
+forage_df = data.frame(species = rownames(Q), group = Q$group_forage_substrate)
+dat_long = dat_long %>% left_join(forage_df, by = "species")
+tab = table(dat_long$strata, dat_long$group)
+results = list()
+for (t in colnames(tab)) {
+  for (strata_level in rownames(tab)) {
+    # counts in this strata
+    a = tab[strata_level, t]
+    b = sum(tab[strata_level, ]) - a
+    # counts in all other strata
+    other_rows = setdiff(rownames(tab), strata_level)
+    c = sum(tab[other_rows, t])
+    d = sum(tab[other_rows, ]) - c
+    # Fisher's exact test for (overrepresented) count data
+    mat = matrix(c(a, b, c, d), nrow = 2, byrow = TRUE)
+    p = fisher.test(mat, alternative = "greater")$p.value
+    results = rbind(results, data.frame(
+      strata = strata_level, t = t, p_value = p
+    ))
+  }
+}
+results$p_adj = p.adjust(results$p_value, method = "holm") # Adjust for multiple testing
+(overrep_forage = results %>% filter(p_adj < 0.05))
+
+# Functional composition, as measured by the community-level weighted means of trait values,
+# which for continuous trais is the mean trait value of all species present in the community,
+# and for categorical traits the abundance of each individual class, i.e. the proportion.
+cwms = functcomp(trait_matrix, community_matrix, CWM.type = "all")  # default
+cwm_df = data.frame(cwms, strata = strata)
+cwm_df$strata = factor(cwm_df$strata, levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE"))
+
+cwm_nest_ps = cwm_df %>%
+  select(starts_with("group_nest_ps"), strata) %>%
+  pivot_longer(cols = -strata, names_to = "type", values_to = "proportion") %>%
+  mutate(type = str_remove(type, "^group_nest_ps_"),
+         type = str_replace_all(type, "\\.", " "),
+         type = str_to_sentence(type))
+p_nest = ggplot(cwm_nest_ps, aes(x = strata, y = proportion, fill = fct_rev(type))) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_brewer(palette = "Set2") +
+  scale_y_continuous(labels = scales::percent_format()) + labs(fill = "Nesting strategy"); p_nest
+
+cwm_forage_substrate = cwm_df %>%
+  select(starts_with("group_forage_substrate"), strata) %>%
+  pivot_longer(cols = -strata, names_to = "type", values_to = "proportion") %>%
+  mutate(type = str_remove(type, "^group_forage_substrate_"),
+         type = str_replace_all(type, "\\.", " "),
+         type = str_to_sentence(type))
+p_forage = ggplot(cwm_forage_substrate, aes(x = strata, y = proportion, fill = type)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_brewer(palette = "Set3") +
+  scale_y_continuous(labels = scales::percent_format()) + labs(fill = "Foraging strategy"); p_forage
+
+ggplot(cwm_df, aes(x = strata, y = mass, fill = strata)) +
+  geom_boxplot() + scale_fill_manual(values = strata_cols)
+
+cwm_migrant = cwm_df %>%
+  select(starts_with("group_migrant"), strata) %>%
+  pivot_longer(cols = -strata, names_to = "type", values_to = "proportion")
+ggplot(cwm_migrant, aes(x = strata, y = proportion, fill = type)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_y_continuous(labels = scales::percent_format())
 
 # TODO: Explore relationship between species rarity (baseline occupancy) and stage
 
@@ -381,39 +422,6 @@ print(between_turnover_summary)
 # https://www.sciencedirect.com/science/article/pii/S0378112711005779
 between_turnover %>% arrange(desc(mean_diss))
 
-# NMDS ----------------------------------------------------------------------------------
-
-# Using posterior mean occupancy probabilities (site similarity in expected composition)
-nmds_occprob_k2 = metaMDS(psi_mean, distance = "bray", trymax = 200, k=2)
-nmds_occprob_k2
-
-nmds_occprob_k3 = metaMDS(psi_mean, distance = "bray", trymax = 200, k=3)
-nmds_occprob_k3
-
-nmds_strata_cols = c("forestgreen", "tan4", "orange", "purple")
-strata = site_key$stratum[ match(sites, site_key$site) ]
-colors = strata_cols[strata]
-
-ordiplot(nmds_occprob_k3,type="n")
-ordiellipse(nmds_occprob_k3, groups = strata, draw = "polygon", kind = "sd", conf = 0.95, lwd = 2, col = NA, border = nmds_strata_cols, label = FALSE)
-points(nmds_occprob_k3, display="sites",col=colors, pch = 16, cex=0.75)
-# orditorp(nmds_occprob_k3,display="species",col="darkgray",air=0.1, cex=0.75)
-
-# TODO: Visualize species vectors only for those that are consistent significant indicators (see below)
-
-# Functional NMDS
-
-# Select numeric trait columns only (exclude 'strata')
-traits_numeric <- cwm_df %>% select(where(is.numeric))
-
-# Calculate NMDS using Bray-Curtis distance
-nmds_res <- metaMDS(traits_numeric, distance = "bray", k = 3, trymax = 100)
-ordiplot(nmds_res, type = "n")
-ordiellipse(nmds_res, groups = strata, draw = "polygon", kind = "sd", conf = 0.95, lwd = 2, col = NA, border = nmds_strata_cols, label = FALSE)
-points(nmds_res, display="sites",col=colors, pch = 16, cex=0.75)
-points(nmds_res, display="sites", pch = 16, cex=1)
-ordihull(nmds_res, groups = strata, draw = "polygon", label = TRUE)
-
 # Indicator species analysis -----------------------------------------------
 # https://cran.r-project.org/web/packages/indicspecies/vignettes/IndicatorSpeciesAnalysis.html
 
@@ -444,12 +452,58 @@ summary(indval_multigroup, indvalcomp=TRUE)
 # "have their highest IndVal value for the set of all sites. In other words, those species occur in sites
 # belonging to all groups. The association with the set of all sites cannot be statistically tested, because
 # there is no external group for comparison."
-summary(indval_singlegroup, alpha=1)
+summary(indval_multigroup, alpha=1)
 # The species that are not selected can be seen via $sign with NA p.value
 indval_multigroup$sign
 
+# Extract top n indicator species per stage grouping
+n = 5
+indval_df = as.data.frame(indval_multigroup$sign)
+indval_df$species = rownames(indval_df)
+indval_df$group = apply(indval_df[, grepl("^s\\.", names(indval_df))], 1, function(x) paste(names(x)[x == 1], collapse = "+"))
+indval_df$group = gsub("s\\.", "", indval_df$group)
+top5_indicators = indval_df %>% filter(p.value <= 0.05) %>% group_by(group) %>% arrange(desc(stat)) %>% slice_head(n = n) %>% ungroup()
+top5_indicators %>% select(group, species, stat, p.value)
+
 # NOTE: Species like brown creeper, pileated woodpecker, have similar IndVal values across multiple groups (e.g. THINNED and MATURE), causing them to jump between group assignments in single group analyses due to stocasticity between runs. Using a multi-group analysis is more appropriate.
 # indval_singlegroup = multipatt(occ, strata, duleg = TRUE, control = how(nperm=nperm))
+
+# NMDS ----------------------------------------------------------------------------------
+
+# Using posterior mean occupancy probabilities (site similarity in expected composition)
+nmds_occprob_k2 = metaMDS(psi_mean, distance = "bray", trymax = 200, k=2)
+nmds_occprob_k2
+
+nmds_occprob_k3 = metaMDS(psi_mean, distance = "bray", trymax = 200, k=3)
+nmds_occprob_k3
+
+nmds_strata_cols = c("forestgreen", "tan4", "orange", "purple")
+strata = site_key$stratum[ match(sites, site_key$site) ]
+colors = strata_cols[strata]
+
+ordiplot(nmds_occprob_k3,type="n")
+ordiellipse(nmds_occprob_k3, groups = strata, draw = "polygon", kind = "sd", conf = 0.95, lwd = 2, col = NA, border = nmds_strata_cols, label = FALSE)
+points(nmds_occprob_k3, display="sites",col=colors, pch = 16, cex=0.75)
+# orditorp(nmds_occprob_k3,display="species",col="darkgray",air=0.1, cex=0.75)
+
+# Visualize species vectors only for those that are consistent significant indicators
+# fit = envfit(nmds_occprob_k3, psi_mean, perm = 999)
+# plot(fit, p.max = 0.05, col = "gray", cex = 0.7)
+fit = envfit(nmds_occprob_k3, psi_mean[, top5_indicators$species], perm = 999)
+plot(fit, p.max = 0.05, col = "gray40", cex = 0.7)
+
+# Functional NMDS
+
+# Select numeric trait columns only (exclude 'strata')
+traits_numeric <- cwm_df %>% select(where(is.numeric))
+
+# Calculate NMDS using Bray-Curtis distance
+nmds_res <- metaMDS(traits_numeric, distance = "bray", k = 3, trymax = 100)
+ordiplot(nmds_res, type = "n")
+ordiellipse(nmds_res, groups = strata, draw = "polygon", kind = "sd", conf = 0.95, lwd = 2, col = NA, border = nmds_strata_cols, label = FALSE)
+points(nmds_res, display="sites",col=colors, pch = 16, cex=0.75)
+points(nmds_res, display="sites", pch = 16, cex=1)
+ordihull(nmds_res, groups = strata, draw = "polygon", label = TRUE)
 
 # Estimate richness by group -------------------------------------------------------------------------
 
