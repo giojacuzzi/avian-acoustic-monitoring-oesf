@@ -176,7 +176,7 @@ ggplot(cwm_df, aes(x = strata, y = mass, fill = strata)) +
 cwm_nest_ps = cwm_df %>%
   select(starts_with("group_nest_ps"), strata) %>%
   pivot_longer(cols = -strata, names_to = "type", values_to = "proportion")
-ggplot(cwm_nest_ps, aes(x = strata, y = proportion, fill = type)) +
+ggplot(cwm_nest_ps, aes(x = strata, y = proportion, fill = fct_rev(type))) +
   geom_bar(stat = "identity", position = "fill") +
   scale_fill_brewer(palette = "Set2") +
   scale_y_continuous(labels = scales::percent_format())
@@ -381,112 +381,6 @@ print(between_turnover_summary)
 # https://www.sciencedirect.com/science/article/pii/S0378112711005779
 between_turnover %>% arrange(desc(mean_diss))
 
-stop("DEBUGGY")
-
-####################
-
-# PERMANOVA
-# Model R2 is the % of variation in species composition across sites explained by strata as a predictor
-# If Pr(>F) < 0.05, differences in composition between strata are statistically significant (at least one stratum differs from the others)
-# If not, null hypothesis is true: there is no difference in species composition among strata
-permanova = adonis2(z_binary ~ strata, method="jaccard")
-permanova
-
-# Pairwise PERMANOVA
-strata_levels = unique(strata)
-combs = combn(strata_levels, 2, simplify = FALSE)
-pairwise_permanova = tibble()
-for (pair in combs) {
-  i = strata %in% pair
-  z_pair = z_binary[i, ]
-  strata_pair = strata[i]
-  permanova_pair = adonis2(z_pair ~ strata_pair, method="jaccard", permutations=999)
-  pairwise_permanova = rbind(pairwise_permanova, tibble(
-    stratum_1 = pair[1],
-    stratum_2 = pair[2],
-    R2        = permanova_pair$R2[1],
-    F         = permanova_pair$F[1],
-    p.val     = permanova_pair$`Pr(>F)`[1]
-  ))
-}
-# Comparisons with small R2 host largely similar assemblages, while those
-# with large R2 have very different assemblages.
-# Even a small effect (low R2) can be highly significant (i.e. detectable) if groups are consistently different,
-# but these differences are minor when compared to differences between strata with higher R2.
-pairwise_permanova %>% arrange(R2)
-
-# Jaccard dissimilarity
-dist_jac = vegdist(z_binary, method = "jaccard", binary = TRUE)
-
-# Dispersion (mean distance of sites to centroid)
-bd = betadisper(dist_jac, strata)
-anova(bd) # Does dispersion differ among strata? If so, PERMANOVA differences may reflect variation in within-stratum dispersion
-dispersion = tibble(stratum = names(bd$group.distances), mean_centroid_dist = tapply(bd$distances, strata, mean))
-dispersion # Which strata have the most heterogeneous within-stratum assemblages / beta diversity (high values) and the most homogenous (low values)?
-
-# Mean dissimilarity (beta diversity) among sites within the same stage
-diss_within_stratum = tibble()
-for (s in levels(strata)) {
-  m = as.matrix(dist_jac)[which(strata == s), which(strata == s)]
-  diss_within_stratum = rbind(diss_within_stratum, tibble(stratum = s, mean_jaccard_dissimilarity = mean(m[upper.tri(m)])))
-}
-diss_within_stratum # Which strata has greater within-stage variation?
-
-# Mean dissimilarity (beta diversity) among sites between stages
-diss_between_strata = tibble()
-combs = combn(levels(strata), 2, simplify = FALSE)
-for (pair in combs) {
-  m = as.matrix(dist_jac)[which(strata == pair[1]), which(strata == pair[2])]
-  diss_between_strata = rbind(diss_between_strata, tibble(stratum_1=pair[1], stratum_2=pair[2], mean_jaccard_dissimilarity=mean(m)))
-}
-diss_between_strata # Which pairs of strata have the highest/lowest turnover?
-
-# Turnover vs nestedness decomposition
-library(betapart)
-beta_res = beta.pair(z_binary, index.family = "jaccard")
-within_turnover = tibble()
-for (s in levels(strata)) {
-  i = which(strata == s)
-  mat_turnover = as.matrix(beta_res$beta.jtu)[i, i]
-  mat_nested   = as.matrix(beta_res$beta.jne)[i, i]
-  mat_total    = as.matrix(beta_res$beta.jac)[i, i]
-  within_turnover = rbind(
-    within_turnover,
-    tibble(stratum    = s,
-           turnover   = mean(mat_turnover[upper.tri(mat_turnover)]),
-           nestedness = mean(mat_nested[upper.tri(mat_nested)]),
-           mean_diss  = mean(mat_total[upper.tri(mat_total)]))
-  )
-}
-within_turnover %>% arrange(desc(mean_diss))
-
-between_turnover = tibble()
-combs = combn(levels(strata), 2, simplify = FALSE)
-for (pair in combs) {
-  i = which(strata == pair[1])
-  j = which(strata == pair[2])
-  mat_turnover = as.matrix(beta_res$beta.jtu)[i, j]
-  mat_nested   = as.matrix(beta_res$beta.jne)[i, j]
-  mat_total    = as.matrix(beta_res$beta.jac)[i, j]
-  between_turnover = rbind(
-    between_turnover,
-    tibble(stratum_1  = pair[1],
-           stratum_2  = pair[2],
-           turnover   = mean(mat_turnover),
-           nestedness = mean(mat_nested),
-           mean_diss  = mean(mat_total))
-  )
-}
-# Between closed-canopy stages alone, nestedness is low (richness is similar) and turnover is
-# more important, meaning that species replacement occurs along the developmental gradient.
-# Between stand initiation and closed-canopy stages, nestedness is high (richness is dissimilar,
-# as closed-canopy sites host reduced species subsets of open sites) and turnover is moderate,
-# further reflecting species replacement across the developmental gradient.
-# The higher overall richness of stand init sites can be attributed to a combination of
-# nestedness (stand init includes several overlapping species) and turnover (novel early colonizers?)?
-# https://www.sciencedirect.com/science/article/pii/S0378112711005779
-between_turnover %>% arrange(desc(mean_diss))
-
 # NMDS ----------------------------------------------------------------------------------
 
 # Using posterior mean occupancy probabilities (site similarity in expected composition)
@@ -505,83 +399,6 @@ ordiellipse(nmds_occprob_k3, groups = strata, draw = "polygon", kind = "sd", con
 points(nmds_occprob_k3, display="sites",col=colors, pch = 16, cex=0.75)
 # orditorp(nmds_occprob_k3,display="species",col="darkgray",air=0.1, cex=0.75)
 
-# Exclude species with little or no variation in occurrence
-sd_threshold = 0.05
-species_sd = apply(z_binary, 2, sd)
-species_for_nmds = species_sd > sd_threshold
-message("Excluding species with very little variation:")
-print(species[species_sd <= sd_threshold])
-occ_filtered = z_binary[, species_for_nmds]
-
-occ_filtered = matrix(as.integer(occ_filtered), nrow = nrow(occ_filtered))
-dimnames(occ_filtered) = list(sites, species[species_for_nmds])
-
-nmds_binary_k2 = metaMDS(occ_filtered, distance = "jaccard", trymax = 200, k=2)
-nmds_binary_k2 # Stress should be < 0.2 for interpretable results
-
-# Stress plot diagnostic
-# Monotone increasing trend → NMDS preserved rank-order distances
-# Scatter / residuals → large deviations indicate poor fit
-# No systematic curvature → suggests axes adequately represent dissimilarity
-stressplot(nmds_binary_k2)
-
-# Convex hulls
-# Species points are centroids in the ordination space, showing average position of the sites
-# where the species occurs. Species near each other are commonly found together, and species
-# near a group of sites are typical of that group.
-ordiplot(nmds_binary_k2,type="n")
-ordihull(nmds_binary_k2, groups = strata, draw = "polygon", col = strata_cols, label = FALSE)
-points(nmds_binary_k2, display="sites",col=colors, pch = 16, cex=1)
-orditorp(nmds_binary_k2,display="species",col="grey",air=0.01, cex=1)
-
-# 95% SD elipses
-ordiplot(nmds_binary_k2,type="n")
-ordiellipse(nmds_binary_k2, groups = strata, draw = "polygon", kind = "sd", conf = 0.95, lwd = 2, col = NA, border = strata_cols, label = FALSE)
-points(nmds_binary_k2, display="sites",col=colors, pch = 16, cex=0.75)
-
-# Clusters
-dist_mat = vegdist(occ_filtered, method = "jaccard")  # Distance matrix
-hc = hclust(dist_mat, method = "average")  # Hierarchical clustering with average linkage
-ordiplot(nmds_binary_k2,type="n")
-ordiellipse(nmds_binary_k2, groups = strata, draw = "polygon", kind = "sd", conf = 0.95, lwd = 2, col = NA, border = strata_cols, label = FALSE)
-ordicluster(nmds_binary_k2, hc, col = "gray", lwd = 1)
-points(nmds_binary_k2, display="sites",col=colors, pch = 16, cex=1)
-
-## Fit with k = 3
-nmds_binary_k3 = metaMDS(occ_filtered, distance = "jaccard", trymax = 200, k=3)
-nmds_binary_k3 # Stress should be < 0.2 for interpretable results
-
-# Visualize in 3d
-# library(rgl)
-# site_scores = scores(nmds_binary_k3, display="sites")
-# plot3d(site_scores[,1],
-#        site_scores[,2],
-#        site_scores[,3],
-#        col=colors,
-#        size=1,
-#        type="s",
-#        xlab="NMDS1",
-#        ylab="NMDS2",
-#        zlab="NMDS3")
-
-# 2D plot showing only axes 1 and 2
-ordiplot(nmds_binary_k3,type="n")
-ordiellipse(nmds_binary_k3, groups = strata, draw = "polygon", kind = "sd", conf = 0.95, lwd = 2, col = NA, border = nmds_strata_cols, label = FALSE)
-points(nmds_binary_k3, display="sites",col=colors, pch = 16, cex=0.75)
-
-fit = envfit(nmds_binary_k3, occ_filtered, permutations = 999)
-sig_species = names(which(fit$vectors$pvals <= 0.001))
-freq_species = colnames(occ_filtered[, colSums(occ_filtered) >= 50])
-selected_species = intersect(sig_species, freq_species)
-fit_subset = fit
-fit_subset$vectors$arrows = fit$vectors$arrows[selected_species, ]
-fit_subset$vectors$r      = fit$vectors$r[selected_species]
-fit_subset$vectors$pvals  = fit$vectors$pvals[selected_species]
-plot(nmds_binary_k3, type = "n")
-plot(fit_subset, col = "black", cex = 0.5)
-
-# orditorp(nmds_binary_k3,display="species",col="darkgray",air=0.1, cex=0.75)
-
 # TODO: Visualize species vectors only for those that are consistent significant indicators (see below)
 
 # Functional NMDS
@@ -592,6 +409,8 @@ traits_numeric <- cwm_df %>% select(where(is.numeric))
 # Calculate NMDS using Bray-Curtis distance
 nmds_res <- metaMDS(traits_numeric, distance = "bray", k = 3, trymax = 100)
 ordiplot(nmds_res, type = "n")
+ordiellipse(nmds_res, groups = strata, draw = "polygon", kind = "sd", conf = 0.95, lwd = 2, col = NA, border = nmds_strata_cols, label = FALSE)
+points(nmds_res, display="sites",col=colors, pch = 16, cex=0.75)
 points(nmds_res, display="sites", pch = 16, cex=1)
 ordihull(nmds_res, groups = strata, draw = "polygon", label = TRUE)
 
@@ -601,16 +420,9 @@ ordihull(nmds_res, groups = strata, draw = "polygon", label = TRUE)
 message("Conducting indicator species analysis")
 
 ## Indicator species analysis
-library(indicspecies)
 nperm = 10000
 
 # TODO: Instead, do this over posterior draws and summarize
-# Simplify posterior occurrence site x species matrix as the most probable occupancy state across all draws and seasons
-z = msom$sims.list$z
-z_binary = apply(z, c(2, 4), function(x) {
-  ifelse(mean(x) >= 0.5, 1, 0)
-})
-dim(z_binary)
 
 occ = as.data.frame(z_binary)
 rownames(occ) = sites
@@ -623,135 +435,24 @@ indval_multigroup = multipatt(occ, strata, duleg = FALSE, control = how(nperm=np
 message("Finished (", Sys.time() - t_start, ")")
 # Indicator species associated with a single stratum are specialists of that stratum, while
 # those associated with a combination of strata are generalists across those strata.
+# Species with significant p-values are strongly associated with a stratum or combination of strata
+# Specificity: "Component ‘A’ is sample estimate of the probability that the surveyed site belongs to the target site group given the fact that the species has been found. This conditional probability is called the specificity or positive predictive value of the species as indicator of the site group." Species with A = 1.0 occur exclusively in sites of a given stratum. In other words, species with high A values are largely restricted to a given stratum.
+# Fidelity: "Component ‘B’ is sample estimate of the probability of finding the species in sites belonging to the site group. This second conditional probability is called the fidelity or sensitivity of the species as indicator of the target site group." Species with B = 1.0 appear in all sites belonging to a given stratum, i.e. it is widespread in the stratum.
 summary(indval_multigroup, indvalcomp=TRUE)
+# Show results for all species, regardless of test significance
+# Note that of the X species in our dataset, only Y are selected for analysis. The remaining Z species
+# "have their highest IndVal value for the set of all sites. In other words, those species occur in sites
+# belonging to all groups. The association with the set of all sites cannot be statistically tested, because
+# there is no external group for comparison."
+summary(indval_singlegroup, alpha=1)
+# The species that are not selected can be seen via $sign with NA p.value
 indval_multigroup$sign
 
-# # Single-stratum indicator analysis (species flip-flop that occur in multiple strata; multi-group analysis is more appropriate)
-# message("Starting single-stratum indicator analysis (", Sys.time(), ")"); t_start = Sys.time()
+# NOTE: Species like brown creeper, pileated woodpecker, have similar IndVal values across multiple groups (e.g. THINNED and MATURE), causing them to jump between group assignments in single group analyses due to stocasticity between runs. Using a multi-group analysis is more appropriate.
 # indval_singlegroup = multipatt(occ, strata, duleg = TRUE, control = how(nperm=nperm))
-# message("Finished (", Sys.time() - t_start, ")")
-# 
-# # Species with significant p-values are strongly associated with a stratum or combination of strata
-# # Specificity: "Component ‘A’ is sample estimate of the probability that the surveyed site belongs to the target site group given the fact that the species has been found. This conditional probability is called the specificity or positive predictive value of the species as indicator of the site group." Species with A = 1.0 occur exclusively in sites of a given stratum. In other words, species with high A values are largely restricted to a given stratum. 
-# # Fidelity: "Component ‘B’ is sample estimate of the probability of finding the species in sites belonging to the site group. This second conditional probability is called the fidelity or sensitivity of the species as indicator of the target site group." Species with B = 1.0 appear in all sites belonging to a given stratum, i.e. it is widespread in the stratum.
-# # Therefore, white-crowned sparrow is a good indicator of STAND INIT because it almost exclusively occurs in STAND INIT sites (A > 0.95), and most sites belonging to STAND INIT include it (B = 0.75).
-# # By contrast, rufous hummingbird appears in all STAND INIT sites (B = 1.0), though it is not completely restricted to STAND INIT (A = 0.48).
-# # Species show significant associations only with STAND INIT and MATURE strata, not COMP EXCL or THINNED.
-# # Several STAND INIT-associated species occur more exclusively in STAND INIT sites (high A), while most MATURE-associated species do not exclusively occur in MATURE sites (low A), though they appear in nearly all MATURE sites (high B)
-# summary(indval_singlegroup, indvalcomp=TRUE)
-# 
-# # NOTE: Species like brown creeper, pileated woodpecker, has similar IndVal values across multiple groups (e.g. THINNED and MATURE), causing them to jump between group assignments in single group analyses due to stocasticity between runs. USING A MULTI-GROUP ANALYSIS IS MORE APPROPRIATE HERE
-# 
-# # Show results for all species, regardless of test significance
-# # Note that of the 72 species in our dataset, only 31 are selected for analysis. The remaining 41 species
-# # "have their highest IndVal value for the set of all sites. In other words, those species occur in sites
-# # belonging to all groups. The association with the set of all sites cannot be statistically tested, because
-# # there is no external group for comparison."
-# summary(indval_singlegroup, alpha=1)
-# # The species that are not selected can be seen via $sign with NA p.value
-# indval_singlegroup$sign
-
-# Fourth corner -----------------------------------------------------------------------------
-
-st = species_traits %>% filter(common_name %in% species)
-traits = st %>% as.data.frame() %>% select(mass, group_migrant, group_nest_ps, group_diet, group_forage_behavior)
-rownames(traits) = st$common_name
-
-# Simplify posterior occurrence site x species matrix as the most probable occupancy state across all draws and seasons
-z = msom$sims.list$z
-z_binary = apply(z, c(2, 4), function(x) {
-  ifelse(mean(x) >= 0.5, 1, 0)
-})
-dim(z_binary)
-rownames(z_binary) = sites
-colnames(z_binary) = species
-occ <- z_binary
-rownames(occ) <- sites
-colnames(occ) <- species
-
-library(ade4)
-R <- data.frame(strata = strata)
-L <- as.data.frame(occ)
-Q <- as.data.frame(traits)
-Q$group_forage_behavior <- factor(Q$group_forage_behavior)
-Q$group_migrant <- factor(Q$group_migrant)
-Q$group_nest_ps <- factor(Q$group_nest_ps)
-Q$group_diet <- factor(Q$group_diet)
-Q <- Q[colnames(L), ] # ensure species order matches
-
-fourth <- fourthcorner(R, L, Q, nrepet = 9999)
-
-summary(fourth) # Nesting strategy is significant 
-
-# Step 1: Make long-format occurrence table
-dat_long <- L %>% mutate(site = rownames(L), strata = R$strata) %>%
-  pivot_longer(cols = -c(site, strata), names_to = "species", values_to = "occ") %>% filter(occ > 0)  # keep only present species
-nest_df <- data.frame(species = rownames(Q), group = Q$group_nest_ps)
-dat_long <- dat_long %>% left_join(nest_df, by = "species")
-prop_df <- dat_long %>% group_by(strata, group) %>% summarise(count = n(), .groups = "drop") %>% group_by(strata) %>% mutate(prop = count / sum(count))
-prop_df$strata <- factor(prop_df$strata, levels = c("STAND INIT","COMP EXCL", "THINNED", "MATURE"))
-ggplot(prop_df, aes(x = strata, y = prop, fill = group)) +
-  geom_bar(stat = "identity") +
-  scale_fill_brewer(palette = "Set2") +
-  labs(title = "Nesting composition")
-
-dat_long <- L %>% mutate(site = rownames(L), strata = R$strata) %>%
-  pivot_longer(cols = -c(site, strata), names_to = "species", values_to = "occ") %>% filter(occ > 0)  # keep only present species
-nest_df <- data.frame(species = rownames(Q), group = Q$group_migrant)
-dat_long <- dat_long %>% left_join(nest_df, by = "species")
-prop_df <- dat_long %>% group_by(strata, group) %>% summarise(count = n(), .groups = "drop") %>% group_by(strata) %>% mutate(prop = count / sum(count))
-prop_df$strata <- factor(prop_df$strata, levels = c("STAND INIT","COMP EXCL", "THINNED", "MATURE"))
-ggplot(prop_df, aes(x = strata, y = prop, fill = group)) +
-  geom_bar(stat = "identity") +
-  scale_fill_brewer(palette = "Set2") +
-  labs(title = "Migration composition")
-
-dat_long <- L %>% mutate(site = rownames(L), strata = R$strata) %>%
-  pivot_longer(cols = -c(site, strata), names_to = "species", values_to = "occ") %>% filter(occ > 0)  # keep only present species
-nest_df <- data.frame(species = rownames(Q), group = Q$group_forage_behavior)
-dat_long <- dat_long %>% left_join(nest_df, by = "species")
-prop_df <- dat_long %>% group_by(strata, group) %>% summarise(count = n(), .groups = "drop") %>% group_by(strata) %>% mutate(prop = count / sum(count))
-prop_df$strata <- factor(prop_df$strata, levels = c("STAND INIT","COMP EXCL", "THINNED", "MATURE"))
-ggplot(prop_df, aes(x = strata, y = prop, fill = group)) +
-  geom_bar(stat = "identity") +
-  scale_fill_brewer(palette = "Set2") +
-  labs(title = "Forage behavior composition")
-
-# tab = your strata x nesting type table
-results <- list()
-tab <- table(dat_long$strata, dat_long$group)
-for (nest_type in colnames(tab)) {
-  for (strata_level in rownames(tab)) {
-    
-    # counts in this strata
-    a <- tab[strata_level, nest_type]
-    b <- sum(tab[strata_level, ]) - a
-    
-    # counts in all other strata
-    other_rows <- setdiff(rownames(tab), strata_level)
-    c <- sum(tab[other_rows, nest_type])
-    d <- sum(tab[other_rows, ]) - c
-    
-    mat <- matrix(c(a, b, c, d), nrow = 2, byrow = TRUE)
-    
-    p <- fisher.test(mat, alternative = "greater")$p.value
-    # alternative="greater" tests over-representation
-    results <- rbind(results, data.frame(
-      strata = strata_level,
-      nest_type = nest_type,
-      p_value = p
-    ))
-  }
-}
-# Adjust for multiple testing
-results$p_adj <- p.adjust(results$p_value, method = "holm")
-# Show significant associations
-signif_assoc <- results %>% filter(p_adj < 0.05)
-signif_assoc
 
 # Estimate richness by group -------------------------------------------------------------------------
 
-z = msom$sims.list$z
 samples = dim(z)[1]
 J = dim(z)[2] # n sites
 T = dim(z)[3] # n seasons
@@ -801,126 +502,3 @@ for (grouping in c("group_all", "group_migrant", "group_nest_ps", "group_size"))
   
   richness_results[[grouping]] = site_richness
 }
-
-# Estimate functional richness -------------------------------------------------------------------------
-
-z = msom$sims.list$z # Simplify posterior occurrence site x species matrix as the most probable occupancy state across all draws and seasons
-z_binary = apply(z, c(2, 4), function(x) {
-  ifelse(mean(x) >= 0.5, 1, 0)
-})
-dim(z_binary)
-rownames(z_binary) = sites
-colnames(z_binary) = species
-
-# Fourth corner analysis
-library(ade4)
-
-R <- data.frame(strata = strata)
-L <- as.data.frame(occ)
-Q <- as.data.frame(traits)
-
-Q$group_migrant <- factor(Q$group_migrant)
-Q$group_nest_ps <- factor(Q$group_nest_ps)
-Q$group_diet <- factor(Q$group_diet)
-
-# ensure species order matches
-Q <- Q[colnames(L), ]
-
-fourth <- fourthcorner(
-  R,
-  L,
-  Q,
-  modeltype = 6,
-  nrepet = 9999
-)
-
-summary(fourth) # Nest type has a significant association with strata
-
-######
-
-library(FD)
-
-occ = z_binary
-rownames(occ) = sites
-colnames(occ) = species
-head(occ)
-
-comm <- occ[, rownames(traits)]
-
-# Sum occurrences per species
-species_totals <- colSums(comm)
-
-# See which species have zero occurrences
-absent_species <- names(species_totals[species_totals == 0])
-absent_species
-
-# Keep only species present in at least one site
-present_species <- names(species_totals[species_totals > 0])
-
-comm2 <- comm[, present_species]
-traits2 <- traits[present_species, ]
-traits2 <- traits2 %>%
-  mutate(across(where(is.character), as.factor))
-
-fd <- dbFD(x = traits2,
-           a = comm2,
-           calc.FRic = TRUE,      # Compute functional richness
-           corr = "cailliez",     # Correction for negative eigenvalues in PCoA
-           stand.x = TRUE, # Standardize traits
-           m = 10)        
-
-# Functional richness per site
-fric <- fd$FRic
-feve <- fd$FEve
-fdiv <- fd$FDiv
-
-# Combine into a data frame
-site_FD <- data.frame(
-  site = rownames(comm2),
-  FRic = fric,
-  FEve = feve,
-  FDiv = fdiv
-)
-site_FD = site_FD %>% left_join(site_key %>% select(site, stratum))
-head(site_FD)
-
-ggplot(site_FD, aes(x = stratum, y = FDiv, color = stratum)) +
-  geom_boxplot()
-
-taxonomic_richness = data.frame(richness_results[["group_all"]])
-taxonomic_richness$site = rownames(richness_results[["group_all"]])
-taxonomic_richness$TRic = taxonomic_richness$all
-
-ggplot(left_join(taxonomic_richness, site_key %>% select(site, stratum) %>% distinct(), by = "site"), aes(x = stratum, y = TRic)) +
-  geom_boxplot()
-
-ggplot(left_join(taxonomic_richness, site_FD, by = "site"), aes(x = TRic, y = FDiv)) +
-  geom_point(shape = 1)
-
-# Functional NMDS
-
-library(FD)
-
-# traits2 contains mass (numeric) + categorical factors
-# gowdis handles mixed trait types
-species_dist <- gowdis(traits2)
-library(vegan)
-
-# sites × species presence/absence
-# Convert to functional distances: weighted by species presence
-# Simple approach: use cophenetic distances weighted by species presence
-site_dist <- vegdist(comm2 %*% as.matrix(species_dist), method = "euclidean")
-
-nmds <- metaMDS(site_dist, k = 2)
-plot(nmds)
-strata = site_key$stratum[ match(sites, site_key$site) ]
-strata_cols = c(
-  "COMP EXCL"  = "forestgreen",
-  "MATURE"     = "tan4",
-  "STAND INIT" = "orange",
-  "THINNED"    = "purple"
-)
-colors = strata_cols[strata]
-ordiplot(nmds,type="n")
-ordihull(nmds, groups = strata, draw = "polygon", col = strata_cols, label = FALSE)
-points(nmds, display="sites",col=colors, pch = 16, cex=1)

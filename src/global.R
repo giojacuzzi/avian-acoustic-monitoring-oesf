@@ -41,6 +41,7 @@ if (!exists("pkgs", envir = .GlobalEnv)) {
     "PRROC",            # classifier performance evaluation
     "betapart",         # beta diversity
     "vegan",            # community ecology methods
+    "indicspecies",     # indicator species
     # utility
     "crayon",           # console warnings
     "progress"          # dynamic progress bar
