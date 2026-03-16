@@ -1,14 +1,13 @@
 model {
 
   ##############################################################################
-  ## 1. Community-level (group) hyperpriors
-  ##############################################################################
+  ## Community-level (group) hyperpriors
   
   for (g in 1:G) {
   
     # Occurrence
     mu.u[g]    ~ dnorm(0, 1/2.25^2)
-    sigma.u[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.u[g] ~ dt(0, 1/2.25^2, 1) T(0,) # TODO: consider half-normal, sigma ~ dnorm(0,1) T(0,)?
     tau.u[g]   <- 1 / pow(sigma.u[g], 2)
     
     # Covariate effects on occurrence
@@ -65,19 +64,18 @@ model {
     tau.beta_point3[g]  <- sigma.beta_point3[g]^-2
     
     # False-positive unconfirmed detection (Royle and Link 2006, Miller et al. 2011)
-    mu.w[g]    ~ dnorm(0,0.01) # TODO: More informative prior?
-    sigma.w[g] ~ dunif(0,5)
-    tau.w[g] <- pow(sigma.w[g],-2)
+    mu.w[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.w[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.w[g] <- sigma.w[g]^-2
     
     # Confirmed true positive detection (Miller et al. 2011)
-    mu.b[g]    ~ dnorm(0,0.01) # TODO: More informative prior?
-    sigma.b[g] ~ dunif(0,5)
-    tau.b[g] <- pow(sigma.b[g],-2)
+    mu.b[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.b[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.b[g] <- sigma.b[g]^-2
   }
   
   ##############################################################################
-  ## 2. Species-level priors
-  ##############################################################################
+  ## Species-level priors
   
   for (i in 1:I) {
   
@@ -109,12 +107,11 @@ model {
     
     # Confirmed true positive detection
     b_logit[i] ~ dnorm(mu.b[group[i]], tau.b[group[i]])
-    b[i] <- ilogit(b_logit[i])
+    b[i] <- ilogit(b_logit[i]) # probability scale
   }
   
   ##############################################################################
-  ## 3. Ecological process (latent occupancy)
-  ##############################################################################
+  ## Ecological process (latent occupancy)
   
   for (i in 1:I) { # for each species i
     for (t in 1:Tseason) { # for each season t
@@ -135,12 +132,11 @@ model {
         z[j,t,i] ~ dbern(psi[j,t,i])
   
         ############################################################################
-        ## 4. Detection model
-        ############################################################################
+        ## Detection model
   
         for (k in 1:K[j,t]) { # for each survey k during season t at site j
         
-          ## Multiple-detection-state observation model (Miller et al. 2011)
+          ## Multiple-detection-state observation process (Miller et al. 2011)
           # States: 1 = nondetection, 2 = uncertain detection, 3 = certain detection
   
           # p11 is true-positive detection probability given z = 1
@@ -191,8 +187,7 @@ model {
   } # I species
   
   ##############################################################################
-  ## 5. Derived quantities
-  ##############################################################################
+  ## Derived quantities
   
   # Deviance of simulated and observed data for posterior predictive check
   D_obs <- -2 * sum(d_obs[1:J,1:Kmax,1:Tseason,1:I])

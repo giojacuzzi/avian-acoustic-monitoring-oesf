@@ -95,28 +95,28 @@ trait_data = trait_data %>% mutate(nesting_guild_cornell_ps = str_to_lower(nesti
   )
 )
 
-# TODO: Dietary guild
+# Dietary guild
 # "Following Pigot et al. (2020), we assigned all species to nine trophic niches (frugivore; granivore; nectarivore; terrestrial herbivore; aquatic herbivore; invertivore; vertivore; aquatic predator; scavenger) encompassing major resource types utilised by birds."
 trait_data = trait_data %>% mutate(
   group_diet = str_to_lower(trophic_niche)
 )
 
-# TODO: Foraging behavior
+# Foraging behavior
 # "Next, we classified each species into five lifestyles (or domains) according to their predominant locomotory niche while foraging: aerial, insessorial, terrestrial, aquatic and generalist. This is a separate dimension to diet inasmuch as species eating fish may be aquatic (e.g. pelican), aerial (e.g. tern), terrestrial (e.g. heron) or insessorial (e.g. kingfisher). Insessorial denotes a perching lifestyle, including arboreal species, but also any species habitually perching on other substrates, including cliffs or manmade structures."
 trait_data = trait_data %>% mutate(
   group_forage_behavior = str_to_lower(primary_lifestyle)
 )
 
-# TODO: Foraging habitat / substrate
+# Foraging habitat / substrate
 trait_data = trait_data %>% mutate(
   group_forage_substrate = case_when(
     (foraging_guild_cornell %in% c("aerial forager", "soaring", "flycatching", "hovering", "aerial dive")) ~ "aerial",
     (foraging_guild_cornell %in% c("foliage gleaner"))                                                     ~ "gleaner",
-    TRUE                                                                                                   ~ "TODO"
+    TRUE                                                                                                   ~ foraging_guild_cornell
   )
 )
 
-# TODO: Migration
+# Migration
 trait_data = trait_data %>%
   mutate(group_migrant = case_when(
     migration == "1" ~ "resident",

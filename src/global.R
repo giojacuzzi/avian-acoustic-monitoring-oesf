@@ -33,10 +33,13 @@ if (!exists("pkgs", envir = .GlobalEnv)) {
     "car",              # variance inflation factors
     "DHARMa",           # modeling diagnostics
     "MuMIn",            # model selection
+    "FD",               # functional diversity
+    "ade4",             # fourth-corner statistic
     "jagsUI",           # hierarchical bayesian MSOM
     "landscapemetrics", # landscape metrics
     "piecewiseSEM",     # structural equation modeling
     "PRROC",            # classifier performance evaluation
+    "betapart",         # beta diversity
     "vegan",            # community ecology methods
     # utility
     "crayon",           # console warnings

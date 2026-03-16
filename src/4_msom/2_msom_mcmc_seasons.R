@@ -15,13 +15,13 @@ param_alpha_plot_names = c( # stage-specific effects
   # "ba_mean",
   "tree_acre_6_mean",
   "qmd_6_mean",
-  # "ht_t100_mean", # ~ 
+  "bap_hwd_mean"
+  # "ht_t100_mean"           # ~ Across most stages: qmd_6_mean, and to a slightly lesser extent tree_acre_6_mean
   # "ht_t100_cv",   # ~
   # "sdi_sum_mean", # ~
-  "bap_hwd_mean"
-  # "canopy_cover_mean", # ~ tree_acre_6_mean
+  # "canopy_cover_mean"    # ~ Across most stages: tree_acre_6_mean, and to a slightly lesser extent qmd_6_mean
   # "canopy_cover_cv",   # ~ 
-  # "canopy_layers_mean" # ~
+  # "canopy_layers_mean"     # ~ Across most stages: tree_acre_6_mean, and to a slightly lesser extent qmd_6_mean
   # "cfvol_ddwm_mean"    # ~ qmd_6_mean
 )
 param_alpha_homerange_names = c(
@@ -85,6 +85,24 @@ species = dimnames(y)$species
 seasons = dimnames(y)$season
 surveys = dimnames(y)$survey
 sites   = dimnames(y)$site
+
+# Total number of detections per species:
+n_detections = apply(y, 4, function(x) sum(x > 1, na.rm = TRUE))
+
+# Total number of site detections per species:
+n_detected_sites = apply(y, 4, function(species_array) {
+  sum(apply(species_array, 1, function(site_matrix) any(site_matrix > 1, na.rm = TRUE)))
+})
+
+# TODO: Exclude extremely rare species?
+species_to_include = species[n_detected_sites > 2]
+species_to_exclude = setdiff(species, species_to_include)
+message("Excluding ", length(species_to_exclude), " species with insufficient observations: ", species_to_exclude)
+species = species_to_include
+species_idx = match(species, dimnames(y)$species)
+y = y[,,,species_idx, drop = FALSE]
+dimnames(y)$species = species
+str(y)
 
 # Ensure plot sites match
 stopifnot(all(sapply(occurrence_predictor_plot_data, function(df) {
@@ -450,8 +468,9 @@ msom = jags(data = msom_data,
             inits = function() { init_vals },
             parameters.to.save = params_to_monitor,
             model.file = model_file,
-            # Test run, ETA: 7 hr (fp), 1.5 hr (nofp)
-            n.chains = 2, n.adapt = 200, n.iter = 2000, n.burnin = 200, n.thin = 1, parallel = FALSE,
+            # Test run, ETA: 7-10 hr (fp), 1.5 hr (nofp)
+            # n.chains = 2, n.adapt = 250, n.iter = 2500, n.burnin = 250, n.thin = 1, parallel = TRUE,
+            n.chains = 3, n.adapt = 1000, n.iter = 5000, n.burnin = 1000, n.thin = 5, parallel = TRUE, # 30 hr for 10000 it
             # n.chains = 2, n.adapt = 500, n.iter = 5000, n.burnin = 500, n.thin = 1, parallel = TRUE, # 3 hr nofp
             # Formal run, ETA unknown
             # n.chains = 3, n.adapt = 5000, n.iter = 30000, n.burnin = 10000, n.thin = 3, parallel = TRUE,

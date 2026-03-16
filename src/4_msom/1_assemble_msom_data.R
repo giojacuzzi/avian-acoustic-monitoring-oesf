@@ -156,6 +156,8 @@ for (i in species) {
   }
 }
 
+# TODO: If a site is manually confirmed, accept all other detections above minimum threshold as 1
+
 # Inspect examples
 ylist[["american robin"]][["2020"]]
 any(ylist[["bewick's wren"]][["2020"]] == 1, na.rm = TRUE)
