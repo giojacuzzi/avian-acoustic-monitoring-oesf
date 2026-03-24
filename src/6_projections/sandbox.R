@@ -30,6 +30,25 @@ grp = factor(sof_decade_0_crop$OESF_SDS_GROUPED)
 pal = setNames(rainbow(nlevels(grp)), levels(grp))
 plot(st_geometry(sof_decade_0_crop), col = pal[grp], border = NA)
 legend("topright", legend = names(pal), fill = pal, cex = 0.7)
+mapview(sof_decade_0_crop %>% select(YAGE), zcol = "YAGE")
+
+#####
+rast_cover_2020 = rast("data/cache/3_gis/2_gen_cover_rasters/rast_cover_2020_clean_stage_3.tif")
+res(rast_cover_2020)
+
+# 1. Reproject the sf object to match the raster's CRS
+sof_reproj <- sof_decade_0_crop %>%
+  select(OESF_SDS_GROUPED) %>%
+  st_transform(crs = crs(rast_cover_2020))
+
+# 2. Rasterize using the raster as a template (inherits resolution, extent, CRS)
+rast_oesf <- rasterize(
+  x     = vect(sof_reproj),          # terra expects a SpatVector
+  y     = rast_cover_2020,           # template raster
+  field = "OESF_SDS_GROUPED"        # field to burn in
+)
+
+#####
 
 # Activities (thinning and harvest)
 
