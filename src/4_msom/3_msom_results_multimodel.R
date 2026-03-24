@@ -193,3 +193,7 @@ mu_alpha_plot$group = "All species"
 ggplot(mu_alpha_plot, aes(x = mean, y = name, color = group, shape = stratum_4)) +
   geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
   geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5))
+
+ggplot(results[["Nesting strategy"]][["mu_alpha_plot"]], aes(x = mean, y = name, color = group, shape = stratum_4)) +
+  geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5))

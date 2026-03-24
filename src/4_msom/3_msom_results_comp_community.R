@@ -502,6 +502,7 @@ plot_ternary_maxima <- function(maxima_df,
 
 # ── USAGE ─────────────────────────────────────────────────────────────────────
 axes <- c("standinit", "compex", "mature")
+axes <- c("compex", "thin", "mature")
 
 # Single species
 pred_sp <- predict_ternary("pileated woodpecker", axes = axes, step = 0.02)
@@ -516,12 +517,12 @@ plot_ternary(pred_comm, axes = axes, scale_limits = "species",
              annotate_max = TRUE, contour_breaks = c(0.25, 0.50, 0.75), no_mask = TRUE)
 
 # Group mean with contours
-focal_species = species_traits %>% filter(group_nest_ps == "tree") %>% pull(common_name)
+focal_species = species_traits %>% filter(group_nest_ps == "cavity_p") %>% pull(common_name)
 # focal_species = species_traits %>% filter(group_habitat == "early seral") %>% pull(common_name)
 focal_species = intersect(focal_species, species)
 pred_focal = predict_ternary_community(axes = axes, step = 0.02, species_subset = focal_species)
 plot_ternary(pred_focal, axes = axes, scale_limits = "species",
-             annotate_max = TRUE, contour_breaks = c(0.25, 0.50, 0.75), no_mask = FALSE)
+             annotate_max = TRUE, contour_breaks = c(0.2, 0.4, 0.6), no_mask = FALSE)
 
 # Species maxima density — all species
 maxima_all <- predict_ternary_maxima(axes = axes, step = 0.05)

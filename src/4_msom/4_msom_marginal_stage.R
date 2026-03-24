@@ -50,12 +50,12 @@ stage_plot_means <- function(stage_code) {
 mean_plot <- lapply(stage_idx_map, stage_plot_means)
 names(mean_plot) <- names(stage_idx_map)
 
-# Stage colors — user-specified
+# Stage colors
 stage_colors <- c(
-  standinit = "#E8A838",   # orange
-  compex    = "#4CAF6B",   # green
-  thin      = "#8B5DB5",   # purple
-  mature    = "#8B5E3C"    # brown
+  standinit = "#E8A838",
+  compex    = "#4CAF6B",
+  thin      = "#8B5DB5",
+  mature    = "#8B5E3C"
 )
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -76,7 +76,6 @@ get_hr_raw <- function(hr_param_name, species_name, sc) {
 
 scale_proportion <- function(p, sc) (p - sc$center) / sc$scale
 
-# Interpolate between two hex colors using a vector of weights t in [0, 1]
 interpolate_colors <- function(color_from, color_to, t) {
   ramp     <- colorRamp(c(color_from, color_to), space = "rgb")
   rgb_vals <- ramp(t)
@@ -178,13 +177,6 @@ predict_hr_gradient <- function(species_name,
 }
 
 # ── CONCATENATED GRADIENT PREDICTION ──────────────────────────────────────────
-# Segments:
-#   1: SI   (100%) -> Compex (100%)   x in [0, 1]
-#   2: Compex (100%) -> Thin (100%)   x in [1, 2]
-#   3: Thin (100%) -> Mature (100%)   x in [2, 3]
-#
-# Each row in pred_df has a hex_color computed by interpolating between the
-# from-stage and to-stage colors using p_to as the blend weight.
 predict_gradient_concat <- function(species_name, n_grid = 501) {
   
   segments <- list(
@@ -193,9 +185,9 @@ predict_gradient_concat <- function(species_name, n_grid = 501) {
     list(from = "thin",      to = "mature", label = "Thin \u2192 Mature")
   )
   
-  all_dfs   <- vector("list", length(segments))
-  seg_meta  <- vector("list", length(segments))
-  x_offset  <- 0
+  all_dfs  <- vector("list", length(segments))
+  seg_meta <- vector("list", length(segments))
+  x_offset <- 0
   
   for (k in seq_along(segments)) {
     seg <- segments[[k]]
@@ -204,7 +196,6 @@ predict_gradient_concat <- function(species_name, n_grid = 501) {
     
     x_vals <- seq(x_offset, x_offset + 1, length.out = n_grid)
     
-    # Interpolate color at each grid point: p_to = 0 -> from color, 1 -> to color
     hex_colors <- interpolate_colors(
       color_from = stage_colors[seg$from],
       color_to   = stage_colors[seg$to],
@@ -241,23 +232,54 @@ predict_gradient_concat <- function(species_name, n_grid = 501) {
     x_offset <- x_offset + 1
   }
   
+  # ── Rug: observed combination of from/to proportions ──────────────────────
+  # For each segment, get raw observed proportions of both stages.
+  # Position: p_to / (p_from + p_to) — relative balance of the two stages,
+  #   normalized to [0,1] within the segment.
+  # Alpha weight: p_from + p_to — how much of the homerange is accounted for
+  #   by these two stages. Sites where both are near 0 (dominated by other
+  #   stages) get faint ticks; sites where they jointly dominate get dark ticks.
+  get_obs_raw <- function(stage, sp) {
+    if (stage == "compex") {
+      hr_sc_si  <- get_hr_scaling("pcnt_standinit", sp)
+      hr_sc_th  <- get_hr_scaling("pcnt_thin",      sp)
+      hr_sc_mat <- get_hr_scaling("pcnt_mature",     sp)
+      1 - get_hr_raw("pcnt_standinit", sp, hr_sc_si) -
+        get_hr_raw("pcnt_thin",      sp, hr_sc_th) -
+        get_hr_raw("pcnt_mature",    sp, hr_sc_mat)
+    } else {
+      sc <- get_hr_scaling(paste0("pcnt_", stage), sp)
+      get_hr_raw(paste0("pcnt_", stage), sp, sc)
+    }
+  }
+  
+  rug_df <- map_dfr(seq_along(seg_meta), \(k) {
+    seg        <- seg_meta[[k]]
+    p_from_obs <- get_obs_raw(seg$from, species_name)
+    p_to_obs   <- get_obs_raw(seg$to,   species_name)
+    combined   <- p_from_obs + p_to_obs
+    
+    tibble(
+      x     = seg$x_min + if_else(combined > 0, p_to_obs / combined, NA_real_),
+      alpha = pmin(combined, 1)
+    ) |>
+      filter(!is.na(x))
+  })
+  
   list(
     pred_df = bind_rows(all_dfs),
     meta_df = map_dfr(seg_meta, as_tibble),
+    rug_df  = rug_df,
     sp_name = species_name
   )
 }
 
 # ── SINGLE-SPECIES CONCATENATED GRADIENT PLOT ─────────────────────────────────
-# The continuous color gradient is achieved by:
-#   - Line:   geom_segment() between consecutive grid points, colored at midpoint
-#   - Ribbon: geom_rect() strips one per grid step, filled at midpoint color
-# Both use scale_color_identity() / scale_fill_identity() so hex values are
-# used directly without any scale mapping.
 plot_gradient_concat <- function(result) {
   
   pred_df <- result$pred_df
   meta_df <- result$meta_df
+  rug_df  <- result$rug_df
   sp_name <- result$sp_name
   
   stage_labels <- c(
@@ -267,10 +289,7 @@ plot_gradient_concat <- function(result) {
     mature    = "Mature"
   )
   
-  # ── Segment pairs for geom_segment (line) ────────────────────────────────
-  # Each row represents one tiny line segment between grid point k and k+1.
-  # color_mid is computed row-wise via map2_chr so each segment gets its own
-  # pairwise interpolation rather than a ramp through all colors at once.
+  # ── Line segments ─────────────────────────────────────────────────────────
   line_segs <- pred_df |>
     mutate(
       x_end      = lead(x),
@@ -282,7 +301,7 @@ plot_gradient_concat <- function(result) {
     ) |>
     filter(!is.na(x_end), !is.na(color_mid))
   
-  # ── Ribbon strips for geom_rect ───────────────────────────────────────────
+  # ── Ribbon strips ─────────────────────────────────────────────────────────
   ribbon_strips <- pred_df |>
     mutate(
       x_end      = lead(x),
@@ -298,29 +317,22 @@ plot_gradient_concat <- function(result) {
     filter(!is.na(x_end), !is.na(color_mid))
   
   # ── Extrapolation zones ───────────────────────────────────────────────────
+  # Shade from observed maximum of the "to" stage to the segment end (x_max).
+  # obs_max is already capped at x_offset + 1 so xmax never exceeds segment end.
   extrap_df <- meta_df |>
-    mutate(xmin = obs_upper, xmax = obs_max) |>
+    mutate(xmin = obs_max, xmax = x_max) |>
     filter(xmax > xmin)
   
-  # ── Stage labels at segment boundaries ───────────────────────────────────
-  # All centered (hjust = 0.5) over their 100% point; clip = "off" allows
-  # the leftmost and rightmost labels to spill beyond the panel edges
+  # ── Junction labels ───────────────────────────────────────────────────────
   junction_labels <- tibble(
-    x     = c(0,          1,       2,            3),
+    x     = c(0,           1,        2,         3),
     label = c("Stand init", "Compex", "Thinned", "Mature"),
     color = stage_colors[c("standinit", "compex", "thin", "mature")]
   )
   
-  # ── Legend data: one point per stage for manual legend ───────────────────
-  legend_df <- tibble(
-    stage = names(stage_colors),
-    label = stage_labels[names(stage_colors)],
-    color = stage_colors
-  )
-  
   ggplot() +
     
-    # Ribbon as semi-transparent colored strips
+    # Ribbon
     geom_rect(
       data    = ribbon_strips,
       mapping = aes(xmin = x, xmax = x_end,
@@ -332,23 +344,22 @@ plot_gradient_concat <- function(result) {
     scale_fill_identity() +
     scale_color_identity() +
     
-    # Extrapolation shading (on top of ribbon)
-    geom_rect(
-      data    = extrap_df,
-      mapping = aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 1),
-      fill    = "grey", alpha = 0.25,
-      inherit.aes = FALSE
-    ) +
+    # # Extrapolation shading — beyond observed maximum
+    # geom_rect(
+    #   data    = extrap_df,
+    #   mapping = aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 1),
+    #   fill    = "grey", alpha = 0.25,
+    #   inherit.aes = FALSE
+    # ) +
     
     # Segment junction lines
     geom_vline(
       xintercept = c(1, 2),
       linewidth  = 0.4,
-      color      = "grey80",
-      linetype   = "solid"
+      color      = "grey80"
     ) +
     
-    # Mean line as colored segments — drawn after ribbon so it is always visible
+    # Mean line
     geom_segment(
       data    = line_segs,
       mapping = aes(x = x, xend = x_end,
@@ -359,17 +370,22 @@ plot_gradient_concat <- function(result) {
       inherit.aes = FALSE
     ) +
     
-    # # Segment transition labels
-    # geom_text(
-    #   data        = meta_df,
-    #   mapping     = aes(x = x_min + 0.5, y = 0.97, label = seg_label),
-    #   size        = 3,
-    #   color       = "grey25",
-    #   fontface    = "italic",
-    #   inherit.aes = FALSE
-    # ) +
+    # Rug — one tick per site per segment
+    # Position: p_to / (p_from + p_to) — relative balance of the two stages
+    # Alpha:    p_from + p_to — how much of the homerange these two stages account for
+    #           Dark ticks = site dominated by this pair; faint = diluted by other stages
+    geom_rug(
+      data        = rug_df,
+      mapping     = aes(x = x, alpha = alpha),
+      sides       = "b",
+      color       = "black",
+      length      = unit(0.03, "npc"),
+      inherit.aes = FALSE
+    ) +
+    scale_alpha_continuous(range = c(0.02, 0.4), guide = "none") +
     
-    # Boundary labels at top — centered over their 100% point, colored by stage
+    # Junction labels — centered, colored by stage, clip = "off" allows
+    # leftmost and rightmost to spill beyond panel edges
     geom_text(
       data        = junction_labels,
       mapping     = aes(x = x, y = 1.0, label = label, color = color),
@@ -380,30 +396,9 @@ plot_gradient_concat <- function(result) {
       inherit.aes = FALSE
     ) +
     
-    # # Manual color legend using dummy points off-plot
-    # geom_point(
-    #   data    = legend_df,
-    #   mapping = aes(x = -Inf, y = -Inf, color = color),
-    #   size    = 3,
-    #   inherit.aes = FALSE
-    # ) +
-    # 
-    # # Stage color legend via manual guide
-    # guides(
-    #   color = guide_legend(
-    #     title    = "Stage",
-    #     override.aes = list(
-    #       color = stage_colors,
-    #       size  = 3
-    #     )
-    #   )
-    # ) +
-    # Inject named legend labels by adding a dummy invisible scale
-    # (scale_color_identity doesn't support labels — use annotate approach instead)
-    
     scale_x_continuous(
       breaks = c(0, 0.5, 1, 1.5, 2, 2.5, 3),
-      labels = c("0:100%", "50%", "0:100%", "50%", "0:100%", "50%", "0:100%"),
+      labels = c("100:0%", "50%", "100:0%", "50%", "100:0%", "50%", "100:0%"),
       expand = c(0.01, 0)
     ) +
     scale_y_continuous(
@@ -414,25 +409,10 @@ plot_gradient_concat <- function(result) {
     ) +
     coord_cartesian(clip = "off") +
     labs(
-      x        = "Pairwise homerange composition",
-      y        = "Predicted occupancy probability",
-      title    = sp_name
+      x     = "Pairwise homerange composition",
+      y     = "Predicted occupancy probability",
+      title = str_to_title(sp_name)
     ) +
-    # Stage color swatches as annotation in top-right corner
-    # annotate("point",
-    #          x     = c(2.55, 2.70, 2.85, 3.00),
-    #          y     = rep(0.06, 4),
-    #          color = stage_colors[c("standinit", "compex", "thin", "mature")],
-    #          size  = 3
-    # ) +
-    # annotate("text",
-    #          x      = c(2.55, 2.70, 2.85, 3.00),
-    #          y      = rep(0.02, 4),
-    #          label  = c("SI", "CE", "Thin", "Mat"),
-    #          size   = 2.5,
-    #          color  = "grey30",
-    #          hjust  = 0.5
-    # ) +
     theme_classic() +
     theme(
       plot.margin        = margin(20, 20, 20, 20),
@@ -442,13 +422,12 @@ plot_gradient_concat <- function(result) {
 }
 
 # ── USAGE ─────────────────────────────────────────────────────────────────────
-# n_grid controls ribbon smoothness — higher = smoother but slower
-# 101 = fast/coarse, 501 = good balance, 1001 = very smooth
-result <- predict_gradient_concat("pileated woodpecker", n_grid = 501)
+stop()
+result <- predict_gradient_concat("pileated woodpecker", n_grid = 101)
 plot_gradient_concat(result)
 
 result <- predict_gradient_concat("vaux's swift", n_grid = 101)
 plot_gradient_concat(result)
 
-result <- predict_gradient_concat("golden-crowned kinglet", n_grid = 501)
+result <- predict_gradient_concat("rufous hummingbird", n_grid = 101)
 plot_gradient_concat(result)
