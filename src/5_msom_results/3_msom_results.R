@@ -3,7 +3,7 @@
 #
 # CONFIG:
 path_msom = "data/cache/models/msom_fp_fp_nest_2026-02-17_22:04:27.rds"
-# TODO: path_msom = "data/cache/models/V3_msom_pcnt_fp_fp_all.rds"
+path_msom = "data/cache/models/V3_msom_pcnt_fp_fp_all.rds"
 #
 # OUTPUT:
 out_cache_dir  = "data/cache/4_msom/3_msom_results"
@@ -111,10 +111,18 @@ species_baselines %>% filter(startsWith(param, "u")) %>% summarise(
 
 ggplot(species_baselines %>% filter(startsWith(param, "u")), aes(x = prob, y = reorder(common_name, prob), color = group)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
-  geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) +
-  labs(x = "Posterior probability", y = "Species index",
-       title = "Species-specific occurrence probability `u` across models (mean and 95% BCI)"
-  ) + theme(legend.position = "bottom")
+  geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) + theme(legend.position = "bottom")
+ggplot(species_baselines %>% filter(startsWith(param, "v")), aes(x = prob, y = reorder(common_name, prob), color = group)) +
+  geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) + theme(legend.position = "bottom")
+ggplot(species_baselines %>% filter(startsWith(param, "w")), aes(x = prob, y = reorder(common_name, prob), color = group)) +
+  geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) + theme(legend.position = "bottom")
+ggplot(species_baselines %>% filter(startsWith(param, "b")), aes(x = prob, y = reorder(common_name, prob), color = group)) +
+  geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = prob_lower95, xmax = prob_upper95), height = 0.1, position = position_dodge(width = 0.5)) + theme(legend.position = "bottom")
+
+stop("DEBUG")
 
 # Compare occupancy parameters --------------------------------------------------
 

@@ -51,6 +51,7 @@ coef_df <- model_data$msom_summary |>
          mean, `2.5%`, `25%`, `75%`, `97.5%`, overlap0, f)
 
 # ── ORDER SPECIES ─────────────────────────────────────────────────────────────
+coef_df$sp_name = str_to_sentence(coef_df$sp_name)
 sp_order <- coef_df |>
   filter(stage == "Mature") |>
   arrange(mean) |>

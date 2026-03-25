@@ -25,7 +25,6 @@ model_data = readRDS(path_msom)
 (species = model_data$species)
 (stages = model_data$stages)
 
-
 library(tidyverse)
 
 # ── SETUP (run once) ──────────────────────────────────────────────────────────
@@ -462,8 +461,7 @@ plot_gradient_concat_multi <- function(pred_df,
   
   junction_labels <- tibble(
     x     = c(0,            1,        2,         3),
-    label = c("Stand init", "Compex", "Thinned", "Mature"),
-    color = stage_colors[c("standinit", "compex", "thin", "mature")]
+    label = c("Stand init", "Compex", "Thinned", "Mature")
   )
   
   ggplot() +
@@ -486,13 +484,10 @@ plot_gradient_concat_multi <- function(pred_df,
       name   = NULL
     ) +
     
-    # Junction labels use scale_color_identity via a separate layer with
-    # color passed as a fixed aesthetic, not mapped — so it doesn't
-    # interfere with the species color scale
     geom_text(
       data        = junction_labels,
       mapping     = aes(x = x, y = 1.0, label = label),
-      color       = junction_labels$color,
+      color       = "grey30",
       hjust       = 0.5, vjust = -0.4,
       size        = 2.8, fontface = "bold",
       inherit.aes = FALSE
@@ -523,30 +518,175 @@ plot_gradient_concat_multi <- function(pred_df,
     )
 }
 
+# ── FACETED MULTI-SPECIES PLOT ─────────────────────────────────────────────────
+# Vertically stacked panels, one per species, sharing the x axis.
+# Species are ordered by which segment's peak occupancy is highest, with
+# stage priority standinit < compex < thin < mature — so species that peak
+# in SI appear at the top, mature-peaking species at the bottom.
+#
+# pred_df: output of predict_gradient_concat_multi()
+plot_gradient_concat_facet <- function(pred_df) {
+  
+  # ── Species ordering ────────────────────────────────────────────────────────
+  # Order by x position of each species' maximum posterior mean occupancy.
+  # x in [0,1] = SI→compex segment, [1,2] = compex→thin, [2,3] = thin→mature.
+  # So ordering by x naturally sequences species from SI-peaking to mature-peaking.
+  pred_df$sp_name = str_to_sentence(pred_df$sp_name)
+  sp_order <- pred_df |>
+    group_by(sp_name) |>
+    slice_max(psi_mean, n = 1, with_ties = FALSE) |>
+    ungroup() |>
+    arrange(x) |>
+    pull(sp_name)
+  
+  pred_df <- pred_df |>
+    mutate(sp_name = factor(sp_name, levels = sp_order))
+  
+  # Line segments colored by stage gradient as in single-species plot
+  line_segs <- pred_df |>
+    group_by(sp_name) |>
+    mutate(
+      x_end      = lead(x),
+      y_end      = lead(psi_mean),
+      color_next = lead(hex_color),
+      color_mid  = map2_chr(hex_color, color_next,
+                            \(a, b) if (is.na(b)) NA_character_
+                            else interpolate_colors(a, b, t = 0.5))
+    ) |>
+    ungroup() |>
+    filter(!is.na(x_end), !is.na(color_mid))
+  
+  # Ribbon strips
+  ribbon_strips <- pred_df |>
+    group_by(sp_name) |>
+    mutate(
+      x_end      = lead(x),
+      lower_end  = lead(psi_lower),
+      upper_end  = lead(psi_upper),
+      color_next = lead(hex_color),
+      color_mid  = map2_chr(hex_color, color_next,
+                            \(a, b) if (is.na(b)) NA_character_
+                            else interpolate_colors(a, b, t = 0.5)),
+      y_lower    = (psi_lower + lower_end) / 2,
+      y_upper    = (psi_upper + upper_end) / 2
+    ) |>
+    ungroup() |>
+    filter(!is.na(x_end), !is.na(color_mid))
+  
+  # Junction labels — drawn once, replicated across facets via geom_text
+  junction_labels <- tibble(
+    x     = c(0,            1,        2,         3),
+    label = c("Stand init", "Compex", "Thinned", "Mature"),
+    color = stage_colors[c("standinit", "compex", "thin", "mature")]
+  )
+  
+  ggplot() +
+    
+    scale_fill_identity() +
+    scale_color_identity() +
+    
+    # Ribbon
+    geom_rect(
+      data    = ribbon_strips,
+      mapping = aes(xmin = x, xmax = x_end,
+                    ymin = y_lower, ymax = y_upper,
+                    fill = color_mid,
+                    group = sp_name),
+      alpha       = 0.25,
+      inherit.aes = FALSE
+    ) +
+    
+    # Junction lines
+    geom_vline(xintercept = c(1, 2), linewidth = 0.4, color = "grey80") +
+    
+    # Mean line
+    geom_segment(
+      data    = line_segs,
+      mapping = aes(x = x, xend = x_end,
+                    y = psi_mean, yend = y_end,
+                    color = color_mid,
+                    group = sp_name),
+      linewidth   = 0.9,
+      lineend     = "round",
+      inherit.aes = FALSE
+    ) +
+    
+    geom_hline(yintercept = 0, color = "gray20", linewidth = 0.5) +
+    
+    # Junction labels — top of each panel
+    # geom_text(
+    #   data        = junction_labels,
+    #   mapping     = aes(x = x, y = 1.0, label = label),
+    #   color       = junction_labels$color,
+    #   hjust       = 0.5, vjust = -0.3,
+    #   size        = 2.5, fontface = "bold",
+    #   inherit.aes = FALSE
+    # ) +
+    
+    facet_wrap(
+      ~ sp_name,
+      ncol   = 1,
+      scales = "free_y",   # y free so each species uses its own range
+      strip.position = "right"
+    ) +
+    
+    scale_x_continuous(
+      breaks = c(0, 0.5, 1, 1.5, 2, 2.5, 3),
+      labels = c("0:1", "0.5", "0:1", "0.5", "0:1", "0.5", "0:1"),
+      expand = c(0.01, 0)
+    ) +
+    scale_y_continuous(
+      breaks = c(0, 0.5, 1),
+      # labels = scales::percent(),
+      expand = c(0, 0)
+    ) +
+    coord_cartesian(clip = "off") +
+    labs(
+      x = "Pairwise homerange composition (%)",
+      y = "Predicted occupancy probability (%)"
+    ) +
+    theme_classic() +
+    theme(
+      plot.margin        = margin(20, 20, 20, 20),
+      strip.background   = element_blank(),
+      strip.text.y.right = element_text(angle = 0, hjust = 0, size = 8, face = "italic"),
+      panel.spacing      = unit(0.3, "lines"),
+      panel.grid.major.y = element_line(color = "grey92", linewidth = 0.3),
+      axis.text.x        = element_text(size = 7),
+      axis.text.y        = element_text(size = 7),
+      axis.title.x       = element_text(size = 9),
+      axis.title.y       = element_text(size = 9),
+      axis.line.x.bottom = element_line(color = "gray20", linewidth = 0.5),
+      axis.line.y.left   = element_line(color = "gray20", linewidth = 0.5)
+    )
+}
+
 # ── USAGE ─────────────────────────────────────────────────────────────────────
+stop()
 
 # Single species
 result <- predict_gradient_concat("pileated woodpecker", n_grid = 101)
 plot_gradient_concat(result)
 
-result <- predict_gradient_concat("vaux's swift", n_grid = 101)
+result <- predict_gradient_concat("pacific-slope flycatcher", n_grid = 101)
 plot_gradient_concat(result)
 
-result <- predict_gradient_concat("golden-crowned kinglet", n_grid = 501)
+result <- predict_gradient_concat("golden-crowned kinglet", n_grid = 101)
 plot_gradient_concat(result)
 
-# Multiple species on one plot
-focal_species = species_traits %>% filter(group_nest_ps == "shrub") %>% pull(common_name)
-focal_species = intersect(focal_species, species)
+for (sp in species) {
+  result <- predict_gradient_concat(sp, n_grid = 101)
+  p = plot_gradient_concat(result); print(p)
+}
+
+# Multiple species — overlaid
+focal_species <- c("pileated woodpecker", "hairy woodpecker", "red-breasted nuthatch")
 multi_pred <- predict_gradient_concat_multi(focal_species, n_grid = 101)
 plot_gradient_concat_multi(multi_pred)
 
-# With custom species colors
-plot_gradient_concat_multi(
-  multi_pred,
-  sp_colors = c(
-    "pileated woodpecker"    = "#C0392B",
-    "hairy woodpecker"       = "#2980B9",
-    "red-breasted nuthatch"  = "#27AE60"
-  )
+# Multiple species — vertically faceted, ordered by peak stage
+focal_species <- c(
+  "vaux's swift", "marbled murrelet", "rufous hummingbird", "northern goshawk", "common nighthawk", "evening grosbeak", "golden-crowned kinglet", "olive-sided flycatcher", "pine siskin", "pileated woodpecker", "willow flycatcher"
 )
+multi_pred <- predict_gradient_concat_multi(focal_species, n_grid = 101)
+plot_gradient_concat_facet(multi_pred)
