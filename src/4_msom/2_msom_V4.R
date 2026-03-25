@@ -55,7 +55,7 @@ source("src/global.R")
 if (model_type == "nofp") {
   model_file = "src/4_msom/msom_pcnt.txt"
 } else if (model_type == "fp") {
-  model_file = "src/4_msom/msom_pcnt_fp.txt"
+  model_file = "src/4_msom/msom_V4.txt"
 } else {
   stop("ERROR: Unsupported model type")
 }
