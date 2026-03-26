@@ -477,8 +477,9 @@ msom = jags(data = msom_data,
             model.file = model_file,
             # Test run, ETA: 7-10 hr (fp), 1.5 hr (nofp)
             # n.chains = 2, n.adapt = 250, n.iter = 2500, n.burnin = 250, n.thin = 1, parallel = TRUE,
-            n.chains = 1, n.adapt = 500, n.iter = 2500, n.burnin = 500, n.thin = 1, parallel = FALSE, # 12 hr for 2500 iter and 3 chains
-            # n.chains = 2, n.adapt = 500, n.iter = 5000, n.burnin = 500, n.thin = 1, parallel = TRUE, # 3 hr nofp
+            # TODO FOR LAB:
+            n.chains = 3, n.adapt  = 2000, n.iter   = 5000, n.burnin = 1000, n.thin   = 1, parallel = TRUE,
+            # n.chains = 3, n.adapt = 500, n.iter = 2500, n.burnin = 500, n.thin = 1, parallel = FALSE, # 12 hr for 2500 iter and 3 chains
             # Formal run, ETA unknown
             # n.chains = 3, n.adapt = 5000, n.iter = 30000, n.burnin = 10000, n.thin = 3, parallel = TRUE,
             DIC = FALSE, verbose=TRUE)
