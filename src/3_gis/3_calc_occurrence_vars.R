@@ -4,15 +4,15 @@
 # ETA: 16 hours
 #
 # CONFIG:
-pnts_name = "sites" # "sites" or "no_action"
+pnts_name = "sites" # "sites" for surveyed sites only or "landscape" for a grid of points across the landscape
 overwrite_data_plot_scale_cache = TRUE
 overwrite_data_homerange_scale_cache = TRUE
 cover_classification = "clean_strata_4" # e.g. clean_stage_3, strata_4
-t = 2021 # year: 2020, 2021, 2022, 2023
+t = 2020 # year: 2020, 2021, 2022, 2023
 #
 ## OUTPUT:
-path_data_plot_scale_out      = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_", t, "_", cover_classification, ".rds")
-path_data_homerange_scale_out = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_", t, "_", cover_classification, ".rds")
+path_data_plot_scale_out      = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_", t, "_", cover_classification, "_", pnts_name, ".rds")
+path_data_homerange_scale_out = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_", t, "_", cover_classification, "_", pnts_name, ".rds")
 #
 ## INPUT:
 path_rast_cover       = paste0("data/cache/3_gis/2_gen_cover_rasters/rast_cover_", t, "_", cover_classification, ".tif")
@@ -39,9 +39,11 @@ pnts = switch(pnts_name,
       read_rds(path_site_cover_class)
     },
     
-    # Existing 2020 landscape
-    no_action = {
+    # Existing landscape
+    landscape = {
       path_rast_cover = path_rast_cover
+      # debug
+      landscape_planning_units_clean = landscape_planning_units_clean %>% filter(unit == "Upper Clearwater")
       bbox = st_bbox(landscape_planning_units_clean)
       cellsize = 250 # distance between points (meters)
       grid = st_sf(st_make_grid(x = st_as_sfc(bbox), cellsize = cellsize, offset = c(bbox["xmin"], bbox["ymin"]), what = "centers"))
@@ -54,22 +56,24 @@ pnts = switch(pnts_name,
 )
 message("Retrieved ", nrow(pnts), " points for '", pnts_name, "'")
 
-# Ensure that aru site locations are correctly positioned within patches (i.e. not near edges so as to get incorrect covariate estimates)
-# Overwrite thinning class validity for sites: ca263i (mature), ap022i (standinit), az041i (standinit)
-pnts[pnts$site == "ca263i", ]
-pnts[pnts$site == "ap022i", "stratum_4"] = "standinit"
-pnts[pnts$site == "ap022i", "stratum_5"] = "standinit"
-pnts[pnts$site == "az041i", "stratum_4"] = "standinit"
-pnts[pnts$site == "az041i", "stratum_5"] = "standinit"
-
-# Combine co-located sites
-s = site_key %>% filter(site != site_agg) %>% select(site, site_agg) %>% distinct()
-s_site = unique(s$site)
-s_site_agg = unique(s$site_agg)
-mapview(pnts %>% filter(site %in% c(s_site, s_site_agg)))
-lookup = site_key %>% select(site, site_agg) %>% distinct()
-pnts_alt = pnts %>% left_join(lookup, by = "site")
-pnts = pnts_alt %>% filter(site == site_agg) %>% select(-site_agg)
+if (pnts_name == "sites") {
+  # Ensure that aru site locations are correctly positioned within patches (i.e. not near edges so as to get incorrect covariate estimates)
+  # Overwrite thinning class validity for sites: ca263i (mature), ap022i (standinit), az041i (standinit)
+  pnts[pnts$site == "ca263i", ]
+  pnts[pnts$site == "ap022i", "stratum_4"] = "standinit"
+  pnts[pnts$site == "ap022i", "stratum_5"] = "standinit"
+  pnts[pnts$site == "az041i", "stratum_4"] = "standinit"
+  pnts[pnts$site == "az041i", "stratum_5"] = "standinit"
+  
+  # Combine co-located sites
+  s = site_key %>% filter(site != site_agg) %>% select(site, site_agg) %>% distinct()
+  s_site = unique(s$site)
+  s_site_agg = unique(s$site_agg)
+  mapview(pnts %>% filter(site %in% c(s_site, s_site_agg)))
+  lookup = site_key %>% select(site, site_agg) %>% distinct()
+  pnts_alt = pnts %>% left_join(lookup, by = "site")
+  pnts = pnts_alt %>% filter(site == site_agg) %>% select(-site_agg)
+}
 
 message('Loading raster cover data from cache ', path_rast_cover)
 rast_cover = rast(path_rast_cover)
@@ -136,28 +140,6 @@ if (overwrite_data_plot_scale_cache) {
   # Plot-level spatial scale buffer
   plot_buffer = 100 # 100 meters
   
-  path_data_plot = 'data/environment/PAM_PreHarvest_Habitat_results_DD_WD_TM.xlsx'
-  
-  # Load and clean plot-level data
-  data_plot = list(
-    readxl::read_xlsx(path_data_plot, sheet = 2, skip = 1) %>% janitor::clean_names(),
-    readxl::read_xlsx(path_data_plot, sheet = 4, skip = 1) %>% janitor::clean_names(),
-    readxl::read_xlsx(path_data_plot, sheet = 5, skip = 1) %>% janitor::clean_names(),
-    readxl::read_xlsx(path_data_plot, sheet = 6, skip = 1) %>% janitor::clean_names()
-  ) %>%
-    reduce(full_join, by = c("station", "strata")) %>% rename(site = station, stratum = strata) %>%
-    mutate(tag = str_extract(site, "_.*$") %>% str_remove("^_"), site = str_remove(site, "_.*$")) %>% mutate(site = tolower(site))
-  
-  # Mark sites that were surveyed for habitat data in-person
-  if (pnts_name == "sites") {
-    intersect(pnts$site, data_plot$site)
-    length(intersect(pnts$site, data_plot$site))
-    setdiff(data_plot$site, pnts$site) # This should be 0
-    pnts$hs = FALSE
-    pnts[pnts$site %in% data_plot$site, 'hs'] = TRUE
-    mapview(pnts, zcol = 'hs')
-  }
-  
   # Elevation [m]
   rast_elevation = load_raster("data/environment/elevation/elevation.tif")
   pnts$elevation = extract(rast_elevation, vect(pnts))[,2]
@@ -173,7 +155,68 @@ if (overwrite_data_plot_scale_cache) {
   table(pnts$age_point)
   table(round(pnts$age_mean))
   
+  # Distance to roads
+  dist_road_paved = st_distance(pnts, paved_roads)
+  dist_road_paved = apply(dist_road_paved, 1, min)
+  pnts$dist_road_paved = dist_road_paved
+  # mapview(pnts, zcol = "dist_road_paved") + mapview(paved_roads)
+  
+  dist_road_all = st_distance(pnts, roads)
+  dist_road_all = apply(dist_road_all, 1, min)
+  pnts$dist_road_all = dist_road_all
+  # mapview(pnts, zcol = "dist_road_all") + mapview(roads, zcol = "road_usgs1")
+  
+  # Distance to water (type 1-3 and all types) [m]
+  dist_watercourse_major = st_distance(pnts, boundary_watercourses)
+  dist_watercourse_major = apply(dist_watercourse_major, 1, min)
+  pnts$dist_watercourse_major = dist_watercourse_major
+  # mapview(pnts, zcol = "dist_watercourse_major") + mapview(boundary_watercourses)
+  
+  dist_watercourse_all = st_distance(pnts, watercourses)
+  dist_watercourse_all = apply(dist_watercourse_all, 1, min)
+  pnts$dist_watercourse_all = dist_watercourse_all
+  # mapview(pnts, zcol = "dist_watercourse_all") + mapview(watercourses)
+  
+  # Distance to nearest edge [m]
+  # For each site, find its patch, then find the distance to the nearest non-patch cell
+  # hr_patch_ids = patches(rast_cover, directions=8, values=TRUE)
+  # pnts$dist_nearest_edge = NA
+  # for (i in 1:nrow(pnts)) {
+  #   d = pnts[i,]
+  #   cover_class = terra::extract(rast_cover, vect(d))[,2]
+  #   pid = terra::extract(hr_patch_ids, vect(d))[,2]
+  #   m = trim(classify(hr_patch_ids, cbind(pid, 1), others = NA))
+  #   na_cells = which(is.na(values(m)))
+  #   na_coords = xyFromCell(m, na_cells)
+  #   d_coords = st_coordinates(d)
+  #   distances = sqrt((na_coords[,1] - d_coords[1])^2 + (na_coords[,2] - d_coords[2])^2)
+  #   min_dist = min(distances)
+  #   pnts[i, 'dist_nearest_edge'] = min_dist
+  # mapview(d) + mapview(m) + mapview(st_buffer(d, 100), col.regions = 'transparent', lwd = 2)
+  # }
+  # mapview(rast_cover) + mapview(pnts, label = pnts$site, zcol = 'dist_nearest_edge') + mapview(st_buffer(pnts, 100), col.regions = 'transparent', lwd = 2)
+  
   if (pnts_name == "sites") {
+    path_data_plot = 'data/environment/PAM_PreHarvest_Habitat_results_DD_WD_TM.xlsx'
+    
+    # Load and clean plot-level data
+    data_plot = list(
+      readxl::read_xlsx(path_data_plot, sheet = 2, skip = 1) %>% janitor::clean_names(),
+      readxl::read_xlsx(path_data_plot, sheet = 4, skip = 1) %>% janitor::clean_names(),
+      readxl::read_xlsx(path_data_plot, sheet = 5, skip = 1) %>% janitor::clean_names(),
+      readxl::read_xlsx(path_data_plot, sheet = 6, skip = 1) %>% janitor::clean_names()
+    ) %>%
+      reduce(full_join, by = c("station", "strata")) %>% rename(site = station, stratum = strata) %>%
+      mutate(tag = str_extract(site, "_.*$") %>% str_remove("^_"), site = str_remove(site, "_.*$")) %>% mutate(site = tolower(site))
+    
+    # Mark sites that were surveyed for habitat data in-person
+    intersect(pnts$site, data_plot$site)
+    length(intersect(pnts$site, data_plot$site))
+    setdiff(data_plot$site, pnts$site) # This should be 0
+    pnts$hs = FALSE
+    pnts[pnts$site %in% data_plot$site, 'hs'] = TRUE
+    mapview(pnts, zcol = 'hs')
+    
     # Basal area (all live trees) [m2/ha] TODO: confirm if this is a mean value at local plot level
     pnts = pnts %>% left_join(data_plot %>% select(site, plot_ba_hs = ba_ha_all), by = 'site')
     
@@ -320,47 +363,6 @@ if (overwrite_data_plot_scale_cache) {
       labs(title = "Tree species density by stage") +
       theme_minimal()
   }
-  
-  # Distance to roads
-  dist_road_paved = st_distance(pnts, paved_roads)
-  dist_road_paved = apply(dist_road_paved, 1, min)
-  pnts$dist_road_paved = dist_road_paved
-  # mapview(pnts, zcol = "dist_road_paved") + mapview(paved_roads)
-  
-  dist_road_all = st_distance(pnts, roads)
-  dist_road_all = apply(dist_road_all, 1, min)
-  pnts$dist_road_all = dist_road_all
-  # mapview(pnts, zcol = "dist_road_all") + mapview(roads, zcol = "road_usgs1")
-  
-  # Distance to water (type 1-3 and all types) [m]
-  dist_watercourse_major = st_distance(pnts, boundary_watercourses)
-  dist_watercourse_major = apply(dist_watercourse_major, 1, min)
-  pnts$dist_watercourse_major = dist_watercourse_major
-  # mapview(pnts, zcol = "dist_watercourse_major") + mapview(boundary_watercourses)
-  
-  dist_watercourse_all = st_distance(pnts, watercourses)
-  dist_watercourse_all = apply(dist_watercourse_all, 1, min)
-  pnts$dist_watercourse_all = dist_watercourse_all
-  # mapview(pnts, zcol = "dist_watercourse_all") + mapview(watercourses)
-  
-  # Distance to nearest edge [m]
-  # For each site, find its patch, then find the distance to the nearest non-patch cell
-  # hr_patch_ids = patches(rast_cover, directions=8, values=TRUE)
-  # pnts$dist_nearest_edge = NA
-  # for (i in 1:nrow(pnts)) {
-  #   d = pnts[i,]
-  #   cover_class = terra::extract(rast_cover, vect(d))[,2]
-  #   pid = terra::extract(hr_patch_ids, vect(d))[,2]
-  #   m = trim(classify(hr_patch_ids, cbind(pid, 1), others = NA))
-  #   na_cells = which(is.na(values(m)))
-  #   na_coords = xyFromCell(m, na_cells)
-  #   d_coords = st_coordinates(d)
-  #   distances = sqrt((na_coords[,1] - d_coords[1])^2 + (na_coords[,2] - d_coords[2])^2)
-  #   min_dist = min(distances)
-  #   pnts[i, 'dist_nearest_edge'] = min_dist
-    # mapview(d) + mapview(m) + mapview(st_buffer(d, 100), col.regions = 'transparent', lwd = 2)
-  # }
-  # mapview(rast_cover) + mapview(pnts, label = pnts$site, zcol = 'dist_nearest_edge') + mapview(st_buffer(pnts, 100), col.regions = 'transparent', lwd = 2)
 
   dir.create(dirname(path_data_plot_scale_out), recursive = TRUE, showWarnings = FALSE)
   saveRDS(pnts, path_data_plot_scale_out)

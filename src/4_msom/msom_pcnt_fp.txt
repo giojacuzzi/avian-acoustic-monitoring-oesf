@@ -1,6 +1,7 @@
+# Multi-species false positive occupancy model, following the Miller et al. (2011) "multiple detection state model" design.
+
 model {
 
-  ##############################################################################
   ## Community-level (group) hyperpriors
   
   for (g in 1:G) {
@@ -50,7 +51,7 @@ model {
     # Detection (unconfirmed true-positive)
     mu.v[g]    ~ dnorm(0, 1/2.25^2)
     sigma.v[g] ~ dt(0, 1/2.25^2, 1) T(0,)
-    tau.v[g] <- sigma.v[g]^-2
+    tau.v[g] <- 1 / pow(sigma.v[g], 2)
   
     # Covariate effects on detection (unconfirmed true-positive)
     mu.beta_point1[g]    ~ dnorm(0, 1/2.25^2)
@@ -59,24 +60,34 @@ model {
     sigma.beta_point1[g] ~ dt(0, 1/2.25^2, 1) T(0,)
     sigma.beta_point2[g] ~ dt(0, 1/2.25^2, 1) T(0,)
     sigma.beta_point3[g] ~ dt(0, 1/2.25^2, 1) T(0,)
-    tau.beta_point1[g]  <- sigma.beta_point1[g]^-2
-    tau.beta_point2[g]  <- sigma.beta_point2[g]^-2
-    tau.beta_point3[g]  <- sigma.beta_point3[g]^-2
+    tau.beta_point1[g]  <- 1 / pow(sigma.beta_point1[g], 2)
+    tau.beta_point2[g]  <- 1 / pow(sigma.beta_point2[g], 2)
+    tau.beta_point3[g]  <- 1 / pow(sigma.beta_point3[g], 2)
+    
+    mu.beta_point3_sq[g] ~ dnorm(0, 1/2.25^2)
+    sigma.beta_point3_sq[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.beta_point3_sq[g] <- 1 / pow(sigma.beta_point3_sq[g], 2)
     
     # False-positive unconfirmed detection (Royle and Link 2006, Miller et al. 2011)
-    mu.w[g]    ~ dnorm(0, 1/2.25^2)
+    mu.w[g]    ~ dnorm(-2.944, 1/1^2) # informative prior centered on logit(0.05) with scale 1
     sigma.w[g] ~ dt(0, 1/2.25^2, 1) T(0,)
-    tau.w[g] <- sigma.w[g]^-2
+    tau.w[g] <- 1 / pow(sigma.w[g], 2)
     
     # Confirmed true positive detection (Miller et al. 2011)
     mu.b[g]    ~ dnorm(0, 1/2.25^2)
     sigma.b[g] ~ dt(0, 1/2.25^2, 1) T(0,)
-    tau.b[g] <- sigma.b[g]^-2
+    tau.b[g] <- 1 / pow(sigma.b[g], 2)
+    
+    # TODO: account for species with all manually verified detections
+    # Marbled murrelet: all detections manually verified
+    # w[31] fixed to near-zero (false positives impossible after manual verification)
+    # b[31] fixed to near-one (all verified detections are certain)
+    #w[31]       <- -10  # logit scale: ilogit(-10) ~= 0
+    #b_logit[31] <- 10   # logit scale: ilogit(10)  ~= 1
+    #b[31]       <- ilogit(b_logit[31])
   }
   
-  ##############################################################################
   ## Species-level priors
-  
   for (i in 1:I) {
   
     # Stage-invariant covariates
@@ -101,6 +112,7 @@ model {
     beta_point1[i] ~ dnorm(mu.beta_point1[group[i]],tau.beta_point1[group[i]])
     beta_point2[i] ~ dnorm(mu.beta_point2[group[i]],tau.beta_point2[group[i]])
     beta_point3[i] ~ dnorm(mu.beta_point3[group[i]],tau.beta_point3[group[i]])
+    beta_point3_sq[i] ~ dnorm(mu.beta_point3_sq[group[i]],tau.beta_point3_sq[group[i]])
     
     # Unconfirmed false positive detection
     w[i] ~ dnorm(mu.w[group[i]],tau.w[group[i]])
@@ -108,6 +120,18 @@ model {
     # Confirmed true positive detection
     b_logit[i] ~ dnorm(mu.b[group[i]], tau.b[group[i]])
     b[i] <- ilogit(b_logit[i]) # probability scale
+  }
+  
+  ## Site-level priors
+  sigma.epsilon ~ dt(0, 1/2.25^2, 1) T(0,)
+  tau.epsilon   <- 1 / pow(sigma.epsilon, 2)
+  for (j in 1:J) {
+    epsilon[j] ~ dnorm(0, tau.epsilon) # Site-level random effect for false-positive detection
+  }
+  
+  ## Stage-level priors
+  for (s in 1:S) {
+    delta[s] ~ dnorm(0, 1/2.25^2) # fixed effect of stage
   }
   
   ##############################################################################
@@ -141,12 +165,14 @@ model {
   
           # p11 is true-positive detection probability given z = 1
           logit(p11[j,k,t,i]) <- v[i] +
+                                 delta[stage[j]] +
                                  beta_point1[i]*x_beta_point1[j,k,t] +
                                  beta_point2[i]*x_beta_point2[j,k,t] +
-                                 beta_point3[i]*x_beta_point3[j,k,t]
+                                 beta_point3[i]*x_beta_point3[j,k,t] +
+                                 beta_point3_sq[i]*pow(x_beta_point3[j,k,t], 2)
   
           # p10 is false-positive detection probability given z = 0
-          logit(p10[j,k,t,i]) <- w[i]
+          logit(p10[j,k,t,i]) <- w[i] + epsilon[j]
           
           # b is the certainty confirmation probability given z = 1 and the species was detected
           # (not a function of covariates)
@@ -165,6 +191,7 @@ model {
           y_sim[j,k,t,i] ~ dcat(pi[j,k,t,i, ])
 
           # Posterior predictive check (deviance)
+          # TODO: REMOVE FROM JAGS AND CALCULATE IN R FROM POSTERIOR
           p_obs_cat[j,k,t,i] <- equals(y[j,k,t,i],1) * pi[j,k,t,i,1] +
                                 equals(y[j,k,t,i],2) * pi[j,k,t,i,2] +
                                 equals(y[j,k,t,i],3) * pi[j,k,t,i,3]
@@ -186,9 +213,7 @@ model {
     } # Tseason seasons
   } # I species
   
-  ##############################################################################
   ## Derived quantities
-  
   # Deviance of simulated and observed data for posterior predictive check
   D_obs <- -2 * sum(d_obs[1:J,1:Kmax,1:Tseason,1:I])
   D_sim <- -2 * sum(d_sim[1:J,1:Kmax,1:Tseason,1:I])

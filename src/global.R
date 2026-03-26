@@ -36,6 +36,7 @@ if (!exists("pkgs", envir = .GlobalEnv)) {
     "FD",               # functional diversity
     "ade4",             # fourth-corner statistic
     "jagsUI",           # hierarchical bayesian MSOM
+    "MCMCvis",          # MCMC visual inspection
     "landscapemetrics", # landscape metrics
     "piecewiseSEM",     # structural equation modeling
     "PRROC",            # classifier performance evaluation
@@ -43,6 +44,7 @@ if (!exists("pkgs", envir = .GlobalEnv)) {
     "vegan",            # community ecology methods
     "indicspecies",     # indicator species
     # utility
+    "benchmarkme",      # runtime benchmarking
     "crayon",           # console warnings
     "progress"          # dynamic progress bar
   )
@@ -130,6 +132,21 @@ strata_5 = tibble(
   age_max = c(NA, 25, 80, 200, Inf),
   idx = 1:5
 ); print(strata_5)
+
+# WADNR landscape planning units
+wadnr_units = st_read("data/environment/GIS Data/WA_DNR_Units/WA_DNR_Units.shp", quiet = TRUE) %>%
+  janitor::clean_names() %>% st_transform(crs = crs_m) %>%
+  filter(jurisdic_2 %in% c("Willy - Huel", "Kalaloch", "Copper Mine", "Upper Clearwate", "Queets")) %>% # select units that were sampled
+  mutate(jurisdic_2 = ifelse(jurisdic_2 == "Upper Clearwate", "Upper Clearwater", jurisdic_2))
+
+wadnr_parcels = st_read("data/environment/GIS Data/WA_DNR_Managed_Land_Parcels/WA_DNR_Managed_Land_Parcels.shp", quiet = TRUE) %>%
+  janitor::clean_names() %>% st_transform(crs = crs_m)
+wadnr_parcels = st_filter(wadnr_parcels, st_union(wadnr_units)) # select parcels within units
+
+landscape_planning_units = st_intersection(wadnr_units, st_union(wadnr_parcels)) %>%
+  st_make_valid() %>% select(jurisdic_2) %>% rename(unit = jurisdic_2)
+landscape_planning_units_clean = st_buffer(landscape_planning_units, -30) |> st_buffer(30)
+# mapview(landscape_planning_units) + mapview(landscape_planning_units_clean)
 
 # Helper functions -----------------------------------------------------------------------------
 

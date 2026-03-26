@@ -49,8 +49,6 @@ strata = as.factor(site_key$stratum[ match(sites, site_key$site) ])
 
 species_traits = species_traits %>% filter(common_name %in% species)
 
-# Taxonomic and functional diversity -----------------------------------------------------------------
-
 z = msom$sims.list$z # Simplify posterior occurrence site x species matrix as the most probable occupancy state across all draws and seasons
 z_binary = apply(z, c(2, 4), function(x) {
   ifelse(mean(x) >= 0.5, 1, 0)
@@ -59,224 +57,11 @@ dim(z_binary)
 rownames(z_binary) = sites
 colnames(z_binary) = species
 
-## Taxonomic diversity (species richness)
-
-richness_per_site = rowSums(z_binary)
-site_richness_strata = data.frame(
-  site = names(richness_per_site),       # site IDs
-  richness = as.numeric(richness_per_site),  # richness values
-  strata = strata                        # stratum factor/vector
-)
-site_richness_strata$strata = factor(
-  site_richness_strata$strata, levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE")
-)
-
-ggplot(site_richness_strata %>% left_join(homerange_data[["median"]], by = "site") %>% left_join(plot_data, by = "site"), aes(x = age_mean, y = richness)) + geom_point() + geom_smooth()
-ggplot(site_richness_strata %>% left_join(homerange_data[["median"]], by = "site") %>% left_join(plot_data, by = "site") %>% filter(age_mean < 25), aes(x = age_mean, y = richness)) + geom_point() + geom_smooth()
-
-# ANOVA for overall richness among stages
-model = aov(richness ~ strata, data = site_richness_strata)
-summary(model) # If significant, between-stage variance is larger than within-stage variance
-qqnorm(residuals(model))
-qqline(residuals(model)) # Generally meets assumption of residual normality
-# Tukey pairwise test
-TukeyHSD(model) # Pairwise comparisons are significantly different
-
-site_richness_strata %>% group_by(strata) %>%
-  summarize(
-    mean_richness = mean(richness),
-    sd_richness = sd(richness),
-    max_richness = max(richness),
-    min_richness = min(richness),
-    n_sites = n()
-  )
-
-p_SR = ggplot(site_richness_strata, aes(x = strata, y = richness, fill = strata)) +
-  geom_boxplot() +
-  scale_fill_manual(values = strata_cols) +
-  labs(subtitle = "Taxonomic richness") +
-  theme(legend.position = "bottom"); print(p_SR)
-
-## Functional diversity (functional dispersion)
-
-# Select traits
-trait_matrix = species_traits %>% as.data.frame() %>% select(group_nest_ps, group_forage_substrate, group_diet, group_migrant, mass)
-rownames(trait_matrix) = species_traits$common_name
-
-# Subset species to those with at least one occurrence
-species_totals = colSums(z_binary)
-present_species = names(species_totals[species_totals > 0])
-community_matrix = z_binary[, present_species]
-trait_matrix = trait_matrix[present_species, ] %>% mutate(across(where(is.character), as.factor))
-
-# Compute functional diversity using FD
-# "FDis is the mean distance in multidimensional trait space of individual species to the centroid of all species...
-# [it] is the mulutivariate analogue of the weighted mean absolute deviation; this makes [it] unaffected by species
-# richness by construction... 
-# Functional dispersion (FDis; Laliberté and Legendre 2010) is computed from the uncorrected species-species
-# distance matrix via fdisp. Axes with negatives eigenvalues are corrected following the approach of Anderson (2006).
-# When all species have equal abundances (i.e. presence-absence data), FDis is simply the average distance to the
-# centroid (i.e. multivariate dispersion) as originally described by Anderson (2006)...
-# For unweighted presence-absence data, FDis can be used for a formal statistical test of differences in FD."
-FDis = fdisp(gowdis(trait_matrix), community_matrix)
-FDis = stack(FDis$FDis)
-colnames(FDis) = c("FDis", "site")
-FDis$strata = strata
-FDis %>% group_by(strata) %>%
-  summarise(
-    mean = mean(FDis),
-    sd = sd(FDis),
-    n_sites = n()
-  )
-
-fd_results = dbFD(
-  x = trait_matrix, a = community_matrix, corr = "sqrt" # "PCoA axes corresponding to negative eigenvalues are imaginary axes that cannot be represented in a Euclidean space, but simply ignoring these axes would lead to biased estimations of FD. Hence in dbFD one of four correction methods are used."
-)
-fd_df = data.frame(
-  site = rownames(community_matrix),
-  strata = strata,
-  FRic = fd_results$FRic,
-  FEve = fd_results$FEve, # 
-  FDis = fd_results$FDis, # Mean distance of species to community centroid
-  FDiv = fd_results$FDiv  # 
-)
-fd_df %>% group_by(strata) %>% summarise(mean = mean(FDis), sd = sd(FDis), n_sites = n())
-
-fd_long = fd_df %>%
-  pivot_longer(cols = c(FRic, FDis, FEve, FDiv), names_to = "metric", values_to = "value") %>%
-  mutate(strata = factor(strata, levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE")))
-
-p_FD = ggplot(fd_long, aes(strata, value, fill = strata)) +
-  geom_boxplot(alpha = 0.7) +
-  facet_wrap(~metric, scales = "free_y") +
-  scale_fill_manual(values = strata_cols) +
-  theme(legend.position = "none"); print(p_FD)
-
-ggplot(site_richness_strata %>% left_join(FDis, by = "site") %>% left_join(plot_data, by = "site"), aes(x = age_mean, y = FDis)) + geom_point() + geom_smooth()
-
-# ANOVA for overall functional dispersion among stages
-model = aov(FDis ~ strata, data = FDis)
-summary(model) # If significant, between-stage variance is larger than within-stage variance
-qqnorm(residuals(model))
-qqline(residuals(model)) # Generally meets assumption of residual normality
-kruskal.test(FDis ~ strata, data = FDis) # Double-check with Kruskal for non-normal data
-# Tukey pairwise test
-TukeyHSD(model) # All pairwise comparisons except COMP EXCL-THINNED are significantly different
-
-## Fourth-corner analysis
-#
-# The fourth-corner method measures and test relationships between
-# species functional traits and environmental variables.
-#
-# Q: Do overal trait distributions differ among stages?
-# Null: Distribution of nesting strategies is the same across all stages.
-R = data.frame(strata = strata)
-L = as.data.frame(community_matrix)
-Q = as.data.frame(trait_matrix)
-Q$group_forage_substrate = factor(Q$group_forage_substrate)
-Q$group_migrant = factor(Q$group_migrant)
-Q$group_nest_ps = factor(Q$group_nest_ps)
-Q$group_diet = factor(Q$group_diet)
-fourth = fourthcorner(R, L, Q, nrepet = 9999)
-summary(fourth) # Nesting strategy overall differs among strata
-
-# Which nesting strategies are associated with which stages?
-# Q: Are particular nesting strategies overrepresented in a stage compared to all other stages?
-dat_long = L %>% mutate(site = rownames(L), strata = R$strata) %>% pivot_longer(cols = -c(site, strata), names_to = "species", values_to = "occ") %>% filter(occ > 0)  # keep only present species
-nest_df = data.frame(species = rownames(Q), group = Q$group_nest_ps)
-dat_long = dat_long %>% left_join(nest_df, by = "species")
-tab = table(dat_long$strata, dat_long$group)
-results = list()
-for (nest_type in colnames(tab)) {
-  for (strata_level in rownames(tab)) {
-    # counts in this strata
-    a = tab[strata_level, nest_type]
-    b = sum(tab[strata_level, ]) - a
-    # counts in all other strata
-    other_rows = setdiff(rownames(tab), strata_level)
-    c = sum(tab[other_rows, nest_type])
-    d = sum(tab[other_rows, ]) - c
-    # Fisher's exact test for (overrepresented) count data
-    mat = matrix(c(a, b, c, d), nrow = 2, byrow = TRUE)
-    p = fisher.test(mat, alternative = "greater")$p.value
-    results = rbind(results, data.frame(
-      strata = strata_level, nest_type = nest_type, p_value = p
-    ))
-  }
-}
-results$p_adj = p.adjust(results$p_value, method = "holm") # Adjust for multiple testing
-(overrep_nest = results %>% filter(p_adj < 0.05))
-
-# Which foraging strategies are associated with which stages?
-dat_long = L %>% mutate(site = rownames(L), strata = R$strata) %>% pivot_longer(cols = -c(site, strata), names_to = "species", values_to = "occ") %>% filter(occ > 0)  # keep only present species
-forage_df = data.frame(species = rownames(Q), group = Q$group_forage_substrate)
-dat_long = dat_long %>% left_join(forage_df, by = "species")
-tab = table(dat_long$strata, dat_long$group)
-results = list()
-for (t in colnames(tab)) {
-  for (strata_level in rownames(tab)) {
-    # counts in this strata
-    a = tab[strata_level, t]
-    b = sum(tab[strata_level, ]) - a
-    # counts in all other strata
-    other_rows = setdiff(rownames(tab), strata_level)
-    c = sum(tab[other_rows, t])
-    d = sum(tab[other_rows, ]) - c
-    # Fisher's exact test for (overrepresented) count data
-    mat = matrix(c(a, b, c, d), nrow = 2, byrow = TRUE)
-    p = fisher.test(mat, alternative = "greater")$p.value
-    results = rbind(results, data.frame(
-      strata = strata_level, t = t, p_value = p
-    ))
-  }
-}
-results$p_adj = p.adjust(results$p_value, method = "holm") # Adjust for multiple testing
-(overrep_forage = results %>% filter(p_adj < 0.05))
-
-# Functional composition, as measured by the community-level weighted means of trait values,
-# which for continuous trais is the mean trait value of all species present in the community,
-# and for categorical traits the abundance of each individual class, i.e. the proportion.
-cwms = functcomp(trait_matrix, community_matrix, CWM.type = "all")  # default
-cwm_df = data.frame(cwms, strata = strata)
-cwm_df$strata = factor(cwm_df$strata, levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE"))
-
-cwm_nest_ps = cwm_df %>%
-  select(starts_with("group_nest_ps"), strata) %>%
-  pivot_longer(cols = -strata, names_to = "type", values_to = "proportion") %>%
-  mutate(type = str_remove(type, "^group_nest_ps_"),
-         type = str_replace_all(type, "\\.", " "),
-         type = str_to_sentence(type))
-p_nest = ggplot(cwm_nest_ps, aes(x = strata, y = proportion, fill = fct_rev(type))) +
-  geom_bar(stat = "identity", position = "fill") +
-  scale_fill_brewer(palette = "Set2") +
-  scale_y_continuous(labels = scales::percent_format()) + labs(fill = "Nesting strategy"); p_nest
-
-cwm_forage_substrate = cwm_df %>%
-  select(starts_with("group_forage_substrate"), strata) %>%
-  pivot_longer(cols = -strata, names_to = "type", values_to = "proportion") %>%
-  mutate(type = str_remove(type, "^group_forage_substrate_"),
-         type = str_replace_all(type, "\\.", " "),
-         type = str_to_sentence(type))
-p_forage = ggplot(cwm_forage_substrate, aes(x = strata, y = proportion, fill = type)) +
-  geom_bar(stat = "identity", position = "fill") +
-  scale_fill_brewer(palette = "Set3") +
-  scale_y_continuous(labels = scales::percent_format()) + labs(fill = "Foraging strategy"); p_forage
-
-ggplot(cwm_df, aes(x = strata, y = mass, fill = strata)) +
-  geom_boxplot() + scale_fill_manual(values = strata_cols)
-
-cwm_migrant = cwm_df %>%
-  select(starts_with("group_migrant"), strata) %>%
-  pivot_longer(cols = -strata, names_to = "type", values_to = "proportion")
-ggplot(cwm_migrant, aes(x = strata, y = proportion, fill = type)) +
-  geom_bar(stat = "identity", position = "fill") +
-  scale_y_continuous(labels = scales::percent_format())
-
-# TODO: Explore relationship between species rarity (baseline occupancy) and stage
+stop("DEBUGGY")
 
 # Composition PERMANOVA and NMDS ---------------------------------------------------------------------
 
-## Test for significant differences in (expected) community composition of different stages
+## Test for significant differences in (expected) taxonomic community composition of different stages
 
 # Get posterior mean occurrence probability site x species matrix across all posterior draws and seasons
 str(z)
@@ -421,6 +206,368 @@ print(between_turnover_summary)
 # nestedness (stand init includes several overlapping species) and turnover (novel early colonizers?)?
 # https://www.sciencedirect.com/science/article/pii/S0378112711005779
 between_turnover %>% arrange(desc(mean_diss))
+
+
+
+# Taxonomic and functional diversity -----------------------------------------------------------------
+
+## TODO: Test for significant differences in (expected) functional community composition of different stages
+
+# Create species-by-traits matrix
+trait_matrix = species_traits %>% as.data.frame() %>%
+  select(group_nest_ps,
+         group_forage_substrate,
+         group_diet,
+         group_migrant,
+         mass)
+rownames(trait_matrix) = species_traits$common_name
+# TODO: Subset species to those with at least one occurrence?
+
+all(rownames(trait_matrix) == colnames(psi_mean))  # must be TRUE
+
+# --- Step 1: Gower distance between species in trait space ---
+gower_dist = gowdis(trait_matrix)
+
+# --- Step 2: PCoA with Cailliez correction for negative eigenvalues ---
+pcoa_traits = cmdscale(gower_dist, k = nrow(as.matrix(gower_dist)) - 1,
+                       eig = TRUE, add = TRUE)
+
+explained = pcoa_traits$eig / sum(pcoa_traits$eig[pcoa_traits$eig > 0])
+n_axes    = which(cumsum(explained) >= 0.90)[1]
+sp_coords = pcoa_traits$points[, 1:n_axes]
+
+# --- Step 3: Occupancy-weighted site scores & functional distance ---
+site_func_scores = psi_mean %*% sp_coords
+func_dist        = dist(site_func_scores, method = "euclidean")
+
+# --- Step 4: Global PERMANOVA ---
+permanova_func = adonis2(func_dist ~ strata, permutations = 999)
+print(permanova_func)
+
+# --- Step 5: Pairwise PERMANOVA ---
+strata_levels = unique(strata)
+combs         = combn(strata_levels, 2, simplify = FALSE)
+
+pairwise_permanova_func = tibble()
+for (pair in combs) {
+  i           = strata %in% pair
+  d_pair      = as.dist(as.matrix(func_dist)[i, i])
+  strata_pair = strata[i]
+  res         = adonis2(d_pair ~ strata_pair, permutations = 999)
+  pairwise_permanova_func = rbind(pairwise_permanova_func, tibble(
+    stratum_1 = pair[1],
+    stratum_2 = pair[2],
+    R2        = res$R2[1],
+    F         = res$F[1],
+    p.val     = res$`Pr(>F)`[1]
+  ))
+}
+print(pairwise_permanova_func %>% arrange(R2))
+
+# Taxonomic PCA
+pca_tax = prcomp(psi_mean, scale. = FALSE)
+pca_tax_df = as_tibble(pca_tax$x[, 1:2]) %>%
+  mutate(strata = strata)
+
+fig_pca_taxonomic = ggplot(pca_tax_df, aes(x = PC1, y = PC2, color = strata)) +
+  geom_point(size = 2, alpha = 0.7) +
+  stat_ellipse(level = 0.95) +
+  scale_color_manual(values = strata_cols) +
+  labs(title = "Taxonomic community composition", color = "Stage") +
+  theme_bw(); print(fig_pca_taxonomic)
+
+# Functional PCA
+pca_func = prcomp(site_func_scores, scale. = FALSE)
+pca_func_df = as_tibble(pca_func$x[, 1:2]) %>%
+  mutate(strata = strata)
+
+fig_pca_functional = ggplot(pca_func_df, aes(x = PC1, y = PC2, color = strata)) +
+  geom_point(size = 2, alpha = 0.7) +
+  stat_ellipse(level = 0.95) +
+  scale_color_manual(values = strata_cols) +
+  labs(title = "Functional community composition", color = "Stage") +
+  theme_bw(); print(fig_pca_functional)
+
+summary(pca_tax)$importance[, 1:5]
+summary(pca_func)$importance[, 1:5]
+
+fig_pca_taxonomic + theme(legend.position = "bottom") +
+  fig_pca_functional + theme(legend.position = "none")
+
+# Taxonomic NMDS
+bray_dist = vegdist(psi_mean, method = "bray")
+nmds_tax = metaMDS(bray_dist, k = 2, trymax = 100)
+nmds_tax$stress
+
+nmds_tax_df = as_tibble(scores(nmds_tax, display = "sites")) %>%
+  mutate(strata = strata)
+
+ggplot(nmds_tax_df, aes(x = NMDS1, y = NMDS2, color = strata)) +
+  geom_point(size = 2, alpha = 0.7) +
+  stat_ellipse(level = 0.95) +
+  labs(title = "NMDS: Taxonomic Community Composition",
+       color = "Stratum") +
+  annotate("text", x = Inf, y = -Inf,
+           label = paste("Stress =", round(nmds_tax$stress, 3)),
+           hjust = 1.1, vjust = -0.5, size = 3.5) +
+  theme_bw()
+
+# Functional NMDS
+nmds_func = metaMDS(func_dist, k = 2, trymax = 100)
+nmds_func$stress
+
+nmds_func_df = as_tibble(scores(nmds_func, display = "sites")) %>%
+  mutate(strata = strata)
+
+ggplot(nmds_func_df, aes(x = NMDS1, y = NMDS2, color = strata)) +
+  geom_point(size = 2, alpha = 0.7) +
+  stat_ellipse(level = 0.95) +
+  labs(title = "NMDS: Functional Community Composition",
+       color = "Stratum") +
+  annotate("text", x = Inf, y = -Inf,
+           label = paste("Stress =", round(nmds_func$stress, 3)),
+           hjust = 1.1, vjust = -0.5, size = 3.5) +
+  theme_bw()
+
+# Taxonomic ANOSIM
+anosim_tax = anosim(bray_dist, strata, permutations = 999)
+summary(anosim_tax)
+
+# Functional ANOSIM
+anosim_func = anosim(func_dist, strata, permutations = 999)
+summary(anosim_func)
+
+## Taxonomic diversity (species richness) ----------------------------------------------------
+
+richness_per_site = rowSums(psi_mean)
+site_richness_strata = data.frame(
+  site = names(richness_per_site),       # site IDs
+  richness = as.numeric(richness_per_site),  # richness values
+  strata = strata                        # stratum factor/vector
+)
+site_richness_strata$strata = factor(
+  site_richness_strata$strata, levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE")
+)
+
+ggplot(site_richness_strata %>% left_join(homerange_data[["median"]], by = "site") %>% left_join(plot_data, by = "site"), aes(x = age_mean, y = richness)) + geom_point() + geom_smooth()
+ggplot(site_richness_strata %>% left_join(homerange_data[["median"]], by = "site") %>% left_join(plot_data, by = "site") %>% filter(age_mean < 25), aes(x = age_mean, y = richness)) + geom_point() + geom_smooth()
+
+# ANOVA for overall richness among stages
+model = aov(richness ~ strata, data = site_richness_strata)
+summary(model) # If significant, between-stage variance is larger than within-stage variance
+qqnorm(residuals(model))
+qqline(residuals(model)) # Generally meets assumption of residual normality
+# Tukey pairwise test
+TukeyHSD(model) # Pairwise comparisons are significantly different
+
+site_richness_strata %>% group_by(strata) %>%
+  summarize(
+    mean_richness = mean(richness),
+    sd_richness = sd(richness),
+    max_richness = max(richness),
+    min_richness = min(richness),
+    n_sites = n()
+  )
+
+p_SR = ggplot(site_richness_strata, aes(x = strata, y = richness, fill = strata)) +
+  geom_boxplot() +
+  scale_fill_manual(values = strata_cols) +
+  labs(subtitle = "Taxonomic richness") +
+  theme(legend.position = "bottom"); print(p_SR)
+
+## Functional diversity (functional dispersion)
+
+# Subset species to those with at least one occurrence
+species_totals = colSums(z_binary)
+present_species = names(species_totals[species_totals > 0])
+community_matrix = z_binary[, present_species]
+trait_matrix = trait_matrix[present_species, ] %>% mutate(across(where(is.character), as.factor))
+
+# Compute functional diversity using FD
+# "FDis is the mean distance in multidimensional trait space of individual species to the centroid of all species...
+# [it] is the mulutivariate analogue of the weighted mean absolute deviation; this makes [it] unaffected by species
+# richness by construction... 
+# Functional dispersion (FDis; Laliberté and Legendre 2010) is computed from the uncorrected species-species
+# distance matrix via fdisp. Axes with negatives eigenvalues are corrected following the approach of Anderson (2006).
+# When all species have equal abundances (i.e. presence-absence data), FDis is simply the average distance to the
+# centroid (i.e. multivariate dispersion) as originally described by Anderson (2006)...
+# For unweighted presence-absence data, FDis can be used for a formal statistical test of differences in FD."
+FDis = fdisp(gowdis(trait_matrix), community_matrix)
+FDis = stack(FDis$FDis)
+colnames(FDis) = c("FDis", "site")
+FDis$strata = strata
+FDis %>% group_by(strata) %>%
+  summarise(
+    mean = mean(FDis),
+    sd = sd(FDis),
+    n_sites = n()
+  )
+
+fd_results = dbFD(
+  x = trait_matrix, a = community_matrix, corr = "sqrt" # "PCoA axes corresponding to negative eigenvalues are imaginary axes that cannot be represented in a Euclidean space, but simply ignoring these axes would lead to biased estimations of FD. Hence in dbFD one of four correction methods are used."
+)
+fd_df = data.frame(
+  site = rownames(community_matrix),
+  strata = strata,
+  FRic = fd_results$FRic,
+  FEve = fd_results$FEve, # 
+  FDis = fd_results$FDis, # Mean distance of species to community centroid
+  FDiv = fd_results$FDiv  # 
+)
+fd_df %>% group_by(strata) %>% summarise(mean = mean(FDis), sd = sd(FDis), n_sites = n())
+
+fd_long = fd_df %>%
+  pivot_longer(cols = c(FRic, FDis, FEve, FDiv), names_to = "metric", values_to = "value") %>%
+  mutate(strata = factor(strata, levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE")))
+
+p_FD = ggplot(fd_long, aes(strata, value, fill = strata)) +
+  geom_boxplot(alpha = 0.7) +
+  facet_wrap(~metric, scales = "free_y") +
+  scale_fill_manual(values = strata_cols) +
+  theme(legend.position = "none"); print(p_FD)
+
+p_FDis = ggplot(fd_long %>% filter(metric == "FDis"), aes(strata, value, fill = strata)) +
+  geom_boxplot() +
+  scale_fill_manual(values = strata_cols) +
+  labs(x = "", y = "Functional dispersion") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none"
+  ); print(p_FDis)
+p_SR = ggplot(site_richness_strata, aes(x = strata, y = richness, fill = strata)) +
+  geom_boxplot() +
+  scale_fill_manual(values = strata_cols) +
+  labs(x = "", y = "Taxonomic richness") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "bottom"
+  ); print(p_SR)
+
+p_SR + p_FDis
+
+ggplot(site_richness_strata %>% left_join(FDis, by = "site") %>% left_join(plot_data, by = "site"), aes(x = age_mean, y = FDis)) + geom_point() + geom_smooth()
+
+# ANOVA for overall functional dispersion among stages
+model = aov(FDis ~ strata, data = FDis)
+summary(model) # If significant, between-stage variance is larger than within-stage variance
+qqnorm(residuals(model))
+qqline(residuals(model)) # Generally meets assumption of residual normality
+kruskal.test(FDis ~ strata, data = FDis) # Double-check with Kruskal for non-normal data
+# Tukey pairwise test
+TukeyHSD(model) # All pairwise comparisons except COMP EXCL-THINNED are significantly different
+
+## Fourth-corner analysis
+#
+# The fourth-corner method measures and test relationships between
+# species functional traits and environmental variables.
+#
+# Q: Do overal trait distributions differ among stages?
+# Null: Distribution of nesting strategies is the same across all stages.
+R = data.frame(strata = strata)
+L = as.data.frame(community_matrix)
+Q = as.data.frame(trait_matrix)
+Q$group_forage_substrate = factor(Q$group_forage_substrate)
+Q$group_migrant = factor(Q$group_migrant)
+Q$group_nest_ps = factor(Q$group_nest_ps)
+Q$group_diet = factor(Q$group_diet)
+fourth = fourthcorner(R, L, Q, nrepet = 9999)
+summary(fourth) # Nesting strategy overall differs among strata
+
+# Which nesting strategies are associated with which stages?
+# Q: Are particular nesting strategies overrepresented in a stage compared to all other stages?
+dat_long = L %>% mutate(site = rownames(L), strata = R$strata) %>% pivot_longer(cols = -c(site, strata), names_to = "species", values_to = "occ") %>% filter(occ > 0)  # keep only present species
+nest_df = data.frame(species = rownames(Q), group = Q$group_nest_ps)
+dat_long = dat_long %>% left_join(nest_df, by = "species")
+tab = table(dat_long$strata, dat_long$group)
+results = list()
+for (nest_type in colnames(tab)) {
+  for (strata_level in rownames(tab)) {
+    # counts in this strata
+    a = tab[strata_level, nest_type]
+    b = sum(tab[strata_level, ]) - a
+    # counts in all other strata
+    other_rows = setdiff(rownames(tab), strata_level)
+    c = sum(tab[other_rows, nest_type])
+    d = sum(tab[other_rows, ]) - c
+    # Fisher's exact test for (overrepresented) count data
+    mat = matrix(c(a, b, c, d), nrow = 2, byrow = TRUE)
+    p = fisher.test(mat, alternative = "greater")$p.value
+    results = rbind(results, data.frame(
+      strata = strata_level, nest_type = nest_type, p_value = p
+    ))
+  }
+}
+results$p_adj = p.adjust(results$p_value, method = "holm") # Adjust for multiple testing
+(overrep_nest = results %>% filter(p_adj < 0.05))
+
+# Which foraging strategies are associated with which stages?
+dat_long = L %>% mutate(site = rownames(L), strata = R$strata) %>% pivot_longer(cols = -c(site, strata), names_to = "species", values_to = "occ") %>% filter(occ > 0)  # keep only present species
+forage_df = data.frame(species = rownames(Q), group = Q$group_forage_substrate)
+dat_long = dat_long %>% left_join(forage_df, by = "species")
+tab = table(dat_long$strata, dat_long$group)
+results = list()
+for (t in colnames(tab)) {
+  for (strata_level in rownames(tab)) {
+    # counts in this strata
+    a = tab[strata_level, t]
+    b = sum(tab[strata_level, ]) - a
+    # counts in all other strata
+    other_rows = setdiff(rownames(tab), strata_level)
+    c = sum(tab[other_rows, t])
+    d = sum(tab[other_rows, ]) - c
+    # Fisher's exact test for (overrepresented) count data
+    mat = matrix(c(a, b, c, d), nrow = 2, byrow = TRUE)
+    p = fisher.test(mat, alternative = "greater")$p.value
+    results = rbind(results, data.frame(
+      strata = strata_level, t = t, p_value = p
+    ))
+  }
+}
+results$p_adj = p.adjust(results$p_value, method = "holm") # Adjust for multiple testing
+(overrep_forage = results %>% filter(p_adj < 0.05))
+
+# Functional composition, as measured by the community-level weighted means of trait values,
+# which for continuous trais is the mean trait value of all species present in the community,
+# and for categorical traits the abundance of each individual class, i.e. the proportion.
+cwms = functcomp(trait_matrix, community_matrix, CWM.type = "all")  # default
+cwm_df = data.frame(cwms, strata = strata)
+cwm_df$strata = factor(cwm_df$strata, levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE"))
+
+cwm_nest_ps = cwm_df %>%
+  select(starts_with("group_nest_ps"), strata) %>%
+  pivot_longer(cols = -strata, names_to = "type", values_to = "proportion") %>%
+  mutate(type = str_remove(type, "^group_nest_ps_"),
+         type = str_replace_all(type, "\\.", " "),
+         type = str_to_sentence(type))
+p_nest = ggplot(cwm_nest_ps, aes(x = strata, y = proportion, fill = fct_rev(type))) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_brewer(palette = "Set2") +
+  scale_y_continuous(labels = scales::percent_format()) + labs(fill = "Nesting strategy"); p_nest
+
+cwm_forage_substrate = cwm_df %>%
+  select(starts_with("group_forage_substrate"), strata) %>%
+  pivot_longer(cols = -strata, names_to = "type", values_to = "proportion") %>%
+  mutate(type = str_remove(type, "^group_forage_substrate_"),
+         type = str_replace_all(type, "\\.", " "),
+         type = str_to_sentence(type))
+p_forage = ggplot(cwm_forage_substrate, aes(x = strata, y = proportion, fill = type)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_brewer(palette = "Set3") +
+  scale_y_continuous(labels = scales::percent_format()) + labs(fill = "Foraging strategy"); p_forage
+
+ggplot(cwm_df, aes(x = strata, y = mass, fill = strata)) +
+  geom_boxplot() + scale_fill_manual(values = strata_cols)
+
+cwm_migrant = cwm_df %>%
+  select(starts_with("group_migrant"), strata) %>%
+  pivot_longer(cols = -strata, names_to = "type", values_to = "proportion")
+ggplot(cwm_migrant, aes(x = strata, y = proportion, fill = type)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_y_continuous(labels = scales::percent_format())
+
+# TODO: Explore relationship between species rarity (baseline occupancy) and stage
 
 # Indicator species analysis -----------------------------------------------
 # https://cran.r-project.org/web/packages/indicspecies/vignettes/IndicatorSpeciesAnalysis.html

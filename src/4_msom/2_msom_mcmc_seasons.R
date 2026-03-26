@@ -34,9 +34,9 @@ param_alpha_homerange_names = c(
   # "shape_idx"        # ~ various pcnt covers depending on scale
 )
 param_beta_point_names = c(
-  "yday",
   "prcp_mm_day",
-  "tmax_deg_c"
+  "tmax_deg_c",
+  "yday"
 )
 #
 ## OUTPUT:
@@ -61,7 +61,7 @@ if (model_type == "nofp") {
 }
 
 model_name = tools::file_path_sans_ext(basename(model_file))
-path_out = paste0(dir_out, "/V3_", model_name, "_", model_type, "_", grouping, ".rds")
+path_out = paste0(dir_out, "/V4_", model_name, "_", model_type, "_", grouping, ".rds")
 if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
 
 # Load dependencies ----------------------------------------------------------------------------
@@ -435,18 +435,25 @@ init_vals = list(z = z)
 if (model_type == "fp") {
   # informative priors necessary to avoid invalid PPC log(0) values
   init_vals[["v"]] = rep(logit(0.70), length(species))
-  init_vals[["w"]] = rep(logit(0.05), length(species))
+  init_vals[["w"]] = rep(logit(0.05), length(species)) # NOTE: Ubiquitous species may have identifiability problems (wide `w` BCI) because there is very little z=0 data to inform w.
 }
 
 # Monitor parameter values
 params_to_monitor = c(
+  # Occupancy
   "mu.u", "sigma.u", "u",
-  "mu.alpha_season", "sigma.alpha_season", "alpha_season",
   paste0("mu.alpha_point",     1:n_alpha_point_params),     paste0("sigma.alpha_point", 1:n_alpha_point_params),        paste0("alpha_point", 1:n_alpha_point_params),
   paste0("mu.alpha_plot",      1:n_alpha_plot_params),      paste0("sigma.alpha_plot", 1:n_alpha_plot_params),          paste0("alpha_plot", 1:n_alpha_plot_params),
   paste0("mu.alpha_homerange", 1:n_alpha_homerange_params), paste0("sigma.alpha_homerange", 1:n_alpha_homerange_params), paste0("alpha_homerange", 1:n_alpha_homerange_params),
+  "mu.alpha_season", "sigma.alpha_season", "alpha_season",
+  # True positive detection
   "mu.v", "sigma.v", "v",
+  "delta",
   paste0("mu.beta_point",      1:n_beta_point_params),      paste0("sigma.beta_point",  1:n_beta_point_params),         paste0("beta_point",  1:n_beta_point_params),
+  "mu.beta_point3_sq", "sigma.beta_point3_sq", "beta_point3_sq",
+  # False positive detection
+  "epsilon", "sigma.epsilon",
+  # Others
   "D_obs", "D_sim", "z"
 )
 if (model_type == "fp") {
@@ -511,6 +518,11 @@ if (nrow(suspected_nonconvergence) > 1) {
 }
 
 ## Posterior predictive check - Bernoulli deviance contribution (Broms et al. 2016)
+
+# Sanity check: confirm no Inf or NA values in observed or simulated data
+summary(msom$sims.list$D_obs)
+summary(msom$sims.list$D_sim)
+
 # "If the observed data are consistent with the model in question, then the Bayesian p-value should be close to 0.5. In practice, a p-value close to 0 or 1 indicates that the model is inadequate in some way -- close to 0 suggests a lack of fit and close to 1 suggests that the model over-fits the data, which may occur when it is too complex... A Bayesian p-value is calculated as the proportion of times the selected summary statistic calculated for the generated data is greater than the value calculated from the observed data" (MacKenzie et al. 2018)
 # Is the overall likelihood of the observed detection histories under the fitted model about the same as the likelihood of new data generated from that model?
 # This Bayesian p-value is the probability (proportion of iterations) that the simulated deviance is greater than the observed deviance.

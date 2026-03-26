@@ -49,9 +49,11 @@ model {
     tau.alpha_homerange3[g] <- 1 / pow(sigma.alpha_homerange3[g], 2)
 
     # Detection (unconfirmed true-positive)
-    mu.v[g]    ~ dnorm(0, 1/2.25^2)
-    sigma.v[g] ~ dt(0, 1/2.25^2, 1) T(0,)
-    tau.v[g] <- 1 / pow(sigma.v[g], 2)
+    for (s in 1:S) {
+      mu.v[s,g]    ~ dnorm(0, 1/2.25^2)
+      sigma.v[s,g] ~ dt(0, 1/2.25^2, 1) T(0,)
+      tau.v[s,g]   <- 1 / pow(sigma.v[s,g], 2)
+    }
   
     # Covariate effects on detection (unconfirmed true-positive)
     mu.beta_point1[g]    ~ dnorm(0, 1/2.25^2)
@@ -100,15 +102,15 @@ model {
     alpha_homerange3[i] ~ dnorm(mu.alpha_homerange3[group[i]],tau.alpha_homerange3[group[i]])
     alpha_season[i] ~ dnorm(mu.alpha_season[group[i]],tau.alpha_season[group[i]])
     
-    # Stage-specific covariates
+    # Stage- and species-specific covariates
     for (s in 1:S) {
       alpha_plot1[s,i] ~ dnorm(mu.alpha_plot1[s,group[i]], tau.alpha_plot1[s,group[i]])
       alpha_plot2[s,i] ~ dnorm(mu.alpha_plot2[s,group[i]], tau.alpha_plot2[s,group[i]])
       alpha_plot3[s,i] ~ dnorm(mu.alpha_plot3[s,group[i]], tau.alpha_plot3[s,group[i]])
+      v[s,i]           ~ dnorm(mu.v[s,group[i]], tau.v[s,group[i]])
     }
 
     # Unconfirmed true positive detection
-    v[i]           ~ dnorm(mu.v[group[i]], tau.v[group[i]])
     beta_point1[i] ~ dnorm(mu.beta_point1[group[i]],tau.beta_point1[group[i]])
     beta_point2[i] ~ dnorm(mu.beta_point2[group[i]],tau.beta_point2[group[i]])
     beta_point3[i] ~ dnorm(mu.beta_point3[group[i]],tau.beta_point3[group[i]])
@@ -127,11 +129,6 @@ model {
   tau.epsilon   <- 1 / pow(sigma.epsilon, 2)
   for (j in 1:J) {
     epsilon[j] ~ dnorm(0, tau.epsilon) # Site-level random effect for false-positive detection
-  }
-  
-  ## Stage-level priors
-  for (s in 1:S) {
-    delta[s] ~ dnorm(0, 1/2.25^2) # fixed effect of stage
   }
   
   ##############################################################################
@@ -164,8 +161,7 @@ model {
           # States: 1 = nondetection, 2 = uncertain detection, 3 = certain detection
   
           # p11 is true-positive detection probability given z = 1
-          logit(p11[j,k,t,i]) <- v[i] +
-                                 delta[stage[j]] +
+          logit(p11[j,k,t,i]) <- v[stage[j],i] +
                                  beta_point1[i]*x_beta_point1[j,k,t] +
                                  beta_point2[i]*x_beta_point2[j,k,t] +
                                  beta_point3[i]*x_beta_point3[j,k,t] +

@@ -90,14 +90,15 @@ sites   = dimnames(y)$site
 n_detections = apply(y, 4, function(x) sum(x > 1, na.rm = TRUE))
 
 # Total number of site detections per species:
-n_detected_sites = apply(y, 4, function(species_array) {
-  sum(apply(species_array, 1, function(site_matrix) any(site_matrix > 1, na.rm = TRUE)))
-})
+(n_detected_sites = apply(y, 4, function(species_array) {
+  sum(apply(species_array, 1, function(site_matrix) any(site_matrix > 0, na.rm = TRUE)))
+}))
 
 # TODO: Exclude extremely rare species?
-species_to_include = species[n_detected_sites > 2]
+species_to_include = species[n_detected_sites > 2] # species[n_detected_sites >= round(0.05 * length(sites))]
 species_to_exclude = setdiff(species, species_to_include)
-message("Excluding ", length(species_to_exclude), " species with insufficient observations: ", species_to_exclude)
+message("Excluding ", length(species_to_exclude), " species with insufficient observations: ")
+print(species_to_exclude)
 species = species_to_include
 species_idx = match(species, dimnames(y)$species)
 y = y[,,,species_idx, drop = FALSE]
@@ -434,7 +435,7 @@ init_vals = list(z = z)
 # "This model has multimodal likelihood, resulting in identical support for different parameter values. We addressed this issue by constraining the parameters so that p11 > p10, an assumption that is supported by the validation  data at the chosen threshold17. We imposed this constraint by providing arbitrarily chosen starting values that  align with this condition (0.7 for p11 and 0.1 for p10)23." 
 if (model_type == "fp") {
   # informative priors necessary to avoid invalid PPC log(0) values
-  init_vals[["v"]] = rep(logit(0.70), length(species))
+  init_vals[["v"]] = matrix(qlogis(0.70), nrow = S, ncol = length(species))
   init_vals[["w"]] = rep(logit(0.05), length(species)) # NOTE: Ubiquitous species may have identifiability problems (wide `w` BCI) because there is very little z=0 data to inform w.
 }
 
@@ -448,7 +449,6 @@ params_to_monitor = c(
   "mu.alpha_season", "sigma.alpha_season", "alpha_season",
   # True positive detection
   "mu.v", "sigma.v", "v",
-  "delta",
   paste0("mu.beta_point",      1:n_beta_point_params),      paste0("sigma.beta_point",  1:n_beta_point_params),         paste0("beta_point",  1:n_beta_point_params),
   "mu.beta_point3_sq", "sigma.beta_point3_sq", "beta_point3_sq",
   # False positive detection
@@ -477,7 +477,7 @@ msom = jags(data = msom_data,
             model.file = model_file,
             # Test run, ETA: 7-10 hr (fp), 1.5 hr (nofp)
             # n.chains = 2, n.adapt = 250, n.iter = 2500, n.burnin = 250, n.thin = 1, parallel = TRUE,
-            n.chains = 3, n.adapt = 1000, n.iter = 5000, n.burnin = 1000, n.thin = 5, parallel = TRUE, # 30 hr for 10000 it
+            n.chains = 1, n.adapt = 500, n.iter = 2500, n.burnin = 500, n.thin = 1, parallel = FALSE, # 12 hr for 2500 iter and 3 chains
             # n.chains = 2, n.adapt = 500, n.iter = 5000, n.burnin = 500, n.thin = 1, parallel = TRUE, # 3 hr nofp
             # Formal run, ETA unknown
             # n.chains = 3, n.adapt = 5000, n.iter = 30000, n.burnin = 10000, n.thin = 3, parallel = TRUE,
@@ -512,7 +512,7 @@ suspected_nonconvergence = suspected_nonconvergence %>% mutate(
 )
 if (nrow(suspected_nonconvergence) > 1) {
   message("The following ", nrow(suspected_nonconvergence), " parameters may not have converged:")
-  print(suspected_nonconvergence)
+  print(suspected_nonconvergence, n = Inf)
 } else {
   message("All parameters appear to have converged (rhat < ", rhat_threshold, ")")
 }

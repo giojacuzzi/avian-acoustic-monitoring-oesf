@@ -18,10 +18,8 @@ path_out_detection_predictor_data            = paste0(out_cache_dir, "/V3_detect
 # INPUT:
 path_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_predictions.rds"
 path_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_surveydates.rds"
-path_calibration_results         = "data/cache/1_pam/1_classifier_calibration/calibration_results_raw.csv"
-path_annotations                 = "data/cache/1_pam/1_classifier_calibration/annotations_clean.csv"
-path_plot_scale_data       = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_2020_clean_strata_4.rds"
-path_homerange_scale_data  = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_2020_clean_strata_4.rds"
+path_calibration_results         = "data/cache/1_pam/1_classifier_calibration/NEW_calibration_results_raw.csv"
+path_annotations                 = "data/cache/1_pam/1_classifier_calibration/NEW_annotations_clean.csv"
 path_predictors_detection  = "data/cache/3_gis/6_calc_detection_vars/V2_data_detection.rds"
 ##################################################################################################################
 

@@ -11,13 +11,13 @@ tp_min_prob = 0.95                   # Desired minimum probability of a true pos
 #
 ## OUTPUT: calibration_results.csv
 out_cache_dir = "data/cache/1_pam/1_classifier_calibration"
-path_annotations_clean_cache         = paste0(out_cache_dir, "/annotations_clean.csv")
-path_calibration_results_raw_cache   = paste0(out_cache_dir, "/calibration_results_raw.csv")   # raw optimized calibration results for subsequent modeling
-path_calibration_results_clean_cache = paste0(out_cache_dir, "/calibration_results_clean.csv") # clean optimized calibration results for inspection and print
+path_annotations_clean_cache         = paste0(out_cache_dir, "/NEW_annotations_clean.csv")
+path_calibration_results_raw_cache   = paste0(out_cache_dir, "/NEW_calibration_results_raw.csv")   # raw optimized calibration results for subsequent modeling
+path_calibration_results_clean_cache = paste0(out_cache_dir, "/NEW_calibration_results_clean.csv") # clean optimized calibration results for inspection and print
 # path_calibration_data_cache    = paste0(out_cache_dir, "/calibration_data.rds")    # raw calibration data and plots
 #
 ## INPUT:
-path_site_key = "data/sites/site_key_long.csv"
+path_site_key_long = "data/sites/site_key_long.csv"
 # Directories containing raw .csv predictions for calibration, e.g.
 # confidence_source	confidence_target	label
 # 0.566		          0.678	            Loxia curvirostra_Red Crossbill
@@ -318,7 +318,7 @@ stopifnot(colnames(jo_annotations) == colnames(wadnr_annotations))
 predictions = bind_rows(jo_predictions, wadnr_predictions)
 annotations = bind_rows(jo_annotations, wadnr_annotations)
 
-# TODO: No matching site confirmations for files like "0.988_6_SMA00518_20230725_150002_945.00s_948.00s"
+# NOTE: No matching site confirmations for files like "0.988_6_SMA00518_20230725_150002_945.00s_948.00s"
 if (overwrite_annotation_cache) {
   annotations_clean = annotations %>%
     rename_with(
@@ -332,7 +332,7 @@ if (overwrite_annotation_cache) {
       # Extract full date (YYYYMMDD) if present after the serial
       yday = str_extract(file, "S(MA|4A)\\d+_(\\d{8})") %>% str_remove("^S(MA|4A)\\d+_") %>%  as.Date(format = "%Y%m%d") %>% yday()
     )
-  site_key = read.csv(path_site_key) %>% mutate(site = tolower(site), site_agg = tolower(site_agg), date = as.Date(date, format = "%m/%d/%y"), season = as.character(year(date)))
+  site_key = read.csv(path_site_key_long) %>% mutate(site = tolower(site), site_agg = tolower(site_agg), date = as.Date(date, format = "%m/%d/%y"), season = as.character(year(date)))
   site_key$yday = yday(site_key$date)
   annotations_clean = annotations_clean %>%
     left_join(
@@ -660,10 +660,7 @@ calibration_results = calibration_results %>%
   )
 
 # TODO: The following classes require exhaustive manual validation
-# cassin's vireo
 # great horned owl
-# marbled murrelet
-# western bluebird
 
 # Format calibration results for output and tables
 calibration_results_clean = calibration_results
