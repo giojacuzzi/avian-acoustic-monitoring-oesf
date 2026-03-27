@@ -161,7 +161,7 @@ model {
           # States: 1 = nondetection, 2 = uncertain detection, 3 = certain detection
   
           # p11 is true-positive detection probability given z = 1
-          logit(p11[j,k,t,i]) <- v[stage[j],i] +
+          logit(p11[j,k,t,i]) <- v[stage[j],i] + # NOTE: alternatively, consider a fixed effect delta[stage[j]]
                                  beta_point1[i]*x_beta_point1[j,k,t] +
                                  beta_point2[i]*x_beta_point2[j,k,t] +
                                  beta_point3[i]*x_beta_point3[j,k,t] +
