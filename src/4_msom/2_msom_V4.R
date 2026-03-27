@@ -85,14 +85,50 @@ species = dimnames(y)$species
 seasons = dimnames(y)$season
 surveys = dimnames(y)$survey
 sites   = dimnames(y)$site
+stages  = occurrence_predictor_plot_data[[1]] %>% select(site, stratum_4) %>% filter(site %in% sites)
+
+# Naive occupancy ---------------------------------
+naive_occ <- apply(y, c(3, 4), function(mat) {
+  site_max <- apply(mat, 1, function(x) { # mat is [sites x visits] for one season x species combo
+    if (all(is.na(x))) NA else max(x, na.rm = TRUE)
+  })
+  detected  <- sum(site_max >= 1, na.rm = TRUE)
+  surveyed  <- sum(!is.na(site_max))
+  if (surveyed == 0) NA else detected / surveyed
+})
+print(round(naive_occ, 3))
+(avg_occ = data.frame(
+  species    = colnames(naive_occ),
+  avg_naive_occ = round(colMeans(naive_occ, na.rm = TRUE),3),
+  row.names  = NULL
+))
+
+# Naive occupancy by stage -----------------------
+site_detected <- apply(y, c(1, 3, 4), function(x) {
+  if (all(is.na(x))) NA else as.integer(max(x, na.rm = TRUE) >= 1)
+})
+library(reshape2)
+det_df <- melt(site_detected, varnames = c("site", "season", "species"), value.name = "detected")
+det_df <- merge(det_df, stages, by = "site")
+occ_by_stage_species <- det_df |>
+  filter(!is.na(detected)) |>
+  group_by(stratum_4, species, season) |>
+  summarise(naive_occ = mean(detected), .groups = "drop") |>
+  group_by(stratum_4, species) |>
+  summarise(avg_naive_occ = mean(naive_occ), .groups = "drop") |>
+  split(~species)
+# Access by name, e.g.:
+occ_by_stage_species[["brown creeper"]]
+occ_by_stage_species[["rufous hummingbird"]]
 
 # Total number of detections per species:
 n_detections = apply(y, 4, function(x) sum(x > 1, na.rm = TRUE))
 
 # Total number of site detections per species:
-(n_detected_sites = apply(y, 4, function(species_array) {
-  sum(apply(species_array, 1, function(site_matrix) any(site_matrix > 0, na.rm = TRUE)))
+(n_detected_sites_per_year = apply(y, c(3,4), function(mat) {
+  sum(rowSums(mat > 0, na.rm = TRUE) > 0)
 }))
+n_detected_sites = colSums(n_detected_sites_per_year)
 
 # TODO: Exclude extremely rare species?
 species_to_include = species[n_detected_sites > 2] # species[n_detected_sites >= round(0.05 * length(sites))]
