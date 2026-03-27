@@ -1,0 +1,167 @@
+# Multi-species false positive occupancy model, following the Miller et al. (2011) "multiple detection state model" design.
+
+model {
+
+  ## Community-level (group) hyperpriors
+  
+  for (g in 1:G) {
+  
+    # Occurrence
+    mu.u[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.u[g] ~ dt(0, 1/2.25^2, 1) T(0,) # TODO: consider half-normal, sigma ~ dnorm(0,1) T(0,)?
+    tau.u[g]   <- 1 / pow(sigma.u[g], 2)
+    
+    # Covariate effects on occurrence
+    for (s in 1:S) { # estimate stage-specific plot-scale effects for each stage
+      mu.alpha_plot1[s,g]      ~ dnorm(0, 1/2.25^2)
+      mu.alpha_plot2[s,g]      ~ dnorm(0, 1/2.25^2)
+      mu.alpha_plot3[s,g]      ~ dnorm(0, 1/2.25^2)
+      sigma.alpha_plot1[s,g]   ~ dt(0, 1/2.25^2, 1) T(0,)
+      sigma.alpha_plot2[s,g]   ~ dt(0, 1/2.25^2, 1) T(0,)
+      sigma.alpha_plot3[s,g]   ~ dt(0, 1/2.25^2, 1) T(0,)
+      tau.alpha_plot1[s,g]     <- 1 / pow(sigma.alpha_plot1[s,g], 2)
+      tau.alpha_plot2[s,g]     <- 1 / pow(sigma.alpha_plot2[s,g], 2)
+      tau.alpha_plot3[s,g]     <- 1 / pow(sigma.alpha_plot3[s,g], 2)
+    }
+  
+    mu.alpha_season[g]     ~ dnorm(0, 1/2.25^2)   
+    mu.alpha_point1[g]     ~ dnorm(0, 1/2.25^2)
+    mu.alpha_point2[g]     ~ dnorm(0, 1/2.25^2)
+    mu.alpha_point3[g]     ~ dnorm(0, 1/2.25^2)
+    mu.alpha_homerange1[g] ~ dnorm(0, 1/2.25^2)
+    mu.alpha_homerange2[g] ~ dnorm(0, 1/2.25^2)
+    mu.alpha_homerange3[g] ~ dnorm(0, 1/2.25^2)
+
+    sigma.alpha_season[g]     ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha_point1[g]     ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha_point2[g]     ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha_point3[g]     ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha_homerange1[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha_homerange2[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.alpha_homerange3[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+  
+    tau.alpha_season[g]     <- 1 / pow(sigma.alpha_season[g], 2)
+    tau.alpha_point1[g]     <- 1 / pow(sigma.alpha_point1[g], 2)
+    tau.alpha_point2[g]     <- 1 / pow(sigma.alpha_point2[g], 2)
+    tau.alpha_point3[g]     <- 1 / pow(sigma.alpha_point3[g], 2)
+    tau.alpha_homerange1[g] <- 1 / pow(sigma.alpha_homerange1[g], 2)
+    tau.alpha_homerange2[g] <- 1 / pow(sigma.alpha_homerange2[g], 2)
+    tau.alpha_homerange3[g] <- 1 / pow(sigma.alpha_homerange3[g], 2)
+
+    # Detection (unconfirmed true-positive)
+    for (s in 1:S) {
+      mu.v[s,g]    ~ dnorm(0, 1/2.25^2)
+      sigma.v[s,g] ~ dt(0, 1/2.25^2, 1) T(0,)
+      tau.v[s,g]   <- 1 / pow(sigma.v[s,g], 2)
+    }
+  
+    # Covariate effects on detection (unconfirmed true-positive)
+    mu.beta_point1[g]    ~ dnorm(0, 1/2.25^2)
+    mu.beta_point2[g]    ~ dnorm(0, 1/2.25^2)
+    mu.beta_point3[g]    ~ dnorm(0, 1/2.25^2)
+    sigma.beta_point1[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.beta_point2[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    sigma.beta_point3[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.beta_point1[g]  <- 1 / pow(sigma.beta_point1[g], 2)
+    tau.beta_point2[g]  <- 1 / pow(sigma.beta_point2[g], 2)
+    tau.beta_point3[g]  <- 1 / pow(sigma.beta_point3[g], 2)
+    
+    mu.beta_point3_sq[g] ~ dnorm(0, 1/2.25^2)
+    sigma.beta_point3_sq[g] ~ dt(0, 1/2.25^2, 1) T(0,)
+    tau.beta_point3_sq[g] <- 1 / pow(sigma.beta_point3_sq[g], 2)
+  }
+  
+  ## Species-level priors
+  for (i in 1:I) {
+  
+    # Stage-invariant covariates
+    u[i]            ~ dnorm(mu.u[group[i]], tau.u[group[i]])
+    alpha_point1[i] ~ dnorm(mu.alpha_point1[group[i]],tau.alpha_point1[group[i]])
+    alpha_point2[i] ~ dnorm(mu.alpha_point2[group[i]],tau.alpha_point2[group[i]])
+    alpha_point3[i] ~ dnorm(mu.alpha_point3[group[i]],tau.alpha_point3[group[i]])
+    alpha_homerange1[i] ~ dnorm(mu.alpha_homerange1[group[i]],tau.alpha_homerange1[group[i]])
+    alpha_homerange2[i] ~ dnorm(mu.alpha_homerange2[group[i]],tau.alpha_homerange2[group[i]])
+    alpha_homerange3[i] ~ dnorm(mu.alpha_homerange3[group[i]],tau.alpha_homerange3[group[i]])
+    alpha_season[i] ~ dnorm(mu.alpha_season[group[i]],tau.alpha_season[group[i]])
+    
+    # Stage- and species-specific covariates
+    for (s in 1:S) {
+      alpha_plot1[s,i] ~ dnorm(mu.alpha_plot1[s,group[i]], tau.alpha_plot1[s,group[i]])
+      alpha_plot2[s,i] ~ dnorm(mu.alpha_plot2[s,group[i]], tau.alpha_plot2[s,group[i]])
+      alpha_plot3[s,i] ~ dnorm(mu.alpha_plot3[s,group[i]], tau.alpha_plot3[s,group[i]])
+      v[s,i]           ~ dnorm(mu.v[s,group[i]], tau.v[s,group[i]])
+    }
+
+    # Unconfirmed true positive detection
+    beta_point1[i] ~ dnorm(mu.beta_point1[group[i]],tau.beta_point1[group[i]])
+    beta_point2[i] ~ dnorm(mu.beta_point2[group[i]],tau.beta_point2[group[i]])
+    beta_point3[i] ~ dnorm(mu.beta_point3[group[i]],tau.beta_point3[group[i]])
+    beta_point3_sq[i] ~ dnorm(mu.beta_point3_sq[group[i]],tau.beta_point3_sq[group[i]])
+  }
+  
+  ##############################################################################
+  ## Ecological process (latent occupancy)
+  
+  for (i in 1:I) { # for each species i
+    for (t in 1:Tseason) { # for each season t
+      for (j in 1:J) { # for each site j
+  
+        logit(psi[j,t,i]) <- u[i] +
+                             alpha_plot1[stage[j],i] * x_alpha_plot1[j,t] +
+                             alpha_plot2[stage[j],i] * x_alpha_plot2[j,t] +
+                             alpha_plot3[stage[j],i] * x_alpha_plot3[j,t] +
+                             alpha_point1[i] * x_alpha_point1[j,t] +
+                             alpha_point2[i] * x_alpha_point2[j,t] +
+                             alpha_point3[i] * x_alpha_point3[j,t] +
+                             alpha_homerange1[i] * x_alpha_homerange1[j,t,i] +
+                             alpha_homerange2[i] * x_alpha_homerange2[j,t,i] +
+                             alpha_homerange3[i] * x_alpha_homerange3[j,t,i] +
+                             alpha_season[i] * x_season[t]
+  
+        z[j,t,i] ~ dbern(psi[j,t,i])
+  
+        ############################################################################
+        ## Detection model
+  
+        for (k in 1:K[j,t]) { # for each survey k during season t at site j
+        
+          ## Multiple-detection-state observation process (Miller et al. 2011)
+          # States: 1 = nondetection, 2 = uncertain detection, 3 = certain detection
+  
+          # p11 is true-positive detection probability given z = 1
+          logit(p11[j,k,t,i]) <- v[stage[j],i] + # NOTE: alternatively, consider a fixed effect delta[stage[j]]
+                                 beta_point1[i]*x_beta_point1[j,k,t] +
+                                 beta_point2[i]*x_beta_point2[j,k,t] +
+                                 beta_point3[i]*x_beta_point3[j,k,t] +
+                                 beta_point3_sq[i]*pow(x_beta_point3[j,k,t], 2)
+          
+          p[j,k,t,i] <- z[j,t,i] * p11[j,k,t,i]
+          
+          # Observed outcome
+          y[j,k,t,i] ~ dbern(p[j,k,t,i])
+          
+          # Simulated replicate for posterior predictive checks
+          y_sim[j,k,t,i] ~ dbern(p[j,k,t,i])
+
+          # Deviance (Broms et al. 2016)
+          d_obs[j,k,t,i] <- z[j,t,i] * (y[j,k,t,i] * log(p[j,k,t,i]) + (1 - y[j,k,t,i]) * log(1 - p[j,k,t,i]))
+          d_sim[j,k,t,i] <- z[j,t,i] * (y_sim[j,k,t,i] * log(p[j,k,t,i]) + (1 - y_sim[j,k,t,i]) * log(1 - p[j,k,t,i]))
+
+        } # K surveys
+  
+        # Pad jagged array of deviance values with zeros to enable sum below
+        for (k in (K[j,t]+1):Kmax) {
+          d_obs[j,k,t,i] <- 0
+          d_sim[j,k,t,i] <- 0
+        }
+  
+      } # J sites
+    } # Tseason seasons
+  } # I species
+  
+  ## Derived quantities
+  # Deviance of simulated and observed data for posterior predictive check
+  D_obs <- -2 * sum(d_obs[1:J,1:Kmax,1:Tseason,1:I])
+  D_sim <- -2 * sum(d_sim[1:J,1:Kmax,1:Tseason,1:I])
+
+}

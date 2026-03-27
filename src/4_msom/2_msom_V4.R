@@ -3,7 +3,7 @@
 #
 ## CONFIG:
 grouping = "all" # Species grouping ("all", "diet", "nest", "nest_ps" ...)
-model_type = "fp" # nofp, fp
+model_type = "nofp" # nofp, fp
 param_alpha_stage = "stratum_4"
 param_alpha_season = "season"
 param_alpha_point_names = c(
@@ -53,9 +53,9 @@ path_trait_data                          = "data/cache/2_traits/1_agg_traits/tra
 source("src/global.R")
 
 if (model_type == "nofp") {
-  model_file = "src/4_msom/msom_pcnt.txt"
+  model_file = "src/4_msom/msom_V4_nofp.txt"
 } else if (model_type == "fp") {
-  model_file = "src/4_msom/msom_V4.txt"
+  model_file = "src/4_msom/msom_V4_fp.txt"
 } else {
   stop("ERROR: Unsupported model type")
 }
@@ -511,13 +511,10 @@ msom = jags(data = msom_data,
             inits = function() { init_vals },
             parameters.to.save = params_to_monitor,
             model.file = model_file,
-            # Test run, ETA: 7-10 hr (fp), 1.5 hr (nofp)
-            # n.chains = 2, n.adapt = 250, n.iter = 2500, n.burnin = 250, n.thin = 1, parallel = TRUE,
-            # TODO FOR LAB:
+            # Longer test for lab:
             n.chains = 3, n.adapt  = 2000, n.iter   = 5000, n.burnin = 1000, n.thin   = 1, parallel = TRUE,
-            # n.chains = 3, n.adapt = 500, n.iter = 2500, n.burnin = 500, n.thin = 1, parallel = FALSE, # 12 hr for 2500 iter and 3 chains
-            # Formal run, ETA unknown
-            # n.chains = 3, n.adapt = 5000, n.iter = 30000, n.burnin = 10000, n.thin = 3, parallel = TRUE,
+            # Shorter test for home:
+            # n.chains = 3, n.adapt = 500, n.iter = 2500, n.burnin = 500, n.thin = 1, parallel = TRUE, # 12 hr for 2500 iter and 3 chains
             DIC = FALSE, verbose=TRUE)
 
 message("Finished running JAGS (", round(msom$mcmc.info$elapsed.mins / 60, 2), " hr)")
