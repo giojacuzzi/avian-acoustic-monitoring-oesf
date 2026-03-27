@@ -2,7 +2,7 @@
 # Marginal plots of varying homerange stage composition
 #
 # CONFIG:
-path_msom = "data/cache/models/V4_msom_V4_fp_all.rds"
+path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds"
 #
 # INPUT:
 path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
@@ -665,10 +665,10 @@ plot_gradient_concat_facet <- function(pred_df) {
 stop("READY")
 
 # Single species
-result <- predict_gradient_concat("bald eagle", n_grid = 101)
+result <- predict_gradient_concat("pileated woodpecker", n_grid = 101)
 plot_gradient_concat(result)
 
-result <- predict_gradient_concat("red-breasted nuthatch", n_grid = 101)
+result <- predict_gradient_concat("rufous hummingbird", n_grid = 101)
 plot_gradient_concat(result)
 
 result <- predict_gradient_concat("golden-crowned kinglet", n_grid = 101)

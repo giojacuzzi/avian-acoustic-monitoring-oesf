@@ -1,11 +1,8 @@
 # 4_community_comp.R ####################################################################################
 # Community composition analyses
 #
-# OUTPUT: 
-out_cache_dir  = "data/cache/4_msom/4_community_comp"
-#
 # INPUT:
-path_msom = "data/cache/models/V3_msom_pcnt_fp_fp_all.rds" # "data/cache/models/msom_nofp_all_2026-02-12_19:37:00.rds"
+path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds" # "data/cache/models/msom_nofp_all_2026-02-12_19:37:00.rds"
 path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 ##################################################################################################################
 
@@ -56,8 +53,6 @@ z_binary = apply(z, c(2, 4), function(x) {
 dim(z_binary)
 rownames(z_binary) = sites
 colnames(z_binary) = species
-
-stop("DEBUGGY")
 
 # Composition PERMANOVA and NMDS ---------------------------------------------------------------------
 
@@ -121,8 +116,9 @@ for (pair in combs) {
   m = as.matrix(dist_bc)[which(strata == pair[1]), which(strata == pair[2])]
   diss_between_strata = rbind(diss_between_strata, tibble(stratum_1=pair[1], stratum_2=pair[2], mean_diss_bc=mean(m)))
 }
-diss_between_strata # Which pairs of strata have the highest/lowest turnover?
+diss_between_strata %>% arrange(mean_diss_bc) # Which pairs of strata have the highest/lowest turnover?
 
+if (FALSE) {
 # Turnover vs nestedness decomposition
 within_turnover = tibble()
 for (draw in 1:dim(z)[1]) {
@@ -206,8 +202,7 @@ print(between_turnover_summary)
 # nestedness (stand init includes several overlapping species) and turnover (novel early colonizers?)?
 # https://www.sciencedirect.com/science/article/pii/S0378112711005779
 between_turnover %>% arrange(desc(mean_diss))
-
-
+}
 
 # Taxonomic and functional diversity -----------------------------------------------------------------
 
@@ -216,7 +211,7 @@ between_turnover %>% arrange(desc(mean_diss))
 # Create species-by-traits matrix
 trait_matrix = species_traits %>% as.data.frame() %>%
   select(group_nest_ps,
-         group_forage_substrate,
+         group_forage_substrate, # TODO: Consider more traits?
          group_diet,
          group_migrant,
          mass)
@@ -404,20 +399,20 @@ FDis %>% group_by(strata) %>%
   )
 
 fd_results = dbFD(
-  x = trait_matrix, a = community_matrix, corr = "sqrt" # "PCoA axes corresponding to negative eigenvalues are imaginary axes that cannot be represented in a Euclidean space, but simply ignoring these axes would lead to biased estimations of FD. Hence in dbFD one of four correction methods are used."
+  x = trait_matrix, a = community_matrix, corr = "sqrt", calc.FRic = FALSE # "PCoA axes corresponding to negative eigenvalues are imaginary axes that cannot be represented in a Euclidean space, but simply ignoring these axes would lead to biased estimations of FD. Hence in dbFD one of four correction methods are used."
 )
 fd_df = data.frame(
   site = rownames(community_matrix),
   strata = strata,
-  FRic = fd_results$FRic,
+  # FRic = fd_results$FRic,
   FEve = fd_results$FEve, # 
-  FDis = fd_results$FDis, # Mean distance of species to community centroid
-  FDiv = fd_results$FDiv  # 
+  FDis = fd_results$FDis # Mean distance of species to community centroid
+  # FDiv = fd_results$FDiv  # 
 )
 fd_df %>% group_by(strata) %>% summarise(mean = mean(FDis), sd = sd(FDis), n_sites = n())
 
 fd_long = fd_df %>%
-  pivot_longer(cols = c(FRic, FDis, FEve, FDiv), names_to = "metric", values_to = "value") %>%
+  pivot_longer(cols = c(FDis, FEve), names_to = "metric", values_to = "value") %>%
   mutate(strata = factor(strata, levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE")))
 
 p_FD = ggplot(fd_long, aes(strata, value, fill = strata)) +
@@ -426,7 +421,7 @@ p_FD = ggplot(fd_long, aes(strata, value, fill = strata)) +
   scale_fill_manual(values = strata_cols) +
   theme(legend.position = "none"); print(p_FD)
 
-p_FDis = ggplot(fd_long %>% filter(metric == "FDis"), aes(strata, value, fill = strata)) +
+p_FDis = ggplot(FDis, aes(strata, FDis, fill = strata)) +
   geom_boxplot() +
   scale_fill_manual(values = strata_cols) +
   labs(x = "", y = "Functional dispersion") +
@@ -446,6 +441,7 @@ p_SR = ggplot(site_richness_strata, aes(x = strata, y = richness, fill = strata)
   ); print(p_SR)
 
 p_SR + p_FDis
+stop("DEBUGGY")
 
 ggplot(site_richness_strata %>% left_join(FDis, by = "site") %>% left_join(plot_data, by = "site"), aes(x = age_mean, y = FDis)) + geom_point() + geom_smooth()
 
@@ -534,6 +530,18 @@ results$p_adj = p.adjust(results$p_value, method = "holm") # Adjust for multiple
 cwms = functcomp(trait_matrix, community_matrix, CWM.type = "all")  # default
 cwm_df = data.frame(cwms, strata = strata)
 cwm_df$strata = factor(cwm_df$strata, levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE"))
+
+# Are the same species driving FDis in both stages?
+# Compare CWM trait values between stages
+cwm_df %>% 
+  filter(strata %in% c("MATURE", "COMP EXCL")) %>%
+  pivot_longer(-c(strata)) %>%
+  group_by(strata, name) %>%
+  summarise(mean = mean(value), .groups = "drop") %>%
+  pivot_wider(names_from = strata, values_from = mean) %>%
+  mutate(diff = MATURE - `COMP EXCL`) %>%
+  arrange(desc(abs(diff))) %>% print(n = Inf)
+stop("DEBUGGY")
 
 cwm_nest_ps = cwm_df %>%
   select(starts_with("group_nest_ps"), strata) %>%

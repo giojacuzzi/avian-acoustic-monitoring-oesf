@@ -487,13 +487,12 @@ params_to_monitor = c(
   "mu.v", "sigma.v", "v",
   paste0("mu.beta_point",      1:n_beta_point_params),      paste0("sigma.beta_point",  1:n_beta_point_params),         paste0("beta_point",  1:n_beta_point_params),
   "mu.beta_point3_sq", "sigma.beta_point3_sq", "beta_point3_sq",
-  # False positive detection
-  "epsilon", "sigma.epsilon",
   # Others
   "D_obs", "D_sim", "z"
 )
 if (model_type == "fp") {
   params_to_monitor = c(params_to_monitor,
+                        "epsilon", "sigma.epsilon", # False positive detection
                         "mu.w", "sigma.w", "w",
                         "mu.b", "sigma.b", "b")
 }
@@ -512,9 +511,9 @@ msom = jags(data = msom_data,
             parameters.to.save = params_to_monitor,
             model.file = model_file,
             # Longer test for lab:
-            n.chains = 3, n.adapt  = 2000, n.iter   = 5000, n.burnin = 1000, n.thin   = 1, parallel = TRUE,
+            # n.chains = 3, n.adapt  = 2000, n.iter   = 5000, n.burnin = 1000, n.thin   = 1, parallel = TRUE,
             # Shorter test for home:
-            # n.chains = 3, n.adapt = 500, n.iter = 2500, n.burnin = 500, n.thin = 1, parallel = TRUE, # 12 hr for 2500 iter and 3 chains
+            n.chains = 3, n.adapt = 500, n.iter = 2500, n.burnin = 500, n.thin = 1, parallel = TRUE, # 12 hr for fp; 3 hr for nofp
             DIC = FALSE, verbose=TRUE)
 
 message("Finished running JAGS (", round(msom$mcmc.info$elapsed.mins / 60, 2), " hr)")

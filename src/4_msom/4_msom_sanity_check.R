@@ -1,6 +1,6 @@
 # Compare naive site occupancy to estimated occupancy from MSOM
 
-path_msom = "data/cache/models/V3_msom_pcnt_fp_fp_all.rds"
+path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds"
 
 path_y = "data/cache/4_msom/1_assemble_msom_data/y.rds"
 
@@ -95,3 +95,132 @@ z_by_stage <- z_df |>
 # Now compare directly
 z_by_stage[["rufous hummingbird"]]
 occ_by_stage_species[["rufous hummingbird"]]
+
+
+z_by_stage[["barred owl"]]
+occ_by_stage_species[["barred owl"]]
+
+z_by_stage[["marbled murrelet"]]
+occ_by_stage_species[["marbled murrelet"]]
+
+
+z_by_stage[["pileated woodpecker"]]
+occ_by_stage_species[["pileated woodpecker"]]
+
+
+# =======================
+
+# Pull mean z per species per stage from standard model
+z_stage_species <- z_df |>
+  group_by(stage, species) |>
+  summarise(avg_z = mean(z_mean), .groups = "drop")
+
+# Which species are most enriched in STAND INIT vs other stages?
+z_wide <- z_stage_species |>
+  pivot_wider(names_from = stage, values_from = avg_z) |>
+  mutate(standinit_enrichment = `STAND INIT` - rowMeans(across(c(`COMP EXCL`, MATURE, THINNED)))) |>
+  arrange(desc(standinit_enrichment))
+
+head(z_wide, 15)
+
+# Mature vs others?
+z_wide %>%
+  mutate(mature_enrichment = MATURE - rowMeans(across(c(`COMP EXCL`, `STAND INIT`, THINNED)))) %>%
+  arrange(desc(mature_enrichment)) %>%
+  head(15)
+
+path_occurrence_predictor_plot_data      = "data/cache/4_msom/1_assemble_msom_data/V3_occurrence_predictor_plot_data.rds"
+occurrence_predictor_plot_data = readRDS(path_occurrence_predictor_plot_data)
+
+# Look at differences by age
+df_ordered <- occurrence_predictor_plot_data[[1]] %>%
+  filter(site %in% sites) %>%
+  select(site, age_mean) %>%
+  slice(match(sites, site))
+stopifnot(all(df_ordered$site == sites))
+df_ordered = df_ordered %>% left_join(stages, by = c("site"))
+
+library(tidyverse)
+library(mgcv)
+
+# --- 1. Average z_mean across seasons ---
+# z_mean is [sites × seasons × species], average over seasons (dim 2)
+z_avg <- apply(z_mean, c(1, 3), mean, na.rm = TRUE)  # now [224 × 67]
+
+# --- 2. Convert to long format and join site metadata ---
+z_df <- as.data.frame(z_avg) |>
+  rownames_to_column("site") |>
+  pivot_longer(-site, names_to = "species", values_to = "occupancy") |>
+  left_join(df_ordered, by = "site")
+
+# --- 3. Filter to MATURE only ---
+mature_df <- z_df |>
+  filter(stage == "MATURE")
+
+# --- 4. Quick look at the age distribution within mature ---
+mature_df |> 
+  distinct(site, age_mean) |> 
+  summary()
+
+focal_spp <- c("brown creeper", "pileated woodpecker", "vaux's swift",
+               "red-breasted nuthatch", "hairy woodpecker",
+               "chestnut-backed chickadee", "barred owl")
+
+mature_df |>
+  filter(species %in% focal_spp) |>
+  ggplot(aes(x = age_mean, y = occupancy)) +
+  geom_point(alpha = 0.5, size = 1.5) +
+  geom_smooth(method = "gam", formula = y ~ s(x, k = 4),  
+              # k=4 conservative given likely small n of mature sites
+              color = "steelblue", se = TRUE) +
+  facet_wrap(~ species, scales = "free_y") +
+  labs(x = "Mean stand age", y = "Occupancy probability",
+       title = "Old-forest species occupancy within mature stands ~ age") +
+  theme_minimal()
+
+
+
+
+
+# --- The real question: at what age does the community 
+#     transition away from comp excl character? ---
+
+# Use all forest types, all focal species
+# This is where your age gradient actually has variance to work with
+
+transition_df <- z_df |>
+  filter(species %in% focal_spp) |>
+  left_join(df_ordered |> select(site, age_mean, stage), by = "site")
+
+# Per-species GAM across all stages using continuous age
+transition_models <- z_df |>
+  group_by(species) |>
+  nest() |>
+  mutate(
+    gam_fit = map(data, ~ gam(occupancy ~ s(age_mean, k = 5),
+                              data = .x)),
+    gam_tidy = map(gam_fit, ~ {
+      s <- summary(.x)
+      tibble(edf = s$edf, p.value = s$s.pv, r.sq = s$r.sq)
+    })
+  )
+
+transition_models |>
+  unnest(gam_tidy) |>
+  select(species, edf, r.sq, p.value) |>
+  arrange(desc(r.sq))
+
+# Visualize transition across full age gradient
+z_df |>
+  filter(species %in% focal_spp) |>
+  ggplot(aes(x = age_mean, y = occupancy, color = stage)) +
+  geom_point(alpha = 0.4, size = 1.5) +
+  geom_smooth(aes(group = 1), method = "gam", 
+              formula = y ~ s(x, k = 5),
+              color = "black", se = TRUE) +
+  scale_color_brewer(palette = "Set2") +
+  facet_wrap(~ species, scales = "free_y") +
+  labs(x = "Mean stand age", y = "Occupancy probability",
+       title = "Occupancy across full age gradient — all forest types",
+       color = "Stage") +
+  theme_minimal()
