@@ -72,6 +72,21 @@ occurrence_predictor_plot_data = readRDS(path_occurrence_predictor_plot_data)
 message("Loading occurrence predictor homerange scale data from ", path_occurrence_predictor_homerange_data)
 occurrence_predictor_homerange_data = readRDS(path_occurrence_predictor_homerange_data)
 
+## DEBUG MM homerange radius 3520 m
+new_2020 = occurrence_predictor_homerange_data[["2020"]]$`northern goshawk`
+new_2020$scale = "marbled murrelet"
+occurrence_predictor_homerange_data[["2020"]]$`marbled murrelet` = new_2020
+new_2021 = occurrence_predictor_homerange_data[["2021"]]$`northern goshawk`
+new_2021$scale = "marbled murrelet"
+occurrence_predictor_homerange_data[["2021"]]$`marbled murrelet` = new_2021
+new_2022 = occurrence_predictor_homerange_data[["2022"]]$`northern goshawk`
+new_2022$scale = "marbled murrelet"
+occurrence_predictor_homerange_data[["2022"]]$`marbled murrelet` = new_2022
+new_2023 = occurrence_predictor_homerange_data[["2023"]]$`northern goshawk`
+new_2023$scale = "marbled murrelet"
+occurrence_predictor_homerange_data[["2023"]]$`marbled murrelet` = new_2023
+## DEBUG MM
+
 message("Loading detection predictor data from ", path_detection_predictor_data)
 detection_predictor_data = readRDS(path_detection_predictor_data)
 
@@ -131,7 +146,7 @@ n_detections = apply(y, 4, function(x) sum(x > 1, na.rm = TRUE))
 n_detected_sites = colSums(n_detected_sites_per_year)
 
 # TODO: Exclude extremely rare species?
-species_to_include = species[n_detected_sites > 2] # species[n_detected_sites >= round(0.05 * length(sites))]
+species_to_include = species[n_detected_sites > round(0.05 * length(sites))]
 species_to_exclude = setdiff(species, species_to_include)
 message("Excluding ", length(species_to_exclude), " species with insufficient observations: ")
 print(species_to_exclude)
