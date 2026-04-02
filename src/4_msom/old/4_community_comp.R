@@ -47,12 +47,6 @@ strata = as.factor(site_key$stratum[ match(sites, site_key$site) ])
 species_traits = species_traits %>% filter(common_name %in% species)
 
 z = msom$sims.list$z # Simplify posterior occurrence site x species matrix as the most probable occupancy state across all draws and seasons
-z_binary = apply(z, c(2, 4), function(x) {
-  ifelse(mean(x) >= 0.5, 1, 0)
-})
-dim(z_binary)
-rownames(z_binary) = sites
-colnames(z_binary) = species
 
 # Composition PERMANOVA and NMDS ---------------------------------------------------------------------
 
@@ -118,8 +112,15 @@ for (pair in combs) {
 }
 diss_between_strata %>% arrange(mean_diss_bc) # Which pairs of strata have the highest/lowest turnover?
 
-if (FALSE) {
 # Turnover vs nestedness decomposition
+# TODO: beta.pair
+
+
+
+
+
+if (FALSE) {
+# Turnover vs nestedness decomposition across posterior
 within_turnover = tibble()
 for (draw in 1:dim(z)[1]) {
   print(draw)
@@ -373,6 +374,12 @@ p_SR = ggplot(site_richness_strata, aes(x = strata, y = richness, fill = strata)
 ## Functional diversity (functional dispersion)
 
 # Subset species to those with at least one occurrence
+z_binary = apply(z, c(2, 4), function(x) {
+  ifelse(mean(x) >= 0.5, 1, 0)
+})
+dim(z_binary)
+rownames(z_binary) = sites
+colnames(z_binary) = species
 species_totals = colSums(z_binary)
 present_species = names(species_totals[species_totals > 0])
 community_matrix = z_binary[, present_species]
@@ -390,7 +397,10 @@ trait_matrix = trait_matrix[present_species, ] %>% mutate(across(where(is.charac
 FDis = fdisp(gowdis(trait_matrix), community_matrix)
 FDis = stack(FDis$FDis)
 colnames(FDis) = c("FDis", "site")
-FDis$strata = strata
+FDis$strata = factor(
+  strata,
+  levels = c("STAND INIT", "COMP EXCL", "THINNED", "MATURE")
+)
 FDis %>% group_by(strata) %>%
   summarise(
     mean = mean(FDis),

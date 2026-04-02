@@ -3,7 +3,7 @@
 #
 # CONFIG:
 path_msom = "data/cache/models/msom_fp_fp_nest_2026-02-17_22:04:27.rds"
-path_msom = "data/cache/models/V4_msom_V4_fp_all.rds"
+path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds"
 #
 # OUTPUT:
 out_cache_dir  = "data/cache/4_msom/3_msom_results"

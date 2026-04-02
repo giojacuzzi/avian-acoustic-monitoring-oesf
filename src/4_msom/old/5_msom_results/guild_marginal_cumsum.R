@@ -2,7 +2,7 @@
 # Marginal plots of varying homerange stage composition
 #
 # CONFIG:
-path_msom = "data/cache/models/V4_msom_V4_fp_all.rds"
+path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds"
 #
 # INPUT:
 path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
@@ -795,7 +795,7 @@ plot_gradient_concat_cumsum <- function(multi_result, show_ci = TRUE) {
     labs(
       x        = "Pairwise homerange composition",
       y        = "Cumulative predicted occupancy (no. species)",
-      title    = paste0("Cumulative occupancy (", n_sp, " species)"),
+      title    = paste0("Expected richness / cumulative occupancy (", n_sp, " species)"),
       subtitle = "Sum of posterior mean occupancy probabilities across all species"
     ) +
     theme_classic() +
@@ -1291,13 +1291,16 @@ result <- predict_gradient_concat("golden-crowned kinglet", n_grid = 501)
 plot_gradient_concat(result)
 
 # Multiple species — overlaid
-focal_species <- c("pileated woodpecker", "hairy woodpecker", "red-breasted nuthatch")
-multi_pred <- predict_gradient_concat_multi(focal_species, n_grid = 501)
+focal_species <- c("pileated woodpecker", "hairy woodpecker", "downy woodpecker", "northern flicker")
+multi_pred <- predict_gradient_concat_multi(focal_species, n_grid = 101)
 plot_gradient_concat_multi(multi_pred)
 plot_gradient_concat_facet(multi_pred)
 
 # Larger set
 focal_species <- intersect(species, species_traits %>% filter(group_nest_ps == "ground") %>% pull(common_name))
+focal_species = sort(intersect(species, c(
+  "vaux's swift", "marbled murrelet", "rufous hummingbird", "northern goshawk", "common nighthawk", "evening grosbeak", "golden-crowned kinglet", "olive-sided flycatcher", "pine siskin", "pileated woodpecker", "willow flycatcher"
+)))
 multi_pred <- predict_gradient_concat_multi(focal_species, n_grid = 101)
 
 plot_gradient_concat_cumsum(multi_pred)

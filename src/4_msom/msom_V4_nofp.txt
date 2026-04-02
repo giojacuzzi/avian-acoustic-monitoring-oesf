@@ -1,5 +1,3 @@
-# Multi-species false positive occupancy model, following the Miller et al. (2011) "multiple detection state model" design.
-
 model {
 
   ## Community-level (group) hyperpriors
