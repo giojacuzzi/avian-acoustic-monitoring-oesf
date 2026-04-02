@@ -2,7 +2,7 @@
 # Fit a multispecies occupancy model using MCMC with stage as a continuous % variable, using compex as the baseline reference
 #
 ## CONFIG:
-grouping = "all" # Species grouping ("all", "diet", "nest", "nest_ps" ...)
+grouping = "forage_behavior" # Species grouping ("all", "diet", "nest", "nest_ps" ...)
 model_type = "nofp" # nofp, fp
 param_alpha_stage = "stratum_4"
 param_alpha_season = "season"
@@ -161,10 +161,18 @@ n_detections = apply(y, 4, function(x) sum(x > 1, na.rm = TRUE))
 n_detected_sites = colSums(n_detected_sites_per_year)
 
 # TODO: Exclude extremely rare species?
-species_to_include = species[n_detected_sites > 2]
+species_to_include = species[n_detected_sites > 2] # species[n_detected_sites > round(0.05 * length(sites))]
 species_to_exclude = setdiff(species, species_to_include)
+
+if (grouping == "nest_ps") { # Only 1-2 members per group
+  species_to_exclude = unique(c(species_to_exclude, c("belted kingfisher", "northern rough-winged swallow", "barn swallow")))
+}
+if (grouping == "forage_behavior") { # Only 1 member per group
+  species_to_exclude = unique(c(species_to_exclude, c("marbled murrelet")))
+}
 message("Excluding ", length(species_to_exclude), " species with insufficient observations: ")
 print(species_to_exclude)
+species_to_include = setdiff(species, species_to_exclude)
 species = species_to_include
 species_idx = match(species, dimnames(y)$species)
 y = y[,,,species_idx, drop = FALSE]
@@ -541,9 +549,9 @@ msom = jags(data = msom_data,
             parameters.to.save = params_to_monitor,
             model.file = model_file,
             # Longer test for lab:
-            # n.chains = 3, n.adapt  = 2000, n.iter   = 5000, n.burnin = 1000, n.thin   = 1, parallel = TRUE,
+            n.chains = 3, n.adapt  = 2000, n.iter   = 10000, n.burnin = 1000, n.thin   = 1, parallel = TRUE,
             # Shorter test for home:
-            n.chains = 3, n.adapt = 500, n.iter = 2500, n.burnin = 500, n.thin = 1, parallel = TRUE, # 12 hr for fp; 3 hr for nofp
+            # n.chains = 3, n.adapt = 500, n.iter = 2500, n.burnin = 500, n.thin = 1, parallel = TRUE, # 12 hr for fp; 3 hr for nofp
             DIC = FALSE, verbose=TRUE)
 
 message("Finished running JAGS (", round(msom$mcmc.info$elapsed.mins / 60, 2), " hr)")
