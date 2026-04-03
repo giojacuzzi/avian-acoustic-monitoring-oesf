@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?><metadata>
+    <idinfo>
+        <citation>
+            <citeinfo>
+                <title>WA DNR Managed Land Parcels</title>
+                <onlink>https://gis.dnr.wa.gov/site3/rest/services/Public_Boundaries/WADNR_PUBLIC_Cadastre_OpenData/FeatureServer/6</onlink>
+                <onlink>https://fortress.wa.gov/dnr/adminsa/gisdata/datadownload/WA_DNR_Managed_Land_Parcels.zip</onlink>
+                <onlink>https://fortress.wa.gov/dnr/adminsa/GisData/metadata/cadastre_parcel.htm</onlink>
+            </citeinfo>
+        </citation>
+        <descript>
+            <abstract>The Parcel layer consists of parcels that are areas land in which the Department of Natural Resources holds some interest and are located anywhere in the upland area of the State of Washington.  Three types of Parcels are currently held in the parcel layer.  The number of Parcel types may increase in the future.  Ownership Parcels, parcel type code 1, consist of Washington State owned land managed by the Department of Natural Resources.  Most ownership parcels are held and managed for the benefit of some trust such as the Common School and Indemnity trust.  Of the several parcel types, only Ownership Parcels represent the entire extent of the particular type of land managed by DNR.  The other parcel types are incomplete data sets.  Disposed Parcels, parcel type code 2, consist of ownership parcels that have been disposed of since July 1, 2007.  A very few parcels disposed of prior to that date are also included.  Easement Parcels, parcel type code 3, consist of various types of easements acquired for the State by the Department.  Some of the Easements are negative easements over land not owned by the State, for example Conservation Easements which remove certain development rights away for the parcel owner.  Other Easements are positive rights acquired by the State, such as roadway easements.WA DNR Managed Land Parcels Metadata</abstract>
+        </descript>
+        <keywords>
+            <theme>
+                <themekt>None</themekt>
+                <themekey>WA</themekey>
+                <themekey>Washington</themekey>
+                <themekey>DNR</themekey>
+                <themekey>parcels</themekey>
+                <themekey>Cadastre</themekey>
+                <themekey>public land survey</themekey>
+                <themekey>Boundaries</themekey>
+            </theme>
+        </keywords>
+        <accconst>Other Constraints</accconst>
+        <useconst>Access constraints: WA ISB, IT Security, Data Category 1 - Public Information (See Security Information). External requests for this data should be directed to the WA DNR GIS Data Center web site (http://www.dnr.wa.gov/BusinessPermits/Topics/Data/Pages/gis_data_center.aspx).Use constraints:
+
+none</useconst>
+        <datacred>Washington State Department of Natural Resources</datacred>
+    </idinfo>
+    <metainfo>
+        <metd>20170314</metd>
+        <metc>
+            <cntinfo>
+                <!--no contact person or organization name available-->
+            </cntinfo>
+        </metc>
+        <metstdn>FGDC Content Standard for Digital Geospatial Metadata</metstdn>
+        <metstdv>FGDC-STD-001-1998</metstdv>
+        <mettc>local time</mettc>
+    </metainfo>
+</metadata>

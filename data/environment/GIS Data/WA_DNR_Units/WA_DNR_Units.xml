@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?><metadata>
+    <idinfo>
+        <citation>
+            <citeinfo>
+                <title>WA DNR Units</title>
+                <onlink>https://gis.dnr.wa.gov/site3/rest/services/Public_Boundaries/WADNR_PUBLIC_Cadastre_OpenData/FeatureServer/5</onlink>
+                <onlink>https://fortress.wa.gov/dnr/adminsa/gisdata/datadownload/WA_DNR_Units.zip</onlink>
+                <onlink>https://fortress.wa.gov/dnr/adminsa/GisData/metadata/cadastre_jurisdiction.htm</onlink>
+            </citeinfo>
+        </citation>
+        <descript>
+            <abstract>Washington Department of Natural Resources Local Unit.  These areas are administrative subunits of a Washington Department of Natural Resources District.WA DNR Units Metadata</abstract>
+        </descript>
+        <keywords>
+            <theme>
+                <themekt>None</themekt>
+                <themekey>WA</themekey>
+                <themekey>Washington</themekey>
+                <themekey>DNR</themekey>
+                <themekey>Units</themekey>
+                <themekey>jurisdiction</themekey>
+                <themekey>Cadastre</themekey>
+                <themekey>public land survey</themekey>
+                <themekey>Boundaries</themekey>
+                <themekey>boundaries</themekey>
+                <themekey>Department of Natural Resources</themekey>
+            </theme>
+        </keywords>
+        <accconst>Other Constraints</accconst>
+        <useconst>None</useconst>
+        <datacred>Washington State Department of Natural Resources</datacred>
+    </idinfo>
+    <metainfo>
+        <metd>20170314</metd>
+        <metc>
+            <cntinfo>
+                <!--no contact person or organization name available-->
+            </cntinfo>
+        </metc>
+        <metstdn>FGDC Content Standard for Digital Geospatial Metadata</metstdn>
+        <metstdv>FGDC-STD-001-1998</metstdv>
+        <mettc>local time</mettc>
+    </metainfo>
+</metadata>
