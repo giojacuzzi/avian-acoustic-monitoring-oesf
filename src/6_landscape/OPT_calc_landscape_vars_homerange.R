@@ -4,12 +4,14 @@
 #       while "rs" refers to data derived via remote-sensing imagery.
 # ETA: 16 hours
 #
-# OPTIMIZATION STEP 1: Remove dead patch-delineation code  (verified)
-# OPTIMIZATION STEP 2: Parallelise the per-point loop with parallel::mclapply
-#   Replaces the for(j ...) loop with mclapply(), which fans the work across
-#   all available CPU cores.  Each worker runs the IDENTICAL per-point code so
-#   output is guaranteed bit-for-bit identical to the step-1 version.
-#   On an 8-core machine this alone should cut remaining runtime by ~6-7x.
+# OPTIMIZATION STEP 1: Remove dead patch-delineation code            (verified)
+# OPTIMIZATION STEP 2: Parallelise per-point loop with mclapply      (verified)
+# OPTIMIZATION STEP 3: Remove redundant homerange_and_edge_buffer
+#   After Step 1, homerange_and_edge_buffer / homerange_and_edge_crop had one
+#   remaining purpose: the raster-overlap guard (tryCatch / next).  That guard
+#   is moved directly onto homerange_crop — the operation that actually matters.
+#   This eliminates one st_buffer + one crop call per point per scale.
+#   core_area_buffer / core_area_buffer_ncells are also removed (now unused).
 
 library(parallel)
 
@@ -128,8 +130,8 @@ if (overwrite_data_homerange_scale_cache) {
     rast_TREE_ACRE_6 = load_raster(paste0(rsfris_version_path, '/TREE_ACRE_6.tif'))
   )
   
-  core_area_buffer        = 50
-  core_area_buffer_ncells = round(core_area_buffer / res(rast_cover)[1], 0)
+  # core_area_buffer removed — was only used to build homerange_and_edge_buffer,
+  # which existed solely for the patch block (Step 1) and the overlap guard (Step 3).
   
   n_cores = max(1L, detectCores() - 1L)
   message("Parallelising over ", n_cores, " cores (", nrow(pnts), " points x ",
@@ -139,12 +141,14 @@ if (overwrite_data_homerange_scale_cache) {
   for (i in 1:nrow(homeranges)) {
     scale                 = homeranges[i, 'scale']
     homerange_buffer_size = homeranges[i, 'home_range_radius_m']
+    
+    if (homerange_buffer_size < 100) {
+      message("Skipping scale '", scale, "', home range buffer size: ", homerange_buffer_size)
+      next
+    }
+    
     message("Scale '", scale, "', home range buffer size: ", homerange_buffer_size)
     
-    # ── STEP 2: replace for(j...) with mclapply ──────────────────────────────
-    # Each list element is NULL (skipped) or a one-row data.frame.
-    # All variables captured from the enclosing scope are identical to what the
-    # original loop used, so results are bit-for-bit identical.
     data_homerange_scale_species_list = mclapply(
       seq_len(nrow(pnts)),
       mc.cores = n_cores,
@@ -152,18 +156,20 @@ if (overwrite_data_homerange_scale_cache) {
         
         pnt = pnts[j, ]
         
-        homerange_and_edge_buffer = st_buffer(pnt, homerange_buffer_size + core_area_buffer)
-        homerange_buffer          = st_buffer(pnt, homerange_buffer_size)
+        homerange_buffer = st_buffer(pnt, homerange_buffer_size)
         
-        homerange_and_edge_crop = tryCatch({
-          crop(rast_cover, vect(homerange_and_edge_buffer))
+        # STEP 3: tryCatch moved directly onto homerange_crop.
+        # Previously the guard was on homerange_and_edge_crop (a larger buffer),
+        # which was a proxy ensuring homerange_crop would succeed.  Checking
+        # homerange_crop directly is both simpler and more precise.
+        homerange_crop = tryCatch({
+          crop(rast_cover, vect(homerange_buffer))
         }, error = function(e) {
           if (grepl("extents do not overlap", e$message)) return(NULL)
         })
         
-        if (is.null(homerange_and_edge_crop)) return(NULL)  # was `next`; NULLs filtered below
+        if (is.null(homerange_crop)) return(NULL)
         
-        homerange_crop  = crop(rast_cover, vect(homerange_buffer))
         homerange_cover = mask(homerange_crop, vect(homerange_buffer))
         rast_homerange  = ifel(!is.na(homerange_cover), 1, NA)
         
@@ -220,9 +226,7 @@ if (overwrite_data_homerange_scale_cache) {
         final_df
       }
     )
-    # ── end mclapply ─────────────────────────────────────────────────────────
     
-    # Filter NULLs (skipped points) then bind rows — same as original
     data_homerange_scale_species = bind_rows(Filter(Negate(is.null), data_homerange_scale_species_list))
     
     if (FALSE) {

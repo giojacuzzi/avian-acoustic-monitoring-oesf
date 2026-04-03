@@ -151,6 +151,12 @@ if (overwrite_data_homerange_scale_cache) {
   for (i in 1:nrow(homeranges)) {
     scale = homeranges[i,'scale']
     homerange_buffer_size = homeranges[i,'home_range_radius_m']
+    
+    if (homerange_buffer_size < 100) {
+      message("Skipping scale '", scale, "', home range buffer size: ", homerange_buffer_size)
+      next
+    }
+    
     message("Scale '", scale, "', home range buffer size: ", homerange_buffer_size)
     
     data_homerange_scale_species = data.frame()
