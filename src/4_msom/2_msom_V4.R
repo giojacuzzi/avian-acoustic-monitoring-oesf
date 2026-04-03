@@ -87,6 +87,21 @@ new_2023$scale = "marbled murrelet"
 occurrence_predictor_homerange_data[["2023"]]$`marbled murrelet` = new_2023
 ## DEBUG MM
 
+## DEBUG HW homerange radius 450 m (64.4 ha, Ripper et al. 2005)
+new_2020 = occurrence_predictor_homerange_data[["2020"]]$`sooty grouse`
+new_2020$scale = "hairy woodpecker"
+occurrence_predictor_homerange_data[["2020"]]$`hairy woodpecker` = new_2020
+new_2021 = occurrence_predictor_homerange_data[["2021"]]$`sooty grouse`
+new_2021$scale = "hairy woodpecker"
+occurrence_predictor_homerange_data[["2021"]]$`hairy woodpecker` = new_2021
+new_2022 = occurrence_predictor_homerange_data[["2022"]]$`sooty grouse`
+new_2022$scale = "hairy woodpecker"
+occurrence_predictor_homerange_data[["2022"]]$`hairy woodpecker` = new_2022
+new_2023 = occurrence_predictor_homerange_data[["2023"]]$`sooty grouse`
+new_2023$scale = "hairy woodpecker"
+occurrence_predictor_homerange_data[["2023"]]$`hairy woodpecker` = new_2023
+## DEBUG HW
+
 message("Loading detection predictor data from ", path_detection_predictor_data)
 detection_predictor_data = readRDS(path_detection_predictor_data)
 

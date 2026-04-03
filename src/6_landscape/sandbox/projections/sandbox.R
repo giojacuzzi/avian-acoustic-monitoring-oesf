@@ -30,7 +30,33 @@ grp = factor(sof_decade_0_crop$OESF_SDS_GROUPED)
 pal = setNames(rainbow(nlevels(grp)), levels(grp))
 plot(st_geometry(sof_decade_0_crop), col = pal[grp], border = NA)
 legend("topright", legend = names(pal), fill = pal, cex = 0.7)
-mapview(sof_decade_0_crop %>% select(YAGE), zcol = "YAGE")
+mapview(sof_decade_0_crop %>% select(OESF_SDS_GROUPED, YAGE), zcol = "YAGE")
+
+# Simplify polygons to only reflect differences in stage and age
+sof_dissolved <- sof_decade_0_crop %>%
+  group_by(OESF_SDS_GROUPED, YAGE) %>%
+  summarize(.groups = "drop")
+mapview(sof_dissolved, zcol = "OESF_SDS_GROUPED") + mapview(sof_dissolved, zcol = "YAGE")
+
+mapview(sof_dissolved, zcol = "YAGE") + mapview(sof_dissolved %>%
+                                                  group_by(OESF_SDS_GROUPED) %>%
+                                                  summarize(.groups = "drop"), zcol = "OESF_SDS_GROUPED")
+
+ggplot(sof_dissolved %>% st_drop_geometry(), aes(x = OESF_SDS_GROUPED, y = YAGE)) +
+  geom_boxplot() +
+  geom_jitter()
+
+# Stand vs record level?
+sof_dissolved %>%
+  st_drop_geometry() %>%
+  group_by(OESF_SDS_GROUPED) %>%
+  summarise(
+    mean = mean(YAGE, na.rm = TRUE),
+    sd   = sd(YAGE, na.rm = TRUE),
+    min  = min(YAGE, na.rm = TRUE),
+    max  = max(YAGE, na.rm = TRUE),
+    .groups = "drop"
+  ) %>% arrange(mean)
 
 #####
 rast_cover_2020 = rast("data/cache/3_gis/2_gen_cover_rasters/rast_cover_2020_clean_stage_3.tif")
