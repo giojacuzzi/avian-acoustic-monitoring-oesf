@@ -22,6 +22,7 @@ overwrite_data_plot_scale_cache  = TRUE
 overwrite_data_homerange_scale_cache = TRUE
 cover_classification             = "clean_strata_4"
 t                                = 2020
+cell_resolution                  = 100 # 9h @ 100
 
 ### OUTPUT:
 path_data_plot_scale_out      = paste0("data/cache/7_landscape/OPT_landscape_data_plot_scale_",      t, "_", cover_classification, "_", pnts_name, ".rds")
@@ -40,6 +41,8 @@ model_data = readRDS(path_msom)
 (species = model_data$species)
 rm(model_data)
 
+message("Current time ", time_start_global <- Sys.time())
+
 #################################################################################
 source("src/global.R")
 message("Calculating occurrence variables for year ", t)
@@ -48,26 +51,39 @@ version             = rsfris_version_years %>% filter(year == t) %>% pull(versio
 rsfris_version_path = paste0("data/environment/rsfris_study_area/", version)
 options(mapview.maxpixels = 2117676)
 
+message('Loading raster cover data from cache ', path_rast_cover)
+rast_cover = rast(path_rast_cover)
+
+# TODO: Ensure rast_cover covers the maximum buffer of the sampling extent
+
 pnts = switch(
   pnts_name,
   landscape = {
-    path_rast_cover = path_rast_cover
-    landscape_planning_units_pnts = landscape_planning_units_clean %>% filter(unit == "Upper Clearwater")
+    landscape_planning_units_pnts = landscape_planning_units_clean
     bbox     = st_bbox(landscape_planning_units_pnts)
-    cellsize = 2500
+    cellsize = cell_resolution
     grid     = st_sf(st_make_grid(x = st_as_sfc(bbox), cellsize = cellsize,
                                   offset = c(bbox["xmin"], bbox["ymin"]), what = "centers"))
     grid     = grid[st_within(grid, st_union(landscape_planning_units_pnts), sparse = FALSE), ]
     grid     = st_sf(geometry = st_geometry(grid))
+  },
+  full = {
+    # Crop rast cover to landscape planning units
+    lpu_vect = vect(landscape_planning_units_clean)
+    rast_cover_masked = mask(rast_cover, lpu_vect)
+    
+    # TODO: Remove riparian buffers
+    
+    mapview(rast_cover_masked) + mapview(landscape_planning_units) + mapview(aru_sites)
+    
+    pnts_sf = as.points(rast_cover_masked, values = FALSE, na.rm = TRUE)
+    st_as_sf(pnts_sf)
   },
   stop("Invalid value: ", pnts_name)
 )
 
 message("Retrieved ", nrow(pnts), " points for '", pnts_name, "'")
 mapview(landscape_planning_units_clean) + mapview(pnts)
-
-message('Loading raster cover data from cache ', path_rast_cover)
-rast_cover = rast(path_rast_cover)
 
 #################################################################################
 species_trait_data = read.csv(path_trait_data)
@@ -104,7 +120,6 @@ rast_age = round(t - rast_origin)
 #################################################################################
 if (overwrite_data_homerange_scale_cache) {
   
-  message("Generating homerange scale data cache (current time ", time_start <- Sys.time(), ")")
   data_homerange_scale = list()
   
   message("Homerange buffer min: ",    min(species_trait_data$home_range_radius_m))
@@ -146,7 +161,7 @@ if (overwrite_data_homerange_scale_cache) {
       next
     }
     
-    message("Scale '", scale, "', home range buffer size: ", homerange_buffer_size)
+    message("Scale '", scale, "', home range buffer size: ", homerange_buffer_size, " // (current time ", time_start <- Sys.time(), ")")
     
     # 4a: pre-compute all buffer polygons once per scale, outside mclapply.
     # Workers index into this object rather than calling st_buffer themselves.
@@ -195,7 +210,11 @@ if (overwrite_data_homerange_scale_cache) {
           if (cl %in% names(cover_counts)) cover_counts[[cl]] / ncells_homerange else 0
         }
         
+        coords = st_coordinates(pnts[j, ])
+        
         final_df = data.frame(
+          x               = coords[, "X"],
+          y               = coords[, "Y"],
           scale           = scale,
           buffer_radius_m = homerange_buffer_size,
           pcnt_standinit  = get_pcnt("standinit"),
@@ -230,12 +249,14 @@ if (overwrite_data_homerange_scale_cache) {
     }
     
     data_homerange_scale[[scale]] = data_homerange_scale_species
+    
+    message("Finished (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " min)")
   }
   
   dir.create(dirname(path_data_homerange_scale_out), recursive = TRUE, showWarnings = FALSE)
   saveRDS(data_homerange_scale, path_data_homerange_scale_out)
   message(crayon::green("Cached homerange data cache to", path_data_homerange_scale_out,
-                        "(", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), "min )"))
+                        "(", round(as.numeric(difftime(Sys.time(), time_start_global, units = 'hours')), 2), "hours )"))
   
 } else {
   message('Loading homerange scale data from cache ', path_data_homerange_scale_out)

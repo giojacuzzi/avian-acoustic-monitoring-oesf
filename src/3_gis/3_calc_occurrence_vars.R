@@ -4,7 +4,7 @@
 # ETA: 16 hours
 #
 # CONFIG:
-pnts_name = "sites" # "sites" for surveyed sites only or "landscape" for a grid of points across the landscape
+pnts_name = "landscape" # "sites" for surveyed sites only or "landscape" for a grid of points across the landscape
 overwrite_data_plot_scale_cache = TRUE
 overwrite_data_homerange_scale_cache = TRUE
 cover_classification = "clean_strata_4" # e.g. clean_stage_3, strata_4
@@ -45,7 +45,7 @@ pnts = switch(pnts_name,
       # debug
       landscape_planning_units_clean = landscape_planning_units_clean %>% filter(unit == "Upper Clearwater")
       bbox = st_bbox(landscape_planning_units_clean)
-      cellsize = 250 # distance between points (meters)
+      cellsize = 1000 # distance between points (meters)
       grid = st_sf(st_make_grid(x = st_as_sfc(bbox), cellsize = cellsize, offset = c(bbox["xmin"], bbox["ymin"]), what = "centers"))
       grid = grid[st_within(grid, st_union(landscape_planning_units_clean), sparse = FALSE), ]
       grid = st_sf(geometry = st_geometry(grid))
@@ -154,6 +154,14 @@ if (overwrite_data_plot_scale_cache) {
   hist(pnts$age_mean, breaks = seq(0, max(pnts$age_mean, na.rm = TRUE) + 10, by = 10))
   table(pnts$age_point)
   table(round(pnts$age_mean))
+  
+  # Distance to edge
+  rast_edges = boundaries(rast_cover, inner = TRUE, classes = TRUE)
+  rast_edges[rast_edges == 0] = NA
+  # Compute a distance raster (m)
+  rast_dist_edge = distance(rast_edges)
+  # Get distance at each site
+  pnts = pnts %>% mutate(dist_edge = terra::extract(rast_dist_edge, vect(pnts))[, 2])
   
   # Distance to roads
   dist_road_paved = st_distance(pnts, paved_roads)
