@@ -53,15 +53,15 @@ path_trait_data                          = "data/cache/2_traits/1_agg_traits/tra
 source("src/global.R")
 
 if (model_type == "nofp") {
-  model_file = "src/4_msom/msom_V4_nofp.txt"
+  model_file = "src/4_msom/msom_jags.txt"
 } else if (model_type == "fp") {
-  model_file = "src/4_msom/msom_V4_fp.txt"
+  model_file = "src/4_msom/msom_jags_fp.txt"
 } else {
   stop("ERROR: Unsupported model type")
 }
 
 model_name = tools::file_path_sans_ext(basename(model_file))
-path_out = paste0(dir_out, "/V4_", model_name, "_", model_type, "_", grouping, ".rds")
+path_out = paste0(dir_out, "/", model_name, "_", model_type, "_", grouping, ".rds")
 if (!dir.exists(dirname(path_out))) dir.create(dirname(path_out), recursive = TRUE)
 
 # Load dependencies ----------------------------------------------------------------------------
@@ -623,133 +623,3 @@ msom_results = list(
 )
 saveRDS(msom_results, file = path_out)
 message(crayon::green("Cached model and results to", path_out, "-", format(structure(file.info(path_out)$size, class = "object_size"), units = "auto")))
-
-# INSPECT MSOM ===============================================================================
-
-stop("READY FOR INSPECTION")
-
-model_data = read_rds(path_out) # DEBUG: "data/cache/models/Mar8_mscom_pcnt_nofp_all.rds"
-msom = model_data$msom
-stages = model_data$stages
-groups = model_data$groups
-species = model_data$species
-param_alpha_stage = model_data$param_alpha_data$param_alpha_stage
-param_alpha_season = model_data$param_alpha_data$param_alpha_season
-param_alpha_point_data = model_data$param_alpha_data$param_alpha_point_data
-param_alpha_plot_data = model_data$param_alpha_data$param_alpha_plot_data
-param_alpha_homerange_data = model_data$param_alpha_data$param_alpha_homerange_data
-
-if (FALSE) {
-  # "Examine trace plots for good mixing and convergence among chains. Each chain is displayed in a different colour. This means random paths exploring a lot of the parameter space on the y-axis without a clear pattern and each chain converging on the same value."
-  MCMCvis::MCMCtrace(msom$samples, ISB = FALSE, pdf = TRUE, exact = TRUE, post_zm = TRUE, type = 'trace', Rhat = TRUE, n.eff = TRUE)
-  
-  # "Examine density plots for not super-wide or with irregular peaks. The more parameter space the density plots include, the higher the uncertainty in a parameter estimate. The density curves don’t have to be normal but shouldn’t have multiple peaks and each chain colour should have approximately the same peak."
-  MCMCvis::MCMCtrace(msom$samples, ISB = FALSE, pdf = TRUE, exact = TRUE, post_zm = TRUE, type = 'density', Rhat = TRUE, n.eff = TRUE, ind = TRUE)
-}
-
-match_s = stages %>% distinct() %>% arrange(stage_idx)
-match_g = groups %>% select(group, group_idx) %>% distinct() %>% arrange(group_idx)
-match_i = tibble(species = species, species_idx = 1:length(species))
-
-# Inspect the mean and 95% BCI of hyperparameter estimates
-whiskerplot(msom, 'mu.u')
-# whiskerplot(msom, 'mu.alpha_stage')
-whiskerplot(msom, c(paste0('mu.', param_alpha_plot_data$param)))
-whiskerplot(msom, c(paste0('mu.', param_alpha_point_data$param)))
-whiskerplot(msom, c(paste0('mu.', param_alpha_homerange_data$param)))
-whiskerplot(msom, 'mu.alpha_season')
-
-whiskerplot(msom, 'mu.v')
-whiskerplot(msom, c(paste0('mu.', param_beta_point_data$param)))
-
-{
-  mu_alpha_homerange = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
-    filter(str_starts(parameter, "mu.alpha_homerange")) %>%
-    mutate(param = str_extract(parameter, "alpha_homerange\\d+")) %>%
-    mutate(
-      p = as.integer(str_match(parameter, "mu\\.alpha_homerange(\\d+)\\[(\\d+)\\]")[,2]),
-      g = as.integer(str_match(parameter, "mu\\.alpha_homerange(\\d+)\\[(\\d+)\\]")[,3])
-    ) %>% left_join(param_alpha_homerange_data %>% select(param, name), by = c("param")) %>%
-    left_join(match_g, by = c("g" = "group_idx"))
-  ggplot(mu_alpha_homerange, aes(x = mean, y = name, color = group)) +
-    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
-    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5))
-  
-  alpha_homerange = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
-    filter(str_starts(parameter, "alpha_homerange")) %>%
-    mutate(param = str_extract(parameter, "alpha_homerange\\d+")) %>%
-    mutate(
-      p = as.integer(str_match(parameter, "alpha_homerange(\\d+)\\[(\\d+)\\]")[,2]),
-      i = as.integer(str_match(parameter, "alpha_homerange(\\d+)\\[(\\d+)\\]")[,3])
-    ) %>% left_join(param_alpha_homerange_data %>% select(param, name), by = c("param")) %>% left_join(match_i, by = c("i" = "species_idx")) %>% left_join(groups, by = c("species" = "common_name"))
-  ggplot(alpha_homerange %>% filter(name == "pcnt_standinit") %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group)) +
-    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
-    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5)) +
-    labs(title = "pcnt_standinit") + theme(legend.position = "bottom")
-  ggplot(alpha_homerange %>% filter(name == "pcnt_mature") %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group)) +
-    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
-    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5)) +
-    labs(title = "pcnt_mature") + theme(legend.position = "bottom")
-  ggplot(alpha_homerange %>% filter(name == "pcnt_thin") %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group)) +
-    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
-    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5)) +
-    labs(title = "pcnt_thin") + theme(legend.position = "bottom")
-  
-  mu_alpha_plot = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
-    filter(str_starts(parameter, "mu.alpha_plot")) %>%
-    mutate(param = str_extract(parameter, "alpha_plot\\d+")) %>%
-    mutate(
-      p = as.integer(str_match(parameter, "mu\\.alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,2]),
-      s = as.integer(str_match(parameter, "mu\\.alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,3]),
-      g = as.integer(str_match(parameter, "mu\\.alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,4])
-    ) %>% left_join(param_alpha_plot_data %>% select(param, name), by = c("param")) %>%
-    left_join(match_s, by = c("s" = "stage_idx")) %>% left_join(match_g, by = c("g" = "group_idx"))
-  ggplot(mu_alpha_plot, aes(x = mean, y = name, color = group, shape = stratum_4)) +
-    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
-    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5))
-  
-  alpha_plot = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
-    filter(str_starts(parameter, "alpha_plot")) %>%
-    mutate(param = str_extract(parameter, "alpha_plot\\d+")) %>%
-    mutate(
-      p = as.integer(str_match(parameter, "alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,2]),
-      s = as.integer(str_match(parameter, "alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,3]),
-      i = as.integer(str_match(parameter, "alpha_plot(\\d+)\\[(\\d+),(\\d+)\\]")[,4])
-    ) %>% left_join(param_alpha_plot_data %>% select(param, name), by = c("param")) %>%
-    left_join(match_s, by = c("s" = "stage_idx")) %>% left_join(match_i, by = c("i" = "species_idx")) %>% left_join(groups, by = c("species" = "common_name"))
-  ggplot(alpha_plot %>% filter(name == "tree_acre_6_mean", stratum_4 == "mature") %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group, shape = stratum_4)) +
-    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
-    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5)) +
-    labs(title = "alpha_plot x stratum_4") + theme(legend.position = "bottom")
-  
-  mu_alpha_point = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
-    filter(str_starts(parameter, "mu.alpha_point")) %>%
-    mutate(param = str_extract(parameter, "alpha_point\\d+")) %>%
-    mutate(
-      p = as.integer(str_match(parameter, "mu\\.alpha_point(\\d+)\\[(\\d+)\\]")[,2]),
-      g = as.integer(str_match(parameter, "mu\\.alpha_point(\\d+)\\[(\\d+)\\]")[,3])
-    ) %>% left_join(param_alpha_point_data %>% select(param, name), by = c("param")) %>%
-    left_join(match_g, by = c("g" = "group_idx"))
-  ggplot(mu_alpha_point, aes(x = mean, y = name, color = group)) +
-    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
-    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5))
-  
-  mu_alpha_season = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
-    filter(str_starts(parameter, "mu.alpha_season")) %>%
-    mutate(
-      g = as.integer(str_match(parameter, "mu\\.alpha_season\\[(\\d+)\\]")[,2])
-    ) %>% left_join(match_g, by = c("g" = "group_idx"))
-  ggplot(mu_alpha_season, aes(x = mean, y = parameter, color = group)) +
-    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
-    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5))
-  
-  alpha_season = summary(msom) %>% as.data.frame() %>% rownames_to_column("parameter") %>%
-    filter(str_starts(parameter, "alpha_season")) %>%
-    mutate(
-      i = as.integer(str_match(parameter, "alpha_season\\[(\\d+)\\]")[,2])
-    ) %>% left_join(match_i, by = c("i" = "species_idx")) %>% left_join(groups, by = c("species" = "common_name"))
-  ggplot(alpha_season %>% mutate(species = fct_reorder(species, mean)), aes(x = mean, y = species, color = group)) +
-    geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
-    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0.1, position = position_dodge(width = 0.5)) +
-    labs(title = "season") + theme(legend.position = "bottom")
-}
