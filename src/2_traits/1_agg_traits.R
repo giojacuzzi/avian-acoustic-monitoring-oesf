@@ -7,9 +7,7 @@ path_out = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 ## INPUT:
 path_avonet      = "data/traits/AVONET Supplementary dataset 1.xlsx"
 path_eltontraits = "data/traits/EltonTraits 1.0/BirdFuncDat.csv"
-path_diets       = "data/traits/species_diets.csv"
-path_guilds      = "data/traits/species_guilds.csv"
-path_metadata    = "data/traits/species_metadata.csv"
+path_traits      = "data/traits/species_traits.csv"
 ###########################################################################################################
 
 source("src/global.R")
@@ -49,21 +47,17 @@ eltontraits = read_csv(path_eltontraits, show_col_types = FALSE) %>% clean_names
 # Check for any unmatched names
 # setdiff(class_labels$common_name, eltontraits %>% filter(common_name %in% class_labels$common_name) %>% pull(common_name))
 
-message("Loading guilds from ", path_guilds)
-guilds = read_csv(path_guilds, show_col_types = FALSE) %>% clean_names() %>%
-  mutate(common_name = tolower(common_name)) %>% select(common_name, foraging_guild_cornell, nesting_guild_cornell, nesting_guild_cornell_ps, conservation_cornell, association_phalan)
-
-message("Loading metadata from ", path_metadata)
-metadata = read.csv(path_metadata, nrows = 107) %>% clean_names() %>%
-  mutate(common_name = str_to_lower(common_name)) %>% select(common_name, home_range_radius_m)
+message("Loading trait data from ", path_traits)
+guilds = read_csv(path_traits, show_col_types = FALSE) %>% clean_names() %>%
+  mutate(common_name = tolower(common_name)) %>% select(
+    common_name, foraging_guild_cornell, nesting_guild_cornell, nesting_guild_cornell_ps, conservation_cornell, association_phalan, home_range_radius_m)
 
 message("Combining species trait databases")
 trait_data = left_join(class_labels,   avonet,  by = "scientific_name")
 trait_data = left_join(trait_data, eltontraits, by = "common_name")
 trait_data = left_join(trait_data, guilds,      by = "common_name")
-trait_data = left_join(trait_data, metadata,    by = "common_name")
 
-trait_data = trait_data %>% filter(!str_starts(label, "abiotic|biotic")) # retain only avian pecies, no other classes
+trait_data = trait_data %>% filter(!str_starts(label, "abiotic|biotic")) # retain only avian species, no other classes
 
 # All grouping (full community):
 trait_data = trait_data %>% mutate(
