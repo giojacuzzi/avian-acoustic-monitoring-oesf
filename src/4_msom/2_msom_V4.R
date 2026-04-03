@@ -2,7 +2,7 @@
 # Fit a multispecies occupancy model using MCMC with stage as a continuous % variable, using compex as the baseline reference
 #
 ## CONFIG:
-grouping = "forage_behavior" # Species grouping ("all", "diet", "nest", "nest_ps" ...)
+grouping = "forage_substrate" # Species grouping ("all", "diet", "forage_behavior", "nest_ps" ...)
 model_type = "nofp" # nofp, fp
 param_alpha_stage = "stratum_4"
 param_alpha_season = "season"
@@ -155,10 +155,15 @@ if (grouping == "nest_ps") { # Only 1-2 members per group
 if (grouping == "forage_behavior") { # Only 1 member per group
   species_to_exclude = unique(c(species_to_exclude, c("marbled murrelet")))
 }
+if (grouping == "forage_substrate") { # Only 1 member per group
+  species_to_exclude = unique(c(species_to_exclude, c("marbled murrelet")))
+}
 message("Excluding ", length(species_to_exclude), " species with insufficient observations: ")
 print(species_to_exclude)
 species_to_include = setdiff(species, species_to_exclude)
 species = species_to_include
+message("Including ", length(species), " species: ")
+print(species)
 species_idx = match(species, dimnames(y)$species)
 y = y[,,,species_idx, drop = FALSE]
 dimnames(y)$species = species
