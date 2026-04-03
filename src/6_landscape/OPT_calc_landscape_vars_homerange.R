@@ -2,16 +2,17 @@
 # Quantify variables for occurrence
 # NOTE: "hs" refers to data collected from in-person habitat surveys,
 #       while "rs" refers to data derived via remote-sensing imagery.
-# ETA: 16 hours
 #
 # OPTIMIZATION STEP 1: Remove dead patch-delineation code            (verified)
 # OPTIMIZATION STEP 2: Parallelise per-point loop with mclapply      (verified)
-# OPTIMIZATION STEP 3: Remove redundant homerange_and_edge_buffer
-#   After Step 1, homerange_and_edge_buffer / homerange_and_edge_crop had one
-#   remaining purpose: the raster-overlap guard (tryCatch / next).  That guard
-#   is moved directly onto homerange_crop — the operation that actually matters.
-#   This eliminates one st_buffer + one crop call per point per scale.
-#   core_area_buffer / core_area_buffer_ncells are also removed (now unused).
+# OPTIMIZATION STEP 3: Remove redundant homerange_and_edge_buffer    (verified)
+# OPTIMIZATION STEP 4: Micro-optimizations inside the worker
+#   a) Pre-compute all homerange buffer polygons before mclapply
+#   b) vect(homerange_buffer) computed once, used for both crop and mask
+#   c) ifel / rast_homerange moved inside the plot-scale block
+#   d) freq + dplyr pipeline replaced: ncells_homerange derived from freq(),
+#      8 filter+pull calls replaced with a single named-vector lookup
+#   e) Pointless single-iteration for(k in seq_along(regions)) loop removed
 
 library(parallel)
 
@@ -67,7 +68,6 @@ mapview(landscape_planning_units_clean) + mapview(pnts)
 
 message('Loading raster cover data from cache ', path_rast_cover)
 rast_cover = rast(path_rast_cover)
-# rast_cover = as.factor(rast_cover)
 
 #################################################################################
 species_trait_data = read.csv(path_trait_data)
@@ -130,12 +130,11 @@ if (overwrite_data_homerange_scale_cache) {
     rast_TREE_ACRE_6 = load_raster(paste0(rsfris_version_path, '/TREE_ACRE_6.tif'))
   )
   
-  # core_area_buffer removed — was only used to build homerange_and_edge_buffer,
-  # which existed solely for the patch block (Step 1) and the overlap guard (Step 3).
-  
   n_cores = max(1L, detectCores() - 1L)
   message("Parallelising over ", n_cores, " cores (", nrow(pnts), " points x ",
           nrow(homeranges), " scales)")
+  
+  all_cover_classes = c("thin", "standinit", "compex", "underdev", "old", "mature", "road_paved", "water")
   
   message("Calculating homerange variables across all scales")
   for (i in 1:nrow(homeranges)) {
@@ -149,75 +148,64 @@ if (overwrite_data_homerange_scale_cache) {
     
     message("Scale '", scale, "', home range buffer size: ", homerange_buffer_size)
     
+    # 4a: pre-compute all buffer polygons once per scale, outside mclapply.
+    # Workers index into this object rather than calling st_buffer themselves.
+    homerange_buffers = st_buffer(pnts, homerange_buffer_size)
+    
     data_homerange_scale_species_list = mclapply(
       seq_len(nrow(pnts)),
       mc.cores = n_cores,
       FUN = function(j) {
         
-        pnt = pnts[j, ]
+        homerange_buffer = homerange_buffers[j, ]
         
-        homerange_buffer = st_buffer(pnt, homerange_buffer_size)
+        # 4b: convert to SpatVector once; reuse for both crop and mask
+        homerange_buffer_vect = vect(homerange_buffer)
         
-        # STEP 3: tryCatch moved directly onto homerange_crop.
-        # Previously the guard was on homerange_and_edge_crop (a larger buffer),
-        # which was a proxy ensuring homerange_crop would succeed.  Checking
-        # homerange_crop directly is both simpler and more precise.
         homerange_crop = tryCatch({
-          crop(rast_cover, vect(homerange_buffer))
+          crop(rast_cover, homerange_buffer_vect)
         }, error = function(e) {
           if (grepl("extents do not overlap", e$message)) return(NULL)
         })
         
         if (is.null(homerange_crop)) return(NULL)
         
-        homerange_cover = mask(homerange_crop, vect(homerange_buffer))
-        rast_homerange  = ifel(!is.na(homerange_cover), 1, NA)
+        homerange_cover = mask(homerange_crop, homerange_buffer_vect)
         
-        ## Structural variables (across plot)
+        ## Structural variables (plot scale only)
         if (scale == "plot") {
-          results_list = list()
-          regions      = list(homerange = rast_homerange)
-          for (k in seq_along(regions)) {
-            region_name = names(regions)[k]
-            region      = resample(regions[[k]], rast_age, method = "near")
-            vars        = lapply(rast_rsfris, function(r) summary_stats(values(mask(r, region)), na.rm = TRUE))
-            names(vars) = sub("^rast_", "", names(vars))
-            vars        = as.data.frame(vars)
-            results_list[[region_name]] = vars
-          }
-          plot_rsfris_df = do.call(cbind, unname(results_list)) %>% clean_names()
+          # 4c: ifel / rast_homerange only created when actually needed
+          rast_homerange = ifel(!is.na(homerange_cover), 1, NA)
+          # 4e: removed the single-element for(k in seq_along(regions)) loop
+          region     = resample(rast_homerange, rast_age, method = "near")
+          vars       = lapply(rast_rsfris, function(r) summary_stats(values(mask(r, region)), na.rm = TRUE))
+          names(vars) = sub("^rast_", "", names(vars))
+          plot_rsfris_df = clean_names(as.data.frame(vars))
         }
         
         ## Homerange scale metrics
-        ncells_homerange = sum(!is.na(values(homerange_cover)))
+        # 4d: freq() called once; ncells derived from it, eliminating the
+        #     separate sum(!is.na(values())) call.  Named-vector lookup replaces
+        #     8 individual filter+pull operations.
+        freq_df          = freq(homerange_cover)
+        ncells_homerange = sum(freq_df$count)
+        cover_counts     = setNames(freq_df$count, freq_df$value)
         
-        cover_freq = tibble(
-          value = c("thin", "standinit", "compex", "underdev", "old", "mature", "road_paved", "water"),
-          count = 0
-        )
-        cover_freq = cover_freq %>%
-          rows_update(freq(homerange_cover) %>% select(value, count), by = "value", unmatched = "ignore")
-        
-        (pcnt_standinit  = cover_freq %>% filter(value == "standinit")  %>% pull(count) / ncells_homerange)
-        (pcnt_compex     = cover_freq %>% filter(value == "compex")     %>% pull(count) / ncells_homerange)
-        (pcnt_underdev   = cover_freq %>% filter(value == "underdev")   %>% pull(count) / ncells_homerange)
-        (pcnt_old        = cover_freq %>% filter(value == "old")        %>% pull(count) / ncells_homerange)
-        (pcnt_mature     = cover_freq %>% filter(value == "mature")     %>% pull(count) / ncells_homerange)
-        (pcnt_thin       = cover_freq %>% filter(value == "thin")       %>% pull(count) / ncells_homerange)
-        (pcnt_road_paved = cover_freq %>% filter(value == "road_paved") %>% pull(count) / ncells_homerange)
-        (pcnt_water      = cover_freq %>% filter(value == "water")      %>% pull(count) / ncells_homerange)
+        get_pcnt = function(cl) {
+          if (cl %in% names(cover_counts)) cover_counts[[cl]] / ncells_homerange else 0
+        }
         
         final_df = data.frame(
           scale           = scale,
           buffer_radius_m = homerange_buffer_size,
-          pcnt_standinit,
-          pcnt_compex,
-          pcnt_underdev,
-          pcnt_old,
-          pcnt_mature,
-          pcnt_thin,
-          pcnt_road_paved,
-          pcnt_water
+          pcnt_standinit  = get_pcnt("standinit"),
+          pcnt_compex     = get_pcnt("compex"),
+          pcnt_underdev   = get_pcnt("underdev"),
+          pcnt_old        = get_pcnt("old"),
+          pcnt_mature     = get_pcnt("mature"),
+          pcnt_thin       = get_pcnt("thin"),
+          pcnt_road_paved = get_pcnt("road_paved"),
+          pcnt_water      = get_pcnt("water")
         )
         
         if (scale == "plot") final_df = cbind(final_df, plot_rsfris_df)
