@@ -54,7 +54,7 @@ pnts = switch(
     path_rast_cover = path_rast_cover
     landscape_planning_units_pnts = landscape_planning_units_clean %>% filter(unit == "Upper Clearwater")
     bbox     = st_bbox(landscape_planning_units_pnts)
-    cellsize = 5000
+    cellsize = 2500
     grid     = st_sf(st_make_grid(x = st_as_sfc(bbox), cellsize = cellsize,
                                   offset = c(bbox["xmin"], bbox["ymin"]), what = "centers"))
     grid     = grid[st_within(grid, st_union(landscape_planning_units_pnts), sparse = FALSE), ]
@@ -178,9 +178,9 @@ if (overwrite_data_homerange_scale_cache) {
           rast_homerange = ifel(!is.na(homerange_cover), 1, NA)
           # 4e: removed the single-element for(k in seq_along(regions)) loop
           region     = resample(rast_homerange, rast_age, method = "near")
-          vars       = lapply(rast_rsfris, function(r) summary_stats(values(mask(r, region)), na.rm = TRUE))
-          names(vars) = sub("^rast_", "", names(vars))
-          plot_rsfris_df = clean_names(as.data.frame(vars))
+          rsfris_means        = sapply(rast_rsfris, function(r) mean(values(mask(r, region)), na.rm = TRUE))
+          names(rsfris_means) = paste0(sub("^rast_", "", names(rsfris_means)), "_mean")
+          plot_rsfris_df      = clean_names(as.data.frame(t(rsfris_means)))
         }
         
         ## Homerange scale metrics
@@ -200,12 +200,12 @@ if (overwrite_data_homerange_scale_cache) {
           buffer_radius_m = homerange_buffer_size,
           pcnt_standinit  = get_pcnt("standinit"),
           pcnt_compex     = get_pcnt("compex"),
-          pcnt_underdev   = get_pcnt("underdev"),
-          pcnt_old        = get_pcnt("old"),
+          # pcnt_underdev   = get_pcnt("underdev"),
+          # pcnt_old        = get_pcnt("old"),
           pcnt_mature     = get_pcnt("mature"),
-          pcnt_thin       = get_pcnt("thin"),
-          pcnt_road_paved = get_pcnt("road_paved"),
-          pcnt_water      = get_pcnt("water")
+          pcnt_thin       = get_pcnt("thin")
+          # pcnt_road_paved = get_pcnt("road_paved"),
+          # pcnt_water      = get_pcnt("water")
         )
         
         if (scale == "plot") final_df = cbind(final_df, plot_rsfris_df)

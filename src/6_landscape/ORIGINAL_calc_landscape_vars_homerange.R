@@ -48,7 +48,7 @@ pnts = switch(pnts_name,
                 # debug
                 landscape_planning_units_pnts = landscape_planning_units_clean %>% filter(unit == "Upper Clearwater")
                 bbox = st_bbox(landscape_planning_units_pnts)
-                cellsize = 5000 # distance between points (meters)
+                cellsize = 2500 # distance between points (meters)
                 grid = st_sf(st_make_grid(x = st_as_sfc(bbox), cellsize = cellsize, offset = c(bbox["xmin"], bbox["ymin"]), what = "centers"))
                 grid = grid[st_within(grid, st_union(landscape_planning_units_pnts), sparse = FALSE), ]
                 grid = st_sf(geometry = st_geometry(grid))
@@ -277,12 +277,12 @@ if (overwrite_data_homerange_scale_cache) {
         buffer_radius_m = homerange_buffer_size,
         pcnt_standinit,
         pcnt_compex,
-        pcnt_underdev,
-        pcnt_old,
+        # pcnt_underdev,
+        # pcnt_old,
         pcnt_mature,
-        pcnt_thin,
-        pcnt_road_paved,
-        pcnt_water
+        pcnt_thin
+        # pcnt_road_paved,
+        # pcnt_water
       )
       
       if (scale == "plot") {
