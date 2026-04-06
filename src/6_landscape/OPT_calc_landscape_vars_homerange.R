@@ -24,6 +24,9 @@ cover_classification             = "clean_strata_4"
 t                                = 2020
 cell_resolution                  = 100 # 9h @ 100
 
+calc_homerange_vars = FALSE
+calc_local_vars = TRUE
+
 ### OUTPUT:
 path_data_plot_scale_out      = paste0("data/cache/7_landscape/OPT_landscape_data_plot_scale_",      t, "_", cover_classification, "_", pnts_name, ".rds")
 path_data_homerange_scale_out = paste0("data/cache/7_landscape/OPT_landscape_data_homerange_scale_", t, "_", cover_classification, "_", pnts_name, ".rds")
@@ -45,7 +48,6 @@ message("Current time ", time_start_global <- Sys.time())
 
 #################################################################################
 source("src/global.R")
-message("Calculating occurrence variables for year ", t)
 
 version             = rsfris_version_years %>% filter(year == t) %>% pull(version)
 rsfris_version_path = paste0("data/environment/rsfris_study_area/", version)
@@ -110,7 +112,6 @@ summary_stats = function(x, na.rm = TRUE, conversion_factor = 1) {
   return(data.frame(mean = mu))
 }
 
-#################################################################################
 rast_origin         = load_raster(paste0(rsfris_version_path, '/ORIGIN_YEAR.tif'))
 rast_origin_missing = rast_origin
 values(rast_origin_missing)[values(rast_origin_missing) <= t] = NA
@@ -118,7 +119,42 @@ values(rast_origin)[values(rast_origin) > t]                  = NA
 rast_age = round(t - rast_origin)
 
 #################################################################################
-if (overwrite_data_homerange_scale_cache) {
+if (calc_local_vars) {
+  message("Calculating local occurrence variables // (current time ", time_start <- Sys.time(), ")")
+  
+  source("src/3_gis/1_preprocess_gis_data.R")
+  
+  # Plot-level spatial scale buffer
+  plot_buffer = 100 # 100 meters
+  
+  paved_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway", "Light-Duty Road")))
+  
+  # Elevation [m]
+  rast_elevation = load_raster("data/environment/elevation/elevation.tif")
+  pnts$elevation = extract(rast_elevation, vect(pnts))[,2]
+  # mapview(pnts, zcol = "elevation")
+  
+  # Distance to roads
+  dist_road_paved = st_distance(pnts, paved_roads)
+  dist_road_paved = apply(dist_road_paved, 1, min)
+  pnts$dist_road_paved = dist_road_paved
+  # mapview(pnts, zcol = "dist_road_paved") + mapview(paved_roads)
+  
+  # Distance to water (type 1-3 and all types) [m]
+  dist_watercourse_major = st_distance(pnts, boundary_watercourses)
+  dist_watercourse_major = apply(dist_watercourse_major, 1, min)
+  pnts$dist_watercourse_major = dist_watercourse_major
+  # mapview(pnts, zcol = "dist_watercourse_major") + mapview(boundary_watercourses)
+  
+  dir.create(dirname(path_data_plot_scale_out), recursive = TRUE, showWarnings = FALSE)
+  saveRDS(pnts, path_data_plot_scale_out)
+  message(crayon::green("Cached plot scale data to", path_data_plot_scale_out, "(", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), "min )"))
+  
+}
+
+#################################################################################
+if (calc_homerange_vars) {
+  message("Calculating homerange occurrence variables for year ", t)
   
   data_homerange_scale = list()
   
@@ -258,7 +294,6 @@ if (overwrite_data_homerange_scale_cache) {
   message(crayon::green("Cached homerange data cache to", path_data_homerange_scale_out,
                         "(", round(as.numeric(difftime(Sys.time(), time_start_global, units = 'hours')), 2), "hours )"))
   
-} else {
-  message('Loading homerange scale data from cache ', path_data_homerange_scale_out)
-  data_homerange_scale = readRDS(path_data_homerange_scale_out)
 }
+
+message("Complete")
