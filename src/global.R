@@ -209,3 +209,10 @@ theme_sleek = function(base_size = 11, base_family = "") {
     )
 }
 theme_set(theme_sleek())
+
+stage_colors = c(
+  "Stand Initiation"      = "orange",
+  "Competitive Exclusion" = "forestgreen",
+  "Thinned"               = "purple",
+  "Mature"                = "tan4"
+)
