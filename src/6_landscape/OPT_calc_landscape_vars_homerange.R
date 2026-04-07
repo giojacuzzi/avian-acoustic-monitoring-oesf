@@ -18,8 +18,6 @@ library(parallel)
 
 ## CONFIG:
 pnts_name                        = "landscape"
-overwrite_data_plot_scale_cache  = TRUE
-overwrite_data_homerange_scale_cache = TRUE
 cover_classification             = "clean_strata_4"
 t                                = 2020
 cell_resolution                  = 100 # 9h @ 100
@@ -128,6 +126,9 @@ if (calc_local_vars) {
   plot_buffer = 100 # 100 meters
   
   paved_roads = st_make_valid(roads %>% filter(road_usgs1 %in% c("Primary Highway", "Light-Duty Road")))
+  
+  # Age
+  pnts$age_point = terra::extract(rast_age, vect(pnts))[, 2]
   
   # Elevation [m]
   rast_elevation = load_raster("data/environment/elevation/elevation.tif")
