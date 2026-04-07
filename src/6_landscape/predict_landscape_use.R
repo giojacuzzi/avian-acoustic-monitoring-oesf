@@ -1,12 +1,15 @@
 ####################################################################################
-## Predict habitat use across the landscape
-##
+# Predict habitat use across the landscape
+#
 ## CONFIG:
 sp_name  = "olive-sided flycatcher"
 season_t = "2020"
-
+units_to_predict = c("Upper Clearwater", "Willy - Huel", "Kalaloch", "Queets", "Copper Mine")
+mask_riparian_zones = TRUE # Exclude "Riparian Management Zones" interior-core buffers for type 1-4 streams
+#
 ## INPUT:
 path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds"
+####################################################################################
 
 source("src/global.R")
 
@@ -91,6 +94,39 @@ rasters = lapply(vars, function(v) {
 })
 names(rasters) = vars
 rast_stack = rast(rasters)
+
+# Mask by management unit and forest-only upland extent -------------------------------------------------------
+mask_poly = landscape_planning_units %>%
+  filter(unit %in% units_to_predict) %>%
+  st_transform(crs = crs(rast_stack)) %>%
+  st_collection_extract("POLYGON") %>%  # extract only polygon parts
+  st_union() %>%                         # dissolve into single geometry
+  st_sf()                                # back to sf object
+mask_poly = st_transform(mask_poly, crs = crs(rast_stack))
+
+# Mask and crop
+rast_stack = rast_stack %>% crop(vect(mask_poly)) %>% mask(vect(mask_poly))
+
+if (mask_riparian_zones) {
+  source("src/3_gis/1_preprocess_gis_data.R")
+  
+  # Interior-core buffers (per WADNR FEIS)
+  riparian_buffers = watercourses %>%
+    filter(sl_wtrty_c %in% c(1, 2, 3, 4)) %>%
+    mutate(buffer_m = case_when(
+      # 150 feet for type 1 and 2 streams
+      sl_wtrty_c %in% c(1, 2) ~ 150 * conv_ft_to_m,
+      # 100 feet for type 3 and 4 streams
+      sl_wtrty_c %in% c(3, 4) ~ 100 * conv_ft_to_m
+    )) %>%
+    st_buffer(dist = .$buffer_m) %>%
+    st_union() %>%  # dissolve overlapping buffers into single polygon
+    st_sf()
+  
+  # mapview(watercourses %>% filter(sl_wtrty_c %in% c(1, 2, 3, 4))) + mapview(stream_buffers)
+  rast_stack = rast_stack %>% mask(vect(stream_buffers), inverse = TRUE)
+  names(rast_stack) = vars
+}
 
 # Predict occupancy probability -------------------------------------------------------
 
@@ -212,16 +248,18 @@ rast_psi = rast(
   type = "xyz", crs = crs(rast_stack)
 )
 
-# Visualize maps
+# Visualize species distribution maps
 stop("READY FOR INSPECTION")
 # mapview(rast_psi[["psi_sd"]]) + mapview(rast_psi[["psi_mean"]])
 
+# Predicted distribution map expressed in terms of model estimated probability of the species using an X by X unit, where X is the resolution of a cell
 p_mean = ggplot() +
   geom_spatraster(data = rast_psi[["psi_mean"]]) +
   scale_fill_viridis_c(option = "viridis", limits = c(0, 1), na.value = NA) +
   labs(title = sp_name, fill = "Ψ") +
   theme(legend.position = "right")
 
+# Corresponding map of standard deviation
 p_sd = ggplot() +
   geom_spatraster(data = rast_psi[["psi_sd"]]) +
   scale_fill_viridis_c(option = "magma", na.value = NA) +
@@ -232,8 +270,6 @@ p_sd = ggplot() +
         )
 
 p_mean + p_sd
-
-# TODO: Mask by management unit and forest-only upland extent
 
 # Posterior mean use probability distribution
 ggplot(df_pred, aes(x = psi_mean, fill = after_stat(x))) +
