@@ -1,6 +1,9 @@
 #####################################################################################
 # Predict habitat use across the landscape
 #
+# CONFIG:
+sp_name = "olive-sided flycatcher"
+#
 # INPUT:
 path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds"
 
@@ -45,7 +48,6 @@ points_plot = st_as_sf(data_homerange[["plot"]] %>% select(
   "x", "y", "bap_hwd_mean", "qmd_6_mean", "tree_acre_6_mean"
 ), coords = c("x", "y"), crs = crs_m)
 
-sp_name = "brown creeper"
 str(data_homerange[[sp_name]])
 
 points_homerange = st_as_sf(data_homerange[[sp_name]] %>% select(
@@ -71,7 +73,10 @@ if (anyNA(points)) {
 # Get stage from rast cover
 stage_vals = extract(rast_cover, vect(points))
 points$stage = stage_vals$stage
-points = points %>% left_join(stages %>% distinct() %>% select(stratum_4, stage_idx), by = c("stage" = "stratum_4"))
+points = points %>% left_join(
+  stages %>% distinct() %>% mutate(stratum_4 = as.character(stratum_4)) %>% select(stratum_4, stage_idx),
+  by = c("stage" = "stratum_4")
+)
 
 # mapview(points)
 
@@ -139,10 +144,7 @@ df_pred$thin_sc      <- sc(df_pred$pcnt_thin,       ahome$data[[2]][[sp_name]])
 df_pred$mature_sc    <- sc(df_pred$pcnt_mature,      ahome$data[[3]][[sp_name]])
 
 # ── Season scalar ─────────────────────────────────────────────────────────────
-x_season_t <- as.vector(pad$param_alpha_season |> 
-                          (\(.) scale(1:length(seasons)))())[t_idx]
-# Or more simply, since you have it already:
-x_season_t <- as.vector(scale(1:length(seasons)))[t_idx]
+x_season_t <- as.vector(scale(seq_along(seasons)))[t_idx]
 
 # ── Posterior samples for this species ───────────────────────────────────────
 sl  <- msom$sims.list
@@ -201,9 +203,9 @@ for (ch in seq_len(n_chunks)) {
   
   logit_psi_ch <-
     outer(u_i, rep(1, length(idx))) +
-    ap1[, sv_ch] * outer(rep(1, n_iter), df_pred$tree_acre_sc[idx]) +
-    ap2[, sv_ch] * outer(rep(1, n_iter), df_pred$qmd_sc[idx]) +
-    ap3[, sv_ch] * outer(rep(1, n_iter), df_pred$bap_hwd_sc[idx]) +
+    ap1[, sv_ch, drop = FALSE] * outer(rep(1, n_iter), df_pred$tree_acre_sc[idx]) +
+    ap2[, sv_ch, drop = FALSE] * outer(rep(1, n_iter), df_pred$qmd_sc[idx]) +
+    ap3[, sv_ch, drop = FALSE] * outer(rep(1, n_iter), df_pred$bap_hwd_sc[idx]) +
     outer(apt1, df_pred$elev_sc[idx]) +
     outer(apt2, df_pred$road_sc[idx]) +
     outer(apt3, df_pred$water_sc[idx]) +
@@ -233,3 +235,14 @@ rast_psi <- rast(
   type = "xyz", crs = crs(rast_stack)
 )
 mapview(rast_psi[["psi_mean"]]) + mapview(rast_psi[["psi_sd"]])
+
+ggplot(df_pred, aes(x = psi_mean, fill = after_stat(x))) +
+  geom_histogram(bins = 100, color = NA) +
+  scale_fill_viridis_c(option = "viridis", limits = c(0, 1)) +
+  scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+  labs(
+    x = "Posterior mean occupancy probability",
+    y = "Number of cells",
+    fill = "Ψ",
+    title = sp_name
+  )
