@@ -11,16 +11,16 @@ min_sites_detected = 1 # Minimum number of sites present to retain a species for
 out_cache_dir  = "data/cache/4_msom/1_assemble_msom_data"
 path_out_y     = paste0(out_cache_dir, "/y.rds")
 path_out_xyday = paste0(out_cache_dir, "/xyday.rds")
-path_out_occurrence_predictor_plot_data      = paste0(out_cache_dir, "/V3_occurrence_predictor_plot_data.rds")
-path_out_occurrence_predictor_homerange_data = paste0(out_cache_dir, "/V3_occurrence_predictor_homerange_data.rds")
-path_out_detection_predictor_data            = paste0(out_cache_dir, "/V3_detection_predictor_data.rds")
+path_out_occurrence_predictor_plot_data      = paste0(out_cache_dir, "/occurrence_predictor_plot_data.rds")
+path_out_occurrence_predictor_homerange_data = paste0(out_cache_dir, "/occurrence_predictor_homerange_data.rds")
+path_out_detection_predictor_data            = paste0(out_cache_dir, "/detection_predictor_data.rds")
 #
 # INPUT:
-path_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_predictions.rds"
-path_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_surveydates.rds"
 path_calibration_results         = "data/cache/1_pam/1_classifier_calibration/NEW_calibration_results_raw.csv"
 path_annotations                 = "data/cache/1_pam/1_classifier_calibration/NEW_annotations_clean.csv"
-path_predictors_detection  = "data/cache/3_gis/6_calc_detection_vars/V2_data_detection.rds"
+path_community_array_predictions = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_predictions.rds"
+path_community_array_surveydates = "data/cache/1_pam/3_agg_community_arrays/V2_community_array_surveydates.rds"
+path_predictors_detection        = "data/cache/3_gis/6_calc_detection_vars/data_detection.rds"
 ##################################################################################################################
 
 source("src/global.R")
@@ -298,12 +298,12 @@ occ_pred_data_plot = list()
 occ_pred_data_homerange = list()
 for (t in seasons) {
   
-  path_plot_scale_data = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_", t, "_clean_strata_4.rds")
+  path_plot_scale_data = paste0("data/cache/3_gis/3_calc_occurrence_vars/data_plot_scale_", t, "_clean_strata_4_sites.rds")
   message("Loading local plot scale data from ", path_plot_scale_data)
   occurrence_predictor_plot_data_local = readRDS(path_plot_scale_data) %>% st_drop_geometry() %>% arrange(site) %>% mutate(site = tolower(site))
   
   s = 'plot'
-  path_homerange_scale_data = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_", t, "_clean_strata_4.rds")
+  path_homerange_scale_data = paste0("data/cache/3_gis/3_calc_occurrence_vars/data_homerange_scale_", t, "_clean_strata_4_sites.rds")
   message("Loading remote sensing plot scale data from '", s, "' layer ", path_homerange_scale_data)
   occurrence_predictor_plot_data_rs = readRDS(path_homerange_scale_data)[[s]] %>% arrange(site) %>% mutate(site = tolower(site))
   

@@ -10,7 +10,7 @@ path_out = "data/cache/3_gis/2_gen_cover_rasters"
 # RS-FRIS 5.0 uses a combination of 2021 and 2022 photogrammetry. 
 # TODO: Calculate on a yearly basis!
 path_rsfris = "data/environment/rsfris_study_area"
-path_trait_data = "data/cache/trait_data/trait_data.csv"
+path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 ###########################################################################################################
 
 source("src/global.R")
@@ -114,15 +114,15 @@ for (t in rsfris_version_years$year) {
   
   ## Classify cover by age breaks
   
-  rast_stage_3 = classify(rast_age, as.matrix(stages_3 %>% select(-class)), include.lowest = TRUE, right = FALSE)
-  levels(rast_stage_3) = data.frame(ID = stages_3$idx, stage = stages_3$class)
-  data_plot_scale$stage_3 = terra::extract(rast_stage_3, vect(data_plot_scale))[, 2]
-  table(data_plot_scale$stage_3)
-  
-  rast_stage_4 = classify(rast_age, as.matrix(stages_4 %>% select(-class)), include.lowest = TRUE, right = FALSE)
-  levels(rast_stage_4) = data.frame(ID = stages_4$idx, stage = stages_4$class)
-  data_plot_scale$stage_4 = terra::extract(rast_stage_4, vect(data_plot_scale))[, 2]
-  table(data_plot_scale$stage_4)
+  # rast_stage_3 = classify(rast_age, as.matrix(stages_3 %>% select(-class)), include.lowest = TRUE, right = FALSE)
+  # levels(rast_stage_3) = data.frame(ID = stages_3$idx, stage = stages_3$class)
+  # data_plot_scale$stage_3 = terra::extract(rast_stage_3, vect(data_plot_scale))[, 2]
+  # table(data_plot_scale$stage_3)
+  # 
+  # rast_stage_4 = classify(rast_age, as.matrix(stages_4 %>% select(-class)), include.lowest = TRUE, right = FALSE)
+  # levels(rast_stage_4) = data.frame(ID = stages_4$idx, stage = stages_4$class)
+  # data_plot_scale$stage_4 = terra::extract(rast_stage_4, vect(data_plot_scale))[, 2]
+  # table(data_plot_scale$stage_4)
   
   rast_strata_4 = classify(rast_age, as.matrix(strata_4 %>% filter(class != "thin") %>% select(-class)), include.lowest = TRUE, right = FALSE)
   rast_strata_4 = cover(rast_thin, rast_strata_4)
@@ -130,20 +130,20 @@ for (t in rsfris_version_years$year) {
   data_plot_scale$stratum_4 = terra::extract(rast_strata_4, vect(data_plot_scale))[, 2]
   table(data_plot_scale$stratum_4)
   
-  rast_strata_5 = classify(rast_age, as.matrix(strata_5 %>% filter(class != "thin") %>% select(-class)), include.lowest = TRUE, right = FALSE)
-  rast_strata_5 = cover(rast_thin, rast_strata_5)
-  levels(rast_strata_5) = data.frame(ID = strata_5$idx, stage = strata_5$class)
-  data_plot_scale$stratum_5 = terra::extract(rast_strata_5, vect(data_plot_scale))[, 2]
-  table(data_plot_scale$stratum_5)
+  # rast_strata_5 = classify(rast_age, as.matrix(strata_5 %>% filter(class != "thin") %>% select(-class)), include.lowest = TRUE, right = FALSE)
+  # rast_strata_5 = cover(rast_thin, rast_strata_5)
+  # levels(rast_strata_5) = data.frame(ID = strata_5$idx, stage = strata_5$class)
+  # data_plot_scale$stratum_5 = terra::extract(rast_strata_5, vect(data_plot_scale))[, 2]
+  # table(data_plot_scale$stratum_5)
   
   # Assemble cover class raster ---------------------------------------------------------------
   
   # Loop over all strata/stages
   all_raster_list = list(
-    "stage_3" = rast_stage_3,
-    "stage_4" = rast_stage_4,
-    "strata_4" = rast_strata_4,
-    "strata_5" = rast_strata_5
+  #  "stage_3" = rast_stage_3,
+  #  "stage_4" = rast_stage_4,
+    "strata_4" = rast_strata_4
+  #  "strata_5" = rast_strata_5
   )
   rast_cover = list()
   for (rast_name in names(all_raster_list)) {
@@ -284,7 +284,7 @@ for (t in rsfris_version_years$year) {
     pids = unique(na.omit(as.vector(values(patch_stack[['patch_id']]))))
     pb = progress_bar$new(format = "[:bar] :percent :elapsedfull (ETA :eta)", total = length(pids), clear = FALSE)
     for (pid in pids) {
-      m = trim(classify(patch_stack[['patch_id']], cbind(pid, 1), others = NA)) # Mask patch
+      m = (ifel(patch_stack[['patch_id']] == pid, 1, NA)) # Mask patch
       m_vals = as.matrix(m, wide=TRUE)
       
       if (all(is.na(m_vals))) next  # Skip empty masks
@@ -395,16 +395,16 @@ for (t in rsfris_version_years$year) {
   
   site_cover_class_sf = data_plot_scale %>%
     left_join(site_key, by = "site") %>%  mutate(stratum_4 = coalesce(stratum, stratum_4)) %>% select(-stratum)
-  site_cover_class_sf = site_cover_class_sf %>%
-    left_join(site_key, by = "site") %>%
-    mutate(
-      stratum_5 = if_else(
-        stratum_5 %in% c("standinit", "thin", "compex") & !is.na(stratum),
-        stratum,
-        stratum_5
-      )
-    ) %>%
-    select(-stratum)
+  # site_cover_class_sf = site_cover_class_sf %>%
+  #   left_join(site_key, by = "site") %>%
+  #   mutate(
+  #     stratum_5 = if_else(
+  #       stratum_5 %in% c("standinit", "thin", "compex") & !is.na(stratum),
+  #       stratum,
+  #       stratum_5
+  #     )
+  #   ) %>%
+  #   select(-stratum)
   
   # Cache site cover class data
   path_out_site_cover_class_sf = paste0(path_out, "/site_cover_class_", t, "_sf.rds")
@@ -414,27 +414,27 @@ for (t in rsfris_version_years$year) {
   message(crayon::green("Finished generating cover cache (", round(as.numeric(difftime(Sys.time(), time_start, units = 'mins')), 2), " minutes)"))
   
   # Compare original vs clean
-  plot(rast_cover[["stage_3"]], main = "stage_3 (original)")
-  plot(rast_cover_clean[["stage_3"]], main = "stage_3 (clean)")
+  plot(rast_cover[["strata_4"]], main = "strata_4 (original)")
+  plot(rast_cover_clean[["strata_4"]], main = "strata_4 (clean)")
   
   # View each raster
-  plot(rast_cover[["stage_3"]], main = "Developmental stage (3-class)", col = c(
-    "standinit"  = "#d8c18a",
-    "compex"     = "#3c8273",
-    "mature"     = "#9b652b",
-    "water"      = "#6495ed",
-    "road_paved" = "gray50",
-    "other"      = "gray80"
-  ))
-  plot(rast_cover[["stage_4"]], main = "Developmental stage (4-class)", col = c(
-    "standinit"  = "#d8c18a",
-    "compex"     = "#3c8273",
-    "underdev"   = "#9b652b",
-    "old"        = "#5C4033",
-    "water"      = "#6495ed",
-    "road_paved" = "gray50",
-    "other"      = "gray80"
-  ))
+  # plot(rast_cover[["stage_3"]], main = "Developmental stage (3-class)", col = c(
+  #   "standinit"  = "#d8c18a",
+  #   "compex"     = "#3c8273",
+  #   "mature"     = "#9b652b",
+  #   "water"      = "#6495ed",
+  #   "road_paved" = "gray50",
+  #   "other"      = "gray80"
+  # ))
+  # plot(rast_cover[["stage_4"]], main = "Developmental stage (4-class)", col = c(
+  #   "standinit"  = "#d8c18a",
+  #   "compex"     = "#3c8273",
+  #   "underdev"   = "#9b652b",
+  #   "old"        = "#5C4033",
+  #   "water"      = "#6495ed",
+  #   "road_paved" = "gray50",
+  #   "other"      = "gray80"
+  # ))
   plot(rast_cover[["strata_4"]], main = "Management strata (4-class)", col = c(
     "thin"       = "#b2675e",
     "standinit"  = "#d8c18a",
@@ -444,19 +444,19 @@ for (t in rsfris_version_years$year) {
     "road_paved" = "gray50",
     "other"      = "gray80"
   ))
-  plot(rast_cover[["strata_5"]], main = "Managment strata (5-class)", col = c(
-    "thin"       = "#b2675e",
-    "standinit"  = "#d8c18a",
-    "compex"     = "#3c8273",
-    "underdev"   = "#9b652b",
-    "old"        = "#5C4033",
-    "water"      = "#6495ed",
-    "road_paved" = "gray50",
-    "other"      = "gray80"
-  ))
+  # plot(rast_cover[["strata_5"]], main = "Managment strata (5-class)", col = c(
+  #   "thin"       = "#b2675e",
+  #   "standinit"  = "#d8c18a",
+  #   "compex"     = "#3c8273",
+  #   "underdev"   = "#9b652b",
+  #   "old"        = "#5C4033",
+  #   "water"      = "#6495ed",
+  #   "road_paved" = "gray50",
+  #   "other"      = "gray80"
+  # ))
   
   # Inspect dynamically
-  mapview(rast_cover_clean[["strata_5"]],
+  mapview(rast_cover_clean[["strata_4"]],
           alpha.regions = 1.0,
           col.regions = c(
             "thin"       = "#b2675e",

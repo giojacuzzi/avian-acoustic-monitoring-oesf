@@ -2,7 +2,7 @@
 # Fit a multispecies occupancy model using MCMC with stage as a continuous % variable, using compex as the baseline reference
 #
 ## CONFIG:
-grouping = "forage_behavior" # Species grouping ("all", "diet", "nest", "nest_ps" ...)
+grouping = "all" # Species grouping ("all", "diet", "nest", "nest_ps" ...)
 model_type = "nofp" # nofp, fp
 param_alpha_stage = "stratum_4"
 param_alpha_season = "season"
@@ -44,9 +44,9 @@ dir_out = "data/cache/models"
 #
 ## INPUT:
 path_y                                   = "data/cache/4_msom/1_assemble_msom_data/y.rds"
-path_occurrence_predictor_plot_data      = "data/cache/4_msom/1_assemble_msom_data/V3_occurrence_predictor_plot_data.rds"
-path_occurrence_predictor_homerange_data = "data/cache/4_msom/1_assemble_msom_data/V3_occurrence_predictor_homerange_data.rds"
-path_detection_predictor_data            = "data/cache/4_msom/1_assemble_msom_data/V3_detection_predictor_data.rds"
+path_occurrence_predictor_plot_data      = "data/cache/4_msom/1_assemble_msom_data/occurrence_predictor_plot_data.rds"
+path_occurrence_predictor_homerange_data = "data/cache/4_msom/1_assemble_msom_data/occurrence_predictor_homerange_data.rds"
+path_detection_predictor_data            = "data/cache/4_msom/1_assemble_msom_data/detection_predictor_data.rds"
 path_trait_data                          = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 ###########################################################################################################
 

@@ -2,7 +2,12 @@
 
 source("src/global.R")
 
-path_rsfris = "/Volumes/gioj/OESF/gis"
+path_rsfris = "E:/OESF/gis/rsfris" # "/Volumes/gioj/OESF/gis"
+path_elevation = "E:/OESF/gis/usgs_elevation/USGS_13.tif" # "/Volumes/gioj/OESF/gis/usgs_elevation/USGS_13.tif"
+
+# RSFRIS -----------------------------------------------------------------
+
+message("Loading ", path_rsfris)
 
 # List all subdirectories
 subdirs <- list.dirs(path_rsfris, recursive = FALSE)
@@ -42,6 +47,8 @@ print(df)
 # Initialize nested list
 raster_list <- list()
 
+message("Cropping RSFRIS rasters")
+
 # Loop over each row in df
 for (i in seq_len(nrow(df))) {
   version <- df$version[i]
@@ -80,12 +87,19 @@ for (version in names(raster_list)) {
     # raster::writeRaster(r, out_path, overwrite = TRUE)
   }
 }
-message("Finished")
 
-## Elevation
+plot(r)
+
+message(crayon::green("Finished cropping rsfris layers"))
+
+## Elevation -------------------------------------------------------
+
+message("Loading ", path_elevation)
 
 # Load raster
-dem <- rast("/Volumes/gioj/OESF/gis/usgs_elevation/USGS_13.tif")
+dem <- rast(path_elevation)
+
+message("Cropping elevation raster")
 
 # Transform study area to raster CRS
 sa <- st_transform(study_area, crs(dem))
@@ -103,5 +117,7 @@ dem_mask <- mask(dem_crop, sa_vect)
 plot(dem_mask)
 
 out_path <- "data/environment/elevation/elevation.tif"
-dir.create(out_path, recursive = TRUE, showWarnings = FALSE)
+dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
 terra::writeRaster(dem_mask, out_path, overwrite = TRUE)
+
+message(crayon::green("Finished cropping elevation layer"))

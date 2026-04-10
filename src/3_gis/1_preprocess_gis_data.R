@@ -5,10 +5,10 @@
 # (various sf objects in local memory)
 #
 ## INPUT:
-path_watercourses = "data/environment/DNR_Hydrography/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation.shp"
-path_waterbodies  = "data/environment/DNR_Hydrography/DNR_Hydrography_-_Water_Bodies_-_Forest_Practices_Regulation/DNR_Hydrography_-_Water_Bodies_-_Forest_Practices_Regulation.shp"
-path_roads_wadnr  = "data/environment/GIS Data/roads/T3roads.shp"
-path_roads_wsdot  = "data/environment/WSDOT_-_Local_Agency_Public_Road_Routes/WSDOT_-_Local_Agency_Public_Road_Routes.shp"
+path_watercourses = "data/environment/GIS Data/DNR_Hydrography/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation/DNR_Hydrography_-_Watercourses_-_Forest_Practices_Regulation.shp"
+path_waterbodies  = "data/environment/GIS Data/DNR_Hydrography/DNR_Hydrography_-_Water_Bodies_-_Forest_Practices_Regulation/DNR_Hydrography_-_Water_Bodies_-_Forest_Practices_Regulation.shp"
+path_roads_wadnr  = "data/environment/GIS Data/T3roads/T3roads.shp"
+path_roads_wsdot  = "data/environment/GIS Data/WSDOT_-_Local_Agency_Public_Road_Routes/WSDOT_-_Local_Agency_Public_Road_Routes.shp"
 ###########################################################################################################
 
 source("src/global.R")

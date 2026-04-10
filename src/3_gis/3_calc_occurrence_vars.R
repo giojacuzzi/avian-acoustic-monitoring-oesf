@@ -4,15 +4,15 @@
 # ETA: 16 hours
 #
 # CONFIG:
-pnts_name = "landscape" # "sites" for surveyed sites only or "landscape" for a grid of points across the landscape
+pnts_name = "sites" # "sites" for surveyed sites only or "landscape" for a grid of points across the landscape
 overwrite_data_plot_scale_cache = TRUE
 overwrite_data_homerange_scale_cache = TRUE
 cover_classification = "clean_strata_4" # e.g. clean_stage_3, strata_4
-t = 2020 # year: 2020, 2021, 2022, 2023
+t = 2023 # year: 2020, 2021, 2022, 2023
 #
 ## OUTPUT:
-path_data_plot_scale_out      = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_", t, "_", cover_classification, "_", pnts_name, ".rds")
-path_data_homerange_scale_out = paste0("data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_", t, "_", cover_classification, "_", pnts_name, ".rds")
+path_data_plot_scale_out      = paste0("data/cache/3_gis/3_calc_occurrence_vars/data_plot_scale_", t, "_", cover_classification, "_", pnts_name, ".rds")
+path_data_homerange_scale_out = paste0("data/cache/3_gis/3_calc_occurrence_vars/data_homerange_scale_", t, "_", cover_classification, "_", pnts_name, ".rds")
 #
 ## INPUT:
 path_rast_cover       = paste0("data/cache/3_gis/2_gen_cover_rasters/rast_cover_", t, "_", cover_classification, ".tif")
@@ -205,7 +205,7 @@ if (overwrite_data_plot_scale_cache) {
   # mapview(rast_cover) + mapview(pnts, label = pnts$site, zcol = 'dist_nearest_edge') + mapview(st_buffer(pnts, 100), col.regions = 'transparent', lwd = 2)
   
   if (pnts_name == "sites") {
-    path_data_plot = 'data/environment/PAM_PreHarvest_Habitat_results_DD_WD_TM.xlsx'
+    path_data_plot = 'data/environment/habitat_surveys/PAM_PreHarvest_Habitat_results_DD_WD_TM.xlsx'
     
     # Load and clean plot-level data
     data_plot = list(

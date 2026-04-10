@@ -79,15 +79,12 @@ conv_m2_to_ha =                0.0001 # square meters to ha
 
 # ARU locations (sites)
 if (!exists("aru_sites", envir = .GlobalEnv)) {
-  aru_sites = st_read('data/environment/GIS Data/AcousticStations.shp', quiet = TRUE) %>%
+  aru_sites = st_read('data/environment/GIS Data/Acoustic_Stations/AcousticStations.shp', quiet = TRUE) %>%
     st_drop_geometry() %>% janitor::clean_names() %>% as.data.frame() %>%
     st_as_sf(coords = c("utm_e", "utm_n"), crs = crs_m) %>%
     select(name, ces, treatment, geometry) %>% rename(site = name) %>%
     mutate(site = tolower(site))
 }
-
-# Define study area as bounding rectangle containing max species home range buffer (6500 m) around sites
-study_area = st_as_sfc(st_bbox(st_buffer(aru_sites, 6500)))
 
 # Table linking unique sampling unit IDs with season/serialno/deploy combinations ("unit_key.csv")
 path_site_key = "data/site_key.csv"
@@ -145,8 +142,9 @@ wadnr_parcels = st_filter(wadnr_parcels, st_union(wadnr_units)) # select parcels
 
 landscape_planning_units = st_intersection(wadnr_units, st_union(wadnr_parcels)) %>%
   st_make_valid() %>% select(jurisdic_2) %>% rename(unit = jurisdic_2)
-landscape_planning_units_clean = st_buffer(landscape_planning_units, -30) |> st_buffer(30)
-# mapview(landscape_planning_units) + mapview(landscape_planning_units_clean)
+
+# Define study area as bounding rectangle containing max species home range buffer (6500 m) around sites
+study_area = st_as_sfc(st_bbox(st_buffer(landscape_planning_units, 6500)))
 
 # Helper functions -----------------------------------------------------------------------------
 

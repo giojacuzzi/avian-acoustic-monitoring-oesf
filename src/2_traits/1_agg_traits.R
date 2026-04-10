@@ -126,12 +126,7 @@ trait_data = trait_data %>% mutate(
   group_habitat = str_to_lower(association_phalan)
 )
 
-# TODO: WADNR species of concern
-trait_data = trait_data %>% mutate(
-  group_wadnr_concern = "TODO"
-)
-
-# TODO: Conservation status
+# Conservation status
 trait_data = trait_data %>% mutate(
   group_status = str_to_lower(conservation_cornell)
 )
@@ -155,7 +150,7 @@ predict_with_ci = function(model, newdata) {
 unknown_home_ranges = trait_data %>% filter(is.na(home_range_radius_m))
 
 ## Fit a generalized linear model relating natural log of body mass to home range radius
-glm_mass = glm(home_range_radius_m ~ log(mass), data = trait_data, family = Gamma(link = "log"))
+glm_mass = glm(home_range_radius_m ~ log(mass), data = trait_data %>% filter(common_name != "marbled murrelet"), family = Gamma(link = "log"))
 glm_mass_pseudoR2 = round(1 - (glm_mass$deviance / glm_mass$null.deviance), 2)
 
 # Calculate regression line
@@ -189,7 +184,7 @@ p_mass_pred = ggplot(predicted_home_range_by_mass, aes(x = mass, y = predicted))
   ); print(p_mass_pred)
 
 ## Fit a generalized linear model relating hand-wing index to home range radius
-glm_hwi = glm(home_range_radius_m ~ hand_wing_index, data = trait_data, family = Gamma(link = "log"))
+glm_hwi = glm(home_range_radius_m ~ hand_wing_index, data = trait_data %>% filter(common_name != "marbled murrelet"), family = Gamma(link = "log"))
 glm_hwi_pseudoR2 = round(1 - (glm_hwi$deviance / glm_hwi$null.deviance), 2)
 
 # Calculate regression line
@@ -223,7 +218,7 @@ p_hwi_pred = ggplot(predicted_home_range_by_hwi, aes(x = hand_wing_index, y = pr
   ); print(p_hwi_pred)
 
 ## Fit a generalized linear model relating natural log of body mass and hand-wing index to home range radius
-glm_combined = glm(home_range_radius_m ~ log(mass) + hand_wing_index, data = trait_data, family = Gamma(link = "log"))
+glm_combined = glm(home_range_radius_m ~ log(mass) + hand_wing_index, data = trait_data %>% filter(common_name != "marbled murrelet"), family = Gamma(link = "log"))
 glm_combined_pseudoR2 = round(1 - (glm_combined$deviance / glm_combined$null.deviance), 2)
 
 summary(glm_combined)

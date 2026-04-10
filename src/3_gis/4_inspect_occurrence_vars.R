@@ -2,8 +2,8 @@
 # Inspect variables for occurrence
 #
 ## INPUT:
-path_plot_scale_data       = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_plot_scale_2020_clean_strata_4.rds"
-path_homerange_scale_data  = "data/cache/3_gis/3_calc_occurrence_vars/V2_data_homerange_scale_2020_clean_strata_4.rds"
+path_plot_scale_data       = "data/cache/3_gis/3_calc_occurrence_vars/data_plot_scale_2020_clean_strata_4_sites.rds"
+path_homerange_scale_data  = "data/cache/3_gis/3_calc_occurrence_vars/data_homerange_scale_2020_clean_strata_4_sites.rds"
 ###########################################################################################################
 
 source("src/global.R")
