@@ -150,6 +150,8 @@ landscape_planning_units_clean = st_buffer(landscape_planning_units, -30) |> st_
 
 # Helper functions -----------------------------------------------------------------------------
 
+progress_bar_format = "[:bar]:percent :elapsedfull (ETA :eta)"
+
 pairwise_collinearity = function(vars, threshold = 0.8) {
   cor_matrix = cor(vars %>% select(where(is.numeric)), use = "pairwise.complete.obs", method = "pearson")
   cor_matrix[lower.tri(cor_matrix, diag = TRUE)] = NA
