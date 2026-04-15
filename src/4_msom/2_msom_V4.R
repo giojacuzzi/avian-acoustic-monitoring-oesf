@@ -2,7 +2,7 @@
 # Fit a multispecies occupancy model using MCMC with stage as a continuous % variable, using compex as the baseline reference
 #
 ## CONFIG:
-grouping = "forage_substrate" # Species grouping ("all", "diet", "forage_behavior", "nest_ps" ...)
+grouping = "all" # Species grouping ("all", "diet", "forage_behavior", "nest_ps" ...)
 model_type = "nofp" # nofp, fp
 param_alpha_stage = "stratum_4"
 param_alpha_season = "season"

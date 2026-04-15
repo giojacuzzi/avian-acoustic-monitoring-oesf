@@ -111,13 +111,13 @@ stages_3 = tibble(
   age_min = c(0, 25, 80),
   age_max = c(25, 80, Inf),
   idx = 1:3
-); print(stages_3)
+)
 stages_4 = tibble(
   class   = c("standinit", "compex", "underdev", "old"),
   age_min = c(0, 25, 80, 200),
   age_max = c(25, 80, 200, Inf),
   idx = 1:4
-); print(stages_4)
+)
 
 ## Management strata (e.g. Minkova)
 strata_4 = tibble(
@@ -125,13 +125,13 @@ strata_4 = tibble(
   age_min = c(NA, 0, 25, 80),
   age_max = c(NA, 25, 80, Inf),
   idx = 1:4
-); print(strata_4)
+)
 strata_5 = tibble(
   class   = c("thin", "standinit", "compex", "underdev", "old"),
   age_min = c(NA, 0, 25,  80, 200),
   age_max = c(NA, 25, 80, 200, Inf),
   idx = 1:5
-); print(strata_5)
+)
 
 # WADNR landscape planning units
 wadnr_units = st_read("data/environment/GIS Data/WA_DNR_Units/WA_DNR_Units.shp", quiet = TRUE) %>%

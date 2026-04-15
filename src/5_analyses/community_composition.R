@@ -54,6 +54,53 @@ for (k in seq_len(n_species)) {
   if (k %% 10 == 0) message(k, "/", n_species)
 }
 dim(rich_post) = c(n_iter, n_sites, n_seasons)
+str(rich_post)
+
+# Test for differences in richness across posterior iterations
+{
+  stage     <- stages$stratum_4                      # factor [n_sites]
+  stage_rep <- rep(stage, times = n_seasons)         # factor [n_sites * n_seasons]
+  
+  # ── ANOVA + Tukey on every posterior iteration ────────────────────────────────
+  tukey_post <- vector("list", n_iter)
+  
+  for (i in seq_len(n_iter)) {
+    df_i <- data.frame(
+      richness = as.vector(rich_post[i, , ]),  # [n_sites * n_seasons]
+      stage    = stage_rep
+    )
+    
+    fit            <- aov(richness ~ stage, data = df_i)
+    tukey_post[[i]] <- TukeyHSD(fit)$stage
+    
+    if (i %% 1000 == 0) message(i, "/", n_iter)
+  }
+  
+  # ── Summarize posterior distributions of pairwise differences ─────────────────
+  tukey_arr  <- simplify2array(tukey_post)    # [n_pairs x 4 x n_iter]
+  tukey_arr  <- aperm(tukey_arr, c(3, 1, 2)) # [n_iter x n_pairs x 4]
+  pair_names <- rownames(tukey_post[[1]])
+  
+  tukey_summary <- lapply(seq_along(pair_names), function(p) {
+    diffs <- tukey_arr[, p, 1]  # posterior of mean difference for pair p
+    data.frame(
+      pair     = pair_names[p],
+      mean     = mean(diffs),
+      median   = median(diffs),
+      lower95  = quantile(diffs, 0.025),
+      upper95  = quantile(diffs, 0.975),
+      prob_gt0 = mean(diffs > 0)
+    )
+  }) |> bind_rows()
+  
+  # ── Print full summary ────────────────────────────────────────────────────────
+  print(tukey_summary, digits = 3)
+  
+  # ── Flag pairs with 95% CI excluding zero ─────────────────────────────────────
+  tukey_summary |>
+    filter(lower95 > 0 | upper95 < 0) |>
+    arrange(desc(abs(mean)))
+}
 
 # Summarize posterior
 rich_mean = apply(rich_post, c(2, 3), mean)
@@ -118,6 +165,7 @@ fig_SR = richness_df |>
     tibble(
       contrast  = paste(pair[1], "-", pair[2]),
       mean_diff = mean(diff_post),
+      median_diff = median(diff_post),
       lo        = quantile(diff_post, 0.025),
       hi        = quantile(diff_post, 0.975),
       p_gt0     = mean(diff_post > 0) # posterior probability that pair[1] > pair[2]

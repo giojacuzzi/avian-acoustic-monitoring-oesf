@@ -246,7 +246,7 @@ predicted_home_range_by_both = predict_with_ci(glm_combined, prediction_data) %>
 # Model selection ---------------------------------------------------------------------
 
 message("Model selection results:")
-print(AIC(glm_mass, glm_hwi, glm_combined))
+print(AICc(glm_mass, glm_hwi, glm_combined))
 summary(glm_mass)$deviance
 summary(glm_hwi)$deviance
 summary(glm_combined)$deviance

@@ -112,7 +112,7 @@ var_candidates_plotscale_rs = var_candidates_plotscale_rs %>% select(-all_of(c(
   # Age is not a variable of direct interest
   # 'homerange_age_mean', 'homerange_age_cv',
   # The following measures of structural variation are not of direct interest
-  'homerange_ba_cv', 'homerange_treeden_all_cv', 'homerange_treeden_gt4in_dbh_cv', 'homerange_qmd_cv',
+  'ba_cv', 'tree_acre_all_cv', 'tree_acre_4_cv', 'qmd_cv',
   'homerange_canopy_layers_cv', 'homerange_snagden_gt15dbh_cv', 'homerange_downvol_cv',
   # 'homerange_canopy_cover_cv',
   # Canopy cover is more applicable than closure
