@@ -135,6 +135,7 @@ compute_scenario_occupancy = function(species_to_plot, model_data) {
 }
 
 focal_species = sort(intersect(species, c(
+  # TODO: https://www.allaboutbirds.org/news/state-of-the-birds-2014-common-birds-in-steep-decline-list/
   "vaux's swift", "marbled murrelet", "rufous hummingbird", "northern goshawk", "common nighthawk", "evening grosbeak", "golden-crowned kinglet", "olive-sided flycatcher", "pine siskin", "pileated woodpecker", "willow flycatcher"
 )))
 old_associates = sort(intersect(species, c(
@@ -145,8 +146,21 @@ early_associates = sort(intersect(species, c(
 )))
 
 # ===============================================================================
+sp = conpri_species # conpri_species, early_associates, old_associates
+results = compute_scenario_occupancy(sp, model_data)
 
-results = compute_scenario_occupancy(focal_species, model_data)
+# Marginal expected focal species richness
+ggplot(results$richness, aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, fill = scenario)) +
+  geom_bar(stat = "identity") + geom_errorbar(width = 0.3, color = "gray10") +
+  scale_fill_manual(values = strata_cols, guide = "none") +
+  labs(x = "Stage scenario", y = "Marginal expected focal species richness")
+ggplot(results$richness, aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, color = scenario)) +
+  geom_linerange(linewidth = 0.8) + geom_point(size = 3) +
+  scale_color_manual(values = strata_cols, guide = "none") +
+  labs(x = "Stage scenario", y = "Marginal expected focal species richness")
+# FINDINGS:
+# - Highest richness of priority species stand init > mature > thin > compex
+# - Competitive exclusion stage supports the fewest number of priority species
 
 # Species-specific marginal expected habitat use probability
 ggplot(results$species, aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, color = scenario)) +
@@ -159,12 +173,3 @@ ggplot(results$species, aes(x = scenario, y = mean, ymin = lower95, ymax = upper
 # - Mature may function as long-term marginal habitat for RuHm, PnSk, OlSiFly
 # - Thinned can substantially promote use for the OlSiFly
 # - GCK and EG show no preference for any stage
-
-# Marginal expected focal species richness
-ggplot(results$richness, aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, color = scenario)) +
-  geom_linerange(linewidth = 0.8) + geom_point(size = 3) +
-  scale_color_manual(values = strata_cols, guide = "none") +
-  labs(x = "Stage scenario", y = "Marginal expected focal species richness")
-# FINDINGS:
-# - Highest richness of priority species stand init > mature > thin > compex
-# - Competitive exclusion stage supports the fewest number of priority species

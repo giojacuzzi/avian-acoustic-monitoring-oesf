@@ -61,6 +61,41 @@ class_labels = readLines("data/models/ensemble/ensemble_class_labels.txt") %>% t
   separate(label, into = c("scientific_name", "common_name"), sep = "_", extra = "merge", fill  = "right", remove = FALSE) %>%
   select(label, common_name, scientific_name)
 
+# Conservation priority species -------------------------------------------------------------------
+
+# ACAD Global - Species of Continental Importance
+acad_continental = readxl::read_xlsx("data/traits/ACAD Global 2024.05.23.xlsx", sheet = 1) %>% clean_names() %>%
+  mutate(common_name = str_to_lower(common_name)) %>%
+  select(
+    common_name,
+    pt_c,
+    ccs_b, # Continental Combined Score for breeding season
+    continental_importance,
+    iucn_red_list_2023
+  )
+# This includes species listed as Near Threatened, Vulnerable, and Endangered on the IUCN red list (2023) as well as common birds in steep decline whose populations have declined continentally by an estimated 50% or more since 1970, or are currently experiencing accelerating short-term decline (ACAD 2024)
+conpri_con_species = acad_continental %>% filter(!is.na(iucn_red_list_2023) | !is.na(continental_importance)) %>% pull(common_name) %>% sort()
+
+# ACAD Regional - Species of Regional Importance
+acad_regional = read.csv("data/traits/ACAD Regional 2024.06.03-filtered.csv") %>% clean_names() %>%
+  mutate(common_name = str_to_lower(common_name)) %>%
+  select(
+    common_name,
+    pt_r,
+    rcs_b, # Regional Combined Score for breeding season
+    regional_importance,
+    action_code
+  )
+# Critical recovery, immediate management, and management attention
+conpri_reg_species = acad_regional %>% filter(action_code %in% c("CR", "IM", "MA")) %>% pull(common_name) %>% sort()
+
+conpri_con_species %in% conpri_reg_species
+
+# Listed at the state or federal level endangered, threatened, candidate, and species of concern
+conpri_local_species = c("northern spotted owl", "marbled murrelet", "pileated woodpecker", "golden eagle", "northern goshawk", "peregrine falcon", "vaux's swift")
+
+conpri_species = union(union(conpri_con_species, conpri_reg_species), conpri_local_species) %>% sort()
+
 # GIS data ----------------------------------------------------------------------------------------
 
 # Coordinate reference system EPSG:32610, UTM Zone 10N, (meters)

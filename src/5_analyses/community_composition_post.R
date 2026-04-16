@@ -7,6 +7,7 @@ thin = 10 # Number of iterations to thin from the z_tmean posterior to speed up 
 path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds" # "data/cache/models/msom_nofp_all_2026-02-12_19:37:00.rds"
 path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 path_occurrence_predictor_plot_data = "data/cache/4_msom/1_assemble_msom_data/V3_occurrence_predictor_plot_data.rds"
+path_occurrence_predictor_homerange_data = "data/cache/4_msom/1_assemble_msom_data/V3_occurrence_predictor_homerange_data.rds"
 ##################################################################################################
 
 source("src/global.R")
@@ -240,14 +241,17 @@ str(z_tmean)
   
   ## Within-stage dispersion (mean distance to centroid)
   # Q: Are some stages more compositionally variable than others?
+  # Q: Is the spread of sites around their stage centroid homogeneous across stages?
   dispersion_post = matrix(NA, nrow = n_iter, ncol = nlevels(stages))
   colnames(dispersion_post) = levels(stages)
+  dispersion_p <- numeric(n_iter)
   
   pb = progress_bar$new(format = progress_bar_format, total = n_iter, clear = FALSE)
   for (i in seq_len(n_iter)) {
     d  = vegdist(z_tmean[i, , ], method = "bray")
     bd = betadisper(d, stages)
     dispersion_post[i, ] = tapply(bd$distances, stages, mean)
+    dispersion_p[i]      = permutest(bd, permutations = 50)$tab["Groups", "Pr(>F)"]
     pb$tick()
   }
   
@@ -261,6 +265,8 @@ str(z_tmean)
     )
   })) %>% remove_rownames()
   print(dispersion_df, digits = 3)
+  message("Proportion of posterior iterations with significant dispersion: ", round(mean(dispersion_p < 0.05), 2))
+  
   # TODO: Findings:
   # - Dispersion differs significantly among strata, so some of the PERMANOVA signal could reflect differences in within-stratum spread rather than centroid location alone
 }
@@ -310,7 +316,7 @@ str(z_tmean)
   # - Among the remaining three strata: all significant but weak, suggesting compex, thin, and mature share broadly similar assemblages with modest compositional differences. Thin–mature is  most distinct of closed canopy, while compex–thin are most similar.
 }
 
-# TODO: Between- and within-stage mean dissimilarity
+# Between- and within-stage mean dissimilarity
 {
   ## Between- and within-stage mean dissimilarity
   # Q: How compositionally different are pairs of stages from each other?
@@ -354,10 +360,178 @@ str(z_tmean)
   print(within_df,  digits = 3) # Higher values -> more compositionally heterogeneous sites within that stage
 }
 
-# TODO: Turnover vs nestedness decomposition
+# Landscape-level turnover vs nestedness decomposition
+{
+  # Binarize z across years as majority rule for beta diversity decomposition
+  z_bin <- (apply(z_raw[i, , , ], c(1, 3), mean) > 0.5) * 1
+  
+  beta_multi_post <- matrix(NA, nrow = n_iter, ncol = 3)
+  colnames(beta_multi_post) <- c("beta.SOR", "beta.SIM", "beta.SNE")
+  
+  pb <- progress_bar$new(format = progress_bar_format, total = n_iter, clear = FALSE)
+  for (i in seq_len(n_iter)) {
+    z_bin              <- (apply(z_raw[i, , , ], c(1, 3), mean) > 0.5) * 1L
+    bp_core            <- betapart.core(z_bin)
+    bm                 <- beta.multi(bp_core, index.family = "sorensen")
+    beta_multi_post[i, ] <- c(bm$beta.SOR, bm$beta.SIM, bm$beta.SNE)
+    pb$tick()
+  }
+  
+  beta_multi_df <- do.call(rbind, lapply(colnames(beta_multi_post), function(nm) {
+    data.frame(
+      component = nm,
+      mean      = mean(beta_multi_post[, nm]),
+      median    = median(beta_multi_post[, nm]),
+      bci_2.5   = unname(quantile(beta_multi_post[, nm], 0.025)),
+      bci_97.5  = unname(quantile(beta_multi_post[, nm], 0.975))
+    )
+  }))
+  print(beta_multi_df, digits = 3)
+  # Interpretation:
+  # - beta.SOR = total Sorensen dissimilarity
+  # - beta.SIM = turnover component
+  # - beta.SNE = nestedness component
+  # Findings:
+  # - Overall beta diversity (SOR 0.95) is high, so communities are dissimilar across all sites
+  # - Nearly all dissimilarity driven by species turnover (SIM 0.9), with nestedness contributing almost nothing (SNE 0.04).
+  # - Sites are not simply species-poor subsets of richer sites, but instead genuinely differ in species.
+}
 
-# TODO: Within-stage partition
+# Pairwise turnover vs nestedness decomposition
+{
+  stage_pairs    <- combn(levels(stages), 2, simplify = FALSE)
+  pair_names     <- sapply(stage_pairs, paste, collapse = " vs ")
+  components     <- c("beta.sor", "beta.sim", "beta.sne")
+  
+  # Between-stage
+  between_bp <- array(NA, dim = c(n_iter, length(stage_pairs), 3),
+                      dimnames = list(NULL, pair_names, components))
+  # Within-stage
+  within_bp  <- array(NA, dim = c(n_iter, nlevels(stages), 3),
+                      dimnames = list(NULL, levels(stages), components))
+  
+  pb <- progress_bar$new(format = progress_bar_format, total = n_iter, clear = FALSE)
+  for (i in seq_len(n_iter)) {
+    bp_core <- betapart.core(z_bin)
+    bp_pair <- beta.pair(bp_core, index.family = "sorensen")
+    
+    for (comp in components) {
+      d_mat <- as.matrix(bp_pair[[comp]])
+      
+      for (j in seq_along(stage_pairs)) {
+        pair <- stage_pairs[[j]]
+        m    <- d_mat[stages == pair[1], stages == pair[2]]
+        between_bp[i, pair_names[j], comp] <- mean(m)
+      }
+      
+      for (s in levels(stages)) {
+        m <- d_mat[stages == s, stages == s]
+        within_bp[i, s, comp] <- mean(m[upper.tri(m)])
+      }
+    }
+    pb$tick()
+  }
+  
+  # Summarise
+  summarise_array <- function(arr) {
+    do.call(rbind, lapply(dimnames(arr)[[2]], function(grp) {
+      do.call(rbind, lapply(components, function(comp) {
+        data.frame(
+          group     = grp,
+          component = comp,
+          mean      = mean(arr[, grp, comp]),
+          median    = median(arr[, grp, comp]),
+          bci_2.5   = unname(quantile(arr[, grp, comp], 0.025)),
+          bci_97.5  = unname(quantile(arr[, grp, comp], 0.975))
+        )
+      }))
+    }))
+  }
+  
+  between_bp_df <- summarise_array(between_bp) %>% arrange(component, group)
+  within_bp_df  <- summarise_array(within_bp)  %>% arrange(component, group)
+  
+  print(between_bp_df, digits = 2)
+  print(within_bp_df,  digits = 2)
+  
+  format_bp <- function(df, group_col) {
+    df %>%
+      select({{ group_col }} := group, component, median) %>%
+      pivot_wider(names_from = component, values_from = median) %>%
+      rename(sor = beta.sor, sim = beta.sim, sne = beta.sne) %>%
+      mutate(
+        pct_turnover  = round(100 * sim / sor, 1),
+        pct_nestedness = round(100 * sne / sor, 1)
+      )
+  }
+  
+  between_summary <- format_bp(between_bp_df, group_col = "pair")
+  within_summary  <- format_bp(within_bp_df,  group_col = "stage")
+  between_summary
+  within_summary
+  
+  # Findings:
+  # - Differences among closed-canopy stages are primarily driven by species turnover. Although compex is species-poor relative to thin and mature, those species are not simply a subset -- compex isn't only filtering the mature/thin species, but also selecting for species affiliated with compex specifically.
+  # - Increasing nestedness driving differences between standinit and closed canopy indicate that canopy closure filters species out of the standinit pool. Nestedness is strongest in compex stands where stem exclusion environment is most intense.
+  # - Canopy closure reduces richness (nestedness), but which species persist under different management regimes still varies substantially (turnover). The practical implication is that thin and mature are not interchangeable from a conservation standpoint despite similar richness — they are likely supporting different species within their shared reduced pool.
+  # - Standinit supports a superset community containing many of the species found elsewhere plus a suite of early-successional specialists. The other three strata share a broadly similar forest-interior community that differs among itself mainly through species replacement rather than richness difference.
+  # Standinit is compositionally distinct from everything else, and nestedness plays a large role in why. The three standinit contrasts have the highest total dissimilarity (SOR 0.229–0.262), which you already knew from the PERMANOVA. What's new here is that nestedness accounts for 39–49% of that dissimilarity depending on the comparison. This means standinit's community is not simply a reshuffled version of the closed-canopy stages — it retains some species found in other stages while also harboring a distinct set of open-habitat species. The high nestedness component suggests that closed-canopy stages are compositionally nested within standinit to a meaningful degree, which makes ecological sense: early successional sites often support a superset of species that includes both generalists found throughout and specialists tied to open conditions.
+ # Among the three closed-canopy stages, dissimilarity is lower and driven almost entirely by turnover. Compex vs mature, compex vs thin, and thin vs mature all have SOR around 0.18 — substantially lower than the standinit contrasts — and 68–75% of that dissimilarity is pure species replacement rather than nestedness. This suggests these stages support broadly similar species pools but with different dominant assemblages, consistent with gradual compositional shifts along a canopy closure or structural complexity gradient rather than wholesale community reorganization.
+ # The standinit vs compex contrast stands out with the highest total dissimilarity (SOR 0.262) and the most even turnover/nestedness split (51/49). Compex is the most structurally distinct of the closed-canopy stages — recently transitioned from standinit, with complex vertical structure — which may explain why it shows the strongest nestedness signal relative to standinit compared to thin and mature.
+  # nestedness signal would reflect landscape context rather than habitat filtering: The nestedness gradient across standinit contrasts could simply reflect patch permeability — small openings in a closed-canopy matrix are easily traversed by forest interior species, inflating apparent co-occurrence with early successional specialists.
+  # alternatively, the nestedness could indicate that several species found in closed-canopy habitat also use open-canopy habitat; The nestedness signal reflects the habitat breadth of species (e.g. generalists, mature species that use early successional for foraging)
+  # it may be a mixture of both
+}
 
 
 
+####
+# Q: Do smaller patches have higher nestendess?
 
+homerange_data = readRDS(path_occurrence_predictor_homerange_data)[[1]][["median"]]
+
+# Filter to standinit sites
+standinit_idx    <- which(stages == "standinit")
+closedcanopy_idx <- which(stages != "standinit")
+
+# For each posterior draw, compute mean SNE for each standinit site
+# against all closed-canopy sites
+site_sne_post <- matrix(NA, nrow = n_iter, ncol = length(standinit_idx))
+colnames(site_sne_post) <- sites[standinit_idx]
+
+pb <- progress_bar$new(format = progress_bar_format, total = n_iter, clear = FALSE)
+for (i in seq_len(n_iter)) {
+  bp_core <- betapart.core(z_bin)
+  bp_pair <- beta.pair(bp_core, index.family = "sorensen")
+  sne_mat <- as.matrix(bp_pair$beta.sne)
+  
+  for (k in seq_along(standinit_idx)) {
+    site_sne_post[i, k] <- mean(sne_mat[standinit_idx[k], closedcanopy_idx])
+  }
+  pb$tick()
+}
+
+# Posterior mean SNE per standinit site
+site_sne_mean <- colMeans(site_sne_post)
+
+# Join with landscape data
+spillover_df <- homerange_data %>%
+  filter(site %in% sites[standinit_idx]) %>%
+  mutate(
+    mean_sne          = site_sne_mean,
+    pcnt_closedcanopy = pcnt_compex + pcnt_thin + pcnt_mature
+  )
+
+# Visualise
+ggplot(spillover_df, aes(x = focalpatch_area_homeange_pcnt, y = mean_sne)) +
+  geom_point() + geom_smooth(method = "lm") +
+  labs(x = "Focal patch area (% of buffer)", y = "Mean nestedness (SNE) vs closed-canopy sites")
+
+ggplot(spillover_df, aes(x = pcnt_closedcanopy, y = mean_sne)) +
+  geom_point() + geom_smooth(method = "lm") +
+  labs(x = "Surrounding closed-canopy cover (%)", y = "Mean nestedness (SNE) vs closed-canopy sites")
+
+# Regression
+lm_spillover <- lm(mean_sne ~ focalpatch_area_homeange_pcnt + pcnt_closedcanopy, data = spillover_df)
+summary(lm_spillover)
+# A plausible ecological interpretation of the negative relationship is that standinit sites surrounded by more closed-canopy forest are more deeply embedded in a forest-interior landscape context, which may actually exclude early-successional species that would otherwise colonize from the broader landscape. In other words, landscape context filters the open-habitat specialists out rather than letting closed-canopy species in — the opposite of spillover.

@@ -689,7 +689,8 @@ for (sp in species) {
 focal_species = sort(intersect(species, c(
   "vaux's swift", "marbled murrelet", "rufous hummingbird", "northern goshawk", "common nighthawk", "evening grosbeak", "golden-crowned kinglet", "olive-sided flycatcher", "pine siskin", "pileated woodpecker", "willow flycatcher"
 )))
-multi_pred = predict_gradient_concat_multi(focal_species, n_grid = 101)
+
+multi_pred = predict_gradient_concat_multi(intersect(conpri_species, species), n_grid = 101)
 plot_gradient_concat_facet(multi_pred)
 # FINDINGS:
 # - Standinit and mature promote the maximum probability of use across focal species, while compex does not enhance probability for any species.
