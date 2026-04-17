@@ -2,9 +2,10 @@
 # Community composition analyses, propagating posterior uncertainty
 #
 # CONFIG:
-thin = 10 # Number of iterations to thin from the z posterior to speed up computation (0 or more)
+thin = 0 # Number of iterations to thin from the z posterior to speed up computation (0 or more)
+nperm = 99 # TODO: 999 (for p value) or 0 permutations
 # INPUT:
-path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds" # "data/cache/models/msom_nofp_all_2026-02-12_19:37:00.rds"
+path_msom = "data/cache/models/prefinal_msom_jags_nofp_all.rds" # "data/cache/models/msom_nofp_all_2026-02-12_19:37:00.rds"
 path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 path_occurrence_predictor_plot_data = "data/cache/4_msom/1_assemble_msom_data/V3_occurrence_predictor_plot_data.rds"
 path_occurrence_predictor_homerange_data = "data/cache/4_msom/1_assemble_msom_data/V3_occurrence_predictor_homerange_data.rds"
@@ -95,12 +96,23 @@ message("Using dissimilarity index '", ifelse(binary_dissimilarity, "Sorensen", 
     site      = sites,
     stage     = stages,
     mean      = apply(post_tmean_rich, 2, mean),
+    median    = apply(post_tmean_rich, 2, median),
     bci_2.5   = apply(post_tmean_rich, 2, quantile, probs = 0.025),
     bci_97.5  = apply(post_tmean_rich, 2, quantile, probs = 0.975)
   )
-  ggplot(post_tmean_rich_stats, aes(x = stage, y = mean, color = stage)) +
+  fig_richness = ggplot(post_tmean_rich_stats, aes(x = stage, y = median, color = stage)) +
     geom_boxplot(outlier.shape = NA) + geom_jitter(width = 0.25, alpha = 0.35, aes(color = stage)) +
-    scale_color_manual(values = unname(stage_colors))
+    scale_color_manual(values = unname(stage_colors)); print(fig_richness)
+  
+  post_tmean_rich_summary = post_tmean_rich_stats %>% group_by(stage) %>%
+    summarise(
+      n        = n(),
+      mean     = mean(mean),
+      median   = median(median),
+      bci_2.5  = mean(bci_2.5),
+      bci_97.5 = mean(bci_97.5),
+      .groups  = "drop"
+    )
   
   # ANOVA + Tukey on every posterior iteration
   anova_pvals = numeric(n_iter)
@@ -170,7 +182,7 @@ message("Using dissimilarity index '", ifelse(binary_dissimilarity, "Sorensen", 
     theme_bw(); print(fig_PCoA_sites)
   
   { # Species ordination correlations
-    species_fit = envfit(pcoa_res$points, apply(z, c(2, 3), mean), permutations = 999)
+    species_fit = envfit(pcoa_res$points, apply(z, c(2, 3), mean), permutations = nperm)
     species_scores = as.data.frame(species_fit$vectors$arrows) |>
       setNames(c("PCoA1", "PCoA2")) |>
       mutate(species = species, r2 = species_fit$vectors$r, p = species_fit$vectors$pvals) |>
@@ -200,7 +212,7 @@ message("Using dissimilarity index '", ifelse(binary_dissimilarity, "Sorensen", 
              -ends_with("_median"), -ends_with("_sd"),
              -starts_with("sdi"), -starts_with("tree_acre_4_"), -starts_with("tree_acre_30_"), -starts_with("qmd_4_"),
              -starts_with("qmd_t100_"), -starts_with("ht"), -starts_with("pcnt_"), -starts_with("ba_"))
-    env_fit = envfit(pcoa_res$points, env_data, permutations = 999, na.rm = TRUE)
+    env_fit = envfit(pcoa_res$points, env_data, permutations = nperm, na.rm = TRUE)
     env_scores = as.data.frame(env_fit$vectors$arrows) %>%
       setNames(c("PCoA1", "PCoA2")) %>%
       mutate(variable = rownames(.), r2 = env_fit$vectors$r, p = env_fit$vectors$pvals) %>%
@@ -239,7 +251,7 @@ message("Using dissimilarity index '", ifelse(binary_dissimilarity, "Sorensen", 
   pb = progress_bar$new(format = progress_bar_format, total = n_iter, clear = FALSE)
   for (i in seq_len(n_iter)) {
     d          = vegdist(z[i, , ], method = "bray")
-    fit        = adonis2(d ~ stages, permutations = 50) # TODO: 999 (for p value) or 0 permutations
+    fit        = adonis2(d ~ stages, permutations = nperm)
     R2_post[i] = fit$R2[1]
     F_post[i]  = fit$F[1]
     p_post[i]  = fit$`Pr(>F)`[1]
@@ -272,7 +284,7 @@ message("Using dissimilarity index '", ifelse(binary_dissimilarity, "Sorensen", 
     d  = vegdist(z[i, , ], method = "bray")
     bd = betadisper(d, stages)
     dispersion_post[i, ] = tapply(bd$distances, stages, mean)
-    dispersion_p[i]      = permutest(bd, permutations = 50)$tab["Groups", "Pr(>F)"]
+    dispersion_p[i]      = permutest(bd, permutations = nperm)$tab["Groups", "Pr(>F)"]
     pb$tick()
   }
   
@@ -309,7 +321,7 @@ message("Using dissimilarity index '", ifelse(binary_dissimilarity, "Sorensen", 
     pb = progress_bar$new(format = progress_bar_format, total = n_iter, clear = FALSE)
     for (i in seq_len(n_iter)) {
       d     = vegdist(z[i, keep, ], method = "bray")
-      fit   = adonis2(d ~ stg_sub, permutations = how(nperm = 50)) # TODO: 999 (for p value) or 0
+      fit   = adonis2(d ~ stg_sub, permutations = how(nperm = nperm))
       R2_post[i] = fit$R2[1]
       F_post[i]  = fit$F[1]
       p_post[i]  = fit$`Pr(>F)`[1]
@@ -335,50 +347,6 @@ message("Using dissimilarity index '", ifelse(binary_dissimilarity, "Sorensen", 
   # Findings:
   # - Standinit vs. everything else: by far the largest compositional differences, confirming standinit supports a fundamentally distinct bird community, not just a richer one.
   # - Among the remaining three strata: all significant but weak, suggesting compex, thin, and mature share broadly similar assemblages with modest compositional differences. Thin–mature is  most distinct of closed canopy, while compex–thin are most similar.
-}
-
-# Between- and within-stage mean dissimilarity
-{
-  ## Between- and within-stage mean dissimilarity
-  # Q: How compositionally different are pairs of stages from each other?
-  # Q: How compositionally homogeneous are sites within the same stage?
-  stage_pairs     = combn(levels(stages), 2, simplify = FALSE)
-  pair_names      = sapply(stage_pairs, paste, collapse = " vs ")
-  between_post    = matrix(NA, nrow = n_iter, ncol = length(stage_pairs))
-  colnames(between_post) = pair_names
-  within_post     = matrix(NA, nrow = n_iter, ncol = nlevels(stages))
-  colnames(within_post) = levels(stages)
-  
-  pb = progress_bar$new(format = progress_bar_format, total = n_iter, clear = FALSE)
-  for (i in seq_len(n_iter)) {
-    d_mat <- as.matrix(vegdist(z[i, , ], method = "bray"))
-    for (j in seq_along(stage_pairs)) {
-      pair <- stage_pairs[[j]]
-      m    <- d_mat[stages == pair[1], stages == pair[2]]
-      between_post[i, j] <- mean(m)
-    }
-    for (s in levels(stages)) {
-      m <- d_mat[stages == s, stages == s]
-      within_post[i, s] <- mean(m[upper.tri(m)])
-    }
-    pb$tick()
-  }
-  summarise_post <- function(mat) {
-    do.call(rbind, lapply(colnames(mat), function(nm) {
-      data.frame(
-        group    = nm,
-        mean     = mean(mat[, nm]),
-        median   = median(mat[, nm]),
-        bci_2.5  = quantile(mat[, nm], 0.025),
-        bci_97.5 = quantile(mat[, nm], 0.975)
-      )
-    }))
-  }
-  
-  between_df = summarise_post(between_post) %>% arrange(mean)
-  within_df  = summarise_post(within_post)
-  print(between_df, digits = 3) # Higher values -> greater compositional turnover between that pair of stages
-  print(within_df,  digits = 3) # Higher values -> more compositionally heterogeneous sites within that stage
 }
 
 # Landscape-level turnover vs nestedness decomposition
@@ -421,9 +389,11 @@ message("Using dissimilarity index '", ifelse(binary_dissimilarity, "Sorensen", 
   components  = c("beta.sor", "beta.sim", "beta.sne")
   
   # Between-stage
+  # Q: How compositionally different are pairs of stages from each other?
   between_bp = array(NA, dim = c(n_iter, length(stage_pairs), 3),
                       dimnames = list(NULL, pair_names, components))
   # Within-stage
+  # Q: How compositionally homogeneous are sites within the same stage?
   within_bp  = array(NA, dim = c(n_iter, nlevels(stages), 3),
                       dimnames = list(NULL, levels(stages), components))
   
@@ -485,7 +455,11 @@ message("Using dissimilarity index '", ifelse(binary_dissimilarity, "Sorensen", 
   between_summary = format_bp(between_bp_df, group_col = "pair")
   within_summary  = format_bp(within_bp_df,  group_col = "stage")
   between_summary
+  # Interpretation:
+  # Higher beta.sor values -> greater compositional turnover between that pair of stages
   within_summary
+  # Interpretation:
+  # Higher beta.sor values -> more compositionally heterogeneous sites within that stage
   
   # Findings:
   # - Differences among closed-canopy stages are primarily driven by species turnover. Although compex is species-poor relative to thin and mature, those species are not simply a subset -- compex isn't only filtering the mature/thin species, but also selecting for species affiliated with compex specifically.
@@ -500,9 +474,61 @@ message("Using dissimilarity index '", ifelse(binary_dissimilarity, "Sorensen", 
   # it may be a mixture of both
 }
 
+## RESULTS ----------------------------------------------------------------------------
 
+# Richness
+# Q: Do stages differ in alpha diversity (species richness)?
+post_tmean_rich_summary
+print(contrasts, digits = 2) # Tukey
+message("Proportion of posterior iterations with significant ANOVA: ", mean(anova_pvals < 0.05))
 
-####
+# Global PERMANOVA
+# Q: What proportion of variance is explained by stage, and are there overall differences among stages (as measured by differences in centroid location)?
+print(res_adonis2, digits = 2)
+message("Proportion of posterior iterations with significant PERMANOVA: ", mean(p_post < 0.05))
+# Within-stage dispersion (mean distance to centroid)
+# Q: Are some stages more compositionally variable than others, as measured by the spread of sites around their stage centroid?
+print(dispersion_df, digits = 2)
+message("Proportion of posterior iterations with significant dispersion: ", mean(dispersion_p < 0.05))
+# Pairwise between-stage
+# Q: Which stages are different in their composition, and by how much?
+print(pairwise_df %>% filter(stat == "R2"), digits = 2)
+print(pairwise_df %>% filter(stat == "p"), digits = 2)
+
+# Global beta diversity decomposition
+# Q: How compositionally different are sites across the landscape, and are differences driven by turnover or nestedness?
+print(beta_multi_df, digits = 2)
+# Pairwise beta diversity decomposition
+# Q: How compositionally different are pairs of stages from each other, and are differences driven by turnover or nestedness?
+print(between_bp_df, digits = 2)
+between_summary
+# Within-stage beta diversity decomposition
+# Q: How compositionally homogeneous are sites within the same stage, and are differences driven by turnover or nestedness?
+print(within_bp_df,  digits = 2)
+within_summary
+
+stop("DEBUG")
+
+## Combine into tables
+
+# Stage-level metrics (median values)
+list(
+  post_tmean_rich_summary %>% select(stage, n, median) %>% rename(alpha = median),
+  dispersion_df %>% select(stage, median) %>% rename(dispersion = median),
+  within_summary %>% select(stage, sor, sim, sne)
+) %>% reduce(left_join, by = "stage") %>% mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+# Pairwise metrics
+list(
+  pairwise_df %>% filter(stat == "R2") %>% select(pair, median) %>% rename(R2 = median),
+  pairwise_df %>% filter(stat == "F") %>% select(pair, median) %>% rename(F = median),
+  between_summary %>% select(pair, sor, sim, sne)
+) %>% reduce(left_join, by = "pair") %>% mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+#### ------------------------------------------------------------------------------
+# TODO: Q: Do assemblages vary between late-successional and old-growth?
+
+#### ------------------------------------------------------------------------------
 # Q: Do smaller patches have higher nestendess?
 
 homerange_data = readRDS(path_occurrence_predictor_homerange_data)[[1]][["median"]]

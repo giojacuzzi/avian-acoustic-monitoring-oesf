@@ -117,6 +117,46 @@ surveys = dimnames(y)$survey
 sites   = dimnames(y)$site
 stages  = occurrence_predictor_plot_data[[1]] %>% select(site, stratum_4) %>% filter(site %in% sites)
 
+## Summarize observations and survey effort
+message("Total survey days: ", sum(!is.na(detection_predictor_data$yday)))
+message("Total hours of acoustic data: ", sum(!is.na(detection_predictor_data$yday)) * 24)
+
+message("Total number of putative detections across all species: ", sum(y > 0, na.rm = TRUE))
+message("Total number of putative detections per species:")
+sort(apply(y, 4, function(x) sum(x > 0, na.rm = TRUE)), decreasing = TRUE) %>% print()
+
+occ_counts = apply(y, c(3, 4), function(mat) {
+  site_max = apply(mat, 1, function(x) {
+    if (all(is.na(x))) NA else max(x, na.rm = TRUE)
+  })
+  sum(site_max >= 1, na.rm = TRUE)
+})
+# print(occ_counts)
+message("Total number of sites observed across all years:")
+sort(colSums(occ_counts), decreasing = TRUE) %>% print()
+
+message("Total number of sites observed across any year:")
+sort(
+  apply(y, 4, function(spec) {
+    site_ever_detected <- apply(spec, 1, function(x) any(x > 0, na.rm = TRUE))
+    sum(site_ever_detected)
+  }),
+  decreasing = TRUE
+) %>% print()
+
+message("Number of families represented: ", length(table(species_traits %>% filter(common_name %in% species) %>% pull(family))))
+
+message("Number of orders represented: ", length(table(species_traits %>% filter(common_name %in% species) %>% pull(order))))
+
+prop.table(table(species_traits %>% filter(common_name %in% species) %>% pull(order))) %>% round(2) %>% sort() %>% print()
+
+message("Detected ", length(intersect(species, conpri_species)), " species of conservation priority:")
+intersect(species, conpri_species) %>% print()
+
+hist(occurrence_predictor_plot_data[[1]] %>% pull(age_mean))
+table(occurrence_predictor_plot_data[[1]]$stratum_4)
+table(occurrence_predictor_plot_data[[1]]$stratum_5)
+
 # Naive occupancy ---------------------------------
 naive_occ <- apply(y, c(3, 4), function(mat) {
   site_max <- apply(mat, 1, function(x) { # mat is [sites x visits] for one season x species combo
