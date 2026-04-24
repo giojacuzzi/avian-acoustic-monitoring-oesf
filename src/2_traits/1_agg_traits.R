@@ -83,8 +83,8 @@ trait_data = trait_data %>% mutate(nesting_guild_cornell_ps = str_to_lower(nesti
     (nesting_guild_cornell_ps %in% c("cavity_secondary")) ~ "cavity_s",
     (nesting_guild_cornell_ps %in% c("ground")) ~ "ground",
     (nesting_guild_cornell_ps %in% c("shrub"))  ~ "shrub",
-    (nesting_guild_cornell_ps %in% c("burrow"))  ~ "burrow",
-    (nesting_guild_cornell_ps %in% c("cliff"))  ~ "cliff",
+    # (nesting_guild_cornell_ps %in% c("burrow"))  ~ "burrow",
+    # (nesting_guild_cornell_ps %in% c("cliff"))  ~ "cliff",
     TRUE ~ "other" # building, cliff
   )
 )
@@ -104,9 +104,10 @@ trait_data = trait_data %>% mutate(
 # Foraging habitat / substrate
 trait_data = trait_data %>% mutate(
   group_forage_substrate = case_when(
-    (foraging_guild_cornell %in% c("soaring", "flycatching", "hovering", "aerial dive")) ~ "aerial forager",
-    (foraging_guild_cornell %in% c("surface dive"))                                      ~ "aquatic forager",
-    TRUE                                                                                 ~ foraging_guild_cornell
+    (foraging_guild_cornell %in% c("soaring", "flycatching", "aerial dive")) ~ "aerial forager",
+    (foraging_guild_cornell %in% c("hovering"))                              ~ "foliage gleaner",
+    (foraging_guild_cornell %in% c("surface dive"))                          ~ "aquatic forager",
+    TRUE                                                                     ~ foraging_guild_cornell
   )
 )
 
@@ -234,7 +235,7 @@ predicted_home_range_by_both = predict_with_ci(glm_combined, prediction_data) %>
 # Model selection ---------------------------------------------------------------------
 
 message("Model selection results:")
-print(AIC(glm_mass, glm_hwi, glm_combined))
+print(AICc(glm_mass, glm_hwi, glm_combined))
 summary(glm_mass)$deviance
 summary(glm_hwi)$deviance
 summary(glm_combined)$deviance
