@@ -2,7 +2,7 @@
 # Fit a multispecies occupancy model using MCMC with stage as a continuous % variable, using compex as the baseline reference
 #
 ## CONFIG:
-grouping = "all" # Species grouping ("all", "diet", "nest", "nest_ps" ...)
+grouping = "migrant" # Species grouping ("all", "diet", "nest", "nest_ps" ...)
 model_type = "nofp" # nofp, fp
 param_alpha_stage = "stratum_4"
 param_alpha_season = "season"
@@ -138,6 +138,9 @@ if (grouping == "nest_ps") { # Only 1-2 members per group
   species_to_exclude = unique(c(species_to_exclude, c("belted kingfisher", "northern rough-winged swallow", "barn swallow")))
 }
 if (grouping == "forage_behavior") { # Only 1 member per group
+  species_to_exclude = unique(c(species_to_exclude, c("marbled murrelet")))
+}
+if (grouping == "forage_substrate") { # Only 1 member per group
   species_to_exclude = unique(c(species_to_exclude, c("marbled murrelet")))
 }
 message("Excluding ", length(species_to_exclude), " species with insufficient observations: ")
@@ -519,9 +522,11 @@ msom = jags(data = msom_data,
             parameters.to.save = params_to_monitor,
             model.file = model_file,
             # Longer test for lab:
-            n.chains = 3, n.adapt  = 2000, n.iter   = 10000, n.burnin = 1000, n.thin   = 1, parallel = TRUE,
+            # n.chains = 3, n.adapt  = 2000, n.iter = 10000, n.burnin = 1000, n.thin   = 1, parallel = TRUE,
             # Shorter test for home:
-            # n.chains = 3, n.adapt = 500, n.iter = 2500, n.burnin = 500, n.thin = 1, parallel = TRUE, # 12 hr for fp; 3 hr for nofp
+            # n.chains = 3, n.adapt = 500, n.iter = 2500, n.burnin = 500, n.thin = 1, parallel = FALSE, # 12 hr for fp; 3 hr for nofp
+            # Final run (~50 hr):
+            n.chains = 3, n.adapt = 10000, n.iter = 60000, n.burnin = 20000, n.thin = 10, parallel = TRUE,
             DIC = FALSE, verbose=TRUE)
 
 message("Finished running JAGS (", round(msom$mcmc.info$elapsed.mins / 60, 2), " hr)")

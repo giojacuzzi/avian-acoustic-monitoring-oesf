@@ -1,4 +1,4 @@
-path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds"
+path_msom = "data/cache/models/msom_jags_nofp_migrant.rds"
 
 source("src/global.R")
 library(reshape2)
