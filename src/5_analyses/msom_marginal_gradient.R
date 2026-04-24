@@ -1,5 +1,5 @@
 # INPUT:
-path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds" # "data/cache/models/msom_nofp_all_2026-02-12_19:37:00.rds"
+path_msom = "data/cache/models/prefinal_msom_jags_nofp_all.rds" # "data/cache/models/msom_nofp_all_2026-02-12_19:37:00.rds"
 path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 ##########################################################################################################
 
@@ -686,10 +686,6 @@ for (sp in species) {
 }
 
 # Multiple species — vertically faceted, ordered by peak stage
-focal_species = sort(intersect(species, c(
-  "vaux's swift", "marbled murrelet", "rufous hummingbird", "northern goshawk", "common nighthawk", "evening grosbeak", "golden-crowned kinglet", "olive-sided flycatcher", "pine siskin", "pileated woodpecker", "willow flycatcher"
-)))
-
 multi_pred = predict_gradient_concat_multi(intersect(conpri_species, species), n_grid = 101)
 plot_gradient_concat_facet(multi_pred)
 # FINDINGS:

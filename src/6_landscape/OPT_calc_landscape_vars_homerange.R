@@ -14,6 +14,8 @@
 #      8 filter+pull calls replaced with a single named-vector lookup
 #   e) Pointless single-iteration for(k in seq_along(regions)) loop removed
 
+path_msom = "data/cache/models/prefinal_msom_jags_nofp_all.rds"
+
 library(parallel)
 
 ## CONFIG:
@@ -36,7 +38,6 @@ path_trait_data       = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 # Base RS-FRIS data (0.1 acre resolution, i.e. ~404m2 or 20.10836 * 20.10836 m grain)
 # RS-FRIS 4.0 uses a combination of 2019 and 2020 photogrammetry.
 # RS-FRIS 5.0 uses a combination of 2021 and 2022 photogrammetry.
-path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds"
 message("Loading data for multi-species occupancy model ", path_msom)
 model_data = readRDS(path_msom)
 (species = model_data$species)

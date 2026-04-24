@@ -124,7 +124,7 @@ if (mask_riparian_zones) {
     st_sf()
   
   # mapview(watercourses %>% filter(sl_wtrty_c %in% c(1, 2, 3, 4))) + mapview(stream_buffers)
-  rast_stack = rast_stack %>% mask(vect(stream_buffers), inverse = TRUE)
+  rast_stack = rast_stack %>% mask(vect(riparian_buffers), inverse = TRUE)
   names(rast_stack) = vars
 }
 
@@ -294,19 +294,6 @@ area_summary = tibble(
 
 message(sp_name, " — expected area used:")
 print(area_summary)
-
-# Posterior distribution of expected area used
-ggplot(tibble(ha = expected_ha_samples), aes(x = ha)) +
-  geom_histogram(bins = 60, fill = "gray", color = NA, alpha = 0.8) +
-  geom_vline(xintercept = quantile(expected_ha_samples, c(0.025, 0.975)), linetype = "dashed") +
-  geom_vline(xintercept = mean(expected_ha_samples), linetype = "solid") +
-  labs(x = "Expected area used (ha)", y = "Posterior iterations",
-    subtitle = paste0(
-      "Mean: ", round(mean(expected_ha_samples)), " ha",
-      " (", round(quantile(expected_ha_samples, 0.025)), "–",
-      round(quantile(expected_ha_samples, 0.975)), " 95% BCI)"
-    )
-  )
 
 # Breakdown by stage ----------------------------------------------------
 stage_total_ha = tibble(

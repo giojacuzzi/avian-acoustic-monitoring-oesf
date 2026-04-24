@@ -1,5 +1,5 @@
 # INPUT:
-path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds" # "data/cache/models/msom_nofp_all_2026-02-12_19:37:00.rds"
+path_msom = "data/cache/models/prefinal_msom_jags_nofp_all.rds" # "data/cache/models/msom_nofp_all_2026-02-12_19:37:00.rds"
 path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 ##########################################################################################################
 
@@ -147,6 +147,8 @@ early_associates = sort(intersect(species, c(
 
 # ===============================================================================
 sp = conpri_species # conpri_species, early_associates, old_associates
+# sp = species_traits %>% filter(group_nest_ps == "cavity_p") %>% pull(common_name)
+# sp = species_traits %>% filter(group_forage_substrate == "bark forager") %>% pull(common_name)
 results = compute_scenario_occupancy(sp, model_data)
 
 # Marginal expected focal species richness
@@ -173,3 +175,21 @@ ggplot(results$species, aes(x = scenario, y = mean, ymin = lower95, ymax = upper
 # - Mature may function as long-term marginal habitat for RuHm, PnSk, OlSiFly
 # - Thinned can substantially promote use for the OlSiFly
 # - GCK and EG show no preference for any stage
+
+fig_conpri = ggplot(compute_scenario_occupancy(conpri_species, model_data)$richness,
+                    aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, fill = scenario)) +
+  geom_bar(stat = "identity") + geom_errorbar(width = 0.3, color = "gray10") +
+  scale_fill_manual(values = strata_cols, guide = "none") +
+  labs(subtitle = "Conservation priority species", x = NULL, y = NULL); print(fig_conpri)
+fig_old_associates = ggplot(compute_scenario_occupancy(old_associates, model_data)$richness,
+                    aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, fill = scenario)) +
+  geom_bar(stat = "identity") + geom_errorbar(width = 0.3, color = "gray10") +
+  scale_fill_manual(values = strata_cols, guide = "none") +
+  labs(subtitle = "Old-forest associates",x = NULL, y = NULL); print(fig_old_associates)
+fig_early_associates = ggplot(compute_scenario_occupancy(early_associates, model_data)$richness,
+                            aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, fill = scenario)) +
+  geom_bar(stat = "identity") + geom_errorbar(width = 0.3, color = "gray10") +
+  scale_fill_manual(values = strata_cols, guide = "none") +
+  labs(subtitle = "Early-seral associates",x = NULL, y = "Marginal expected group richness"); print(fig_early_associates)
+
+fig_conpri / fig_early_associates / fig_old_associates

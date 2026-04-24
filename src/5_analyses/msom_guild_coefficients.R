@@ -10,9 +10,9 @@ models = data.frame(
     "Foraging guild"
   ),
   path = c(
-    "data/cache/models/V4_msom_V4_nofp_nofp_all.rds",
-    "data/cache/models/V4_msom_V4_nofp_nofp_nest_ps.rds",
-    "data/cache/models/V4_msom_V4_nofp_nofp_forage_substrate.rds"
+    "data/cache/models/prefinal_msom_jags_nofp_all.rds",
+    "data/cache/models/prefinal_msom_jags_nofp_nest_ps.rds",
+    "data/cache/models/prefinal_msom_jags_nofp_forage_substrate.rds"
   )
 )
 
@@ -37,6 +37,7 @@ for (m in seq_along(models$model)) {
   param_alpha_point_data = model_data$param_alpha_data$param_alpha_point_data
   param_alpha_plot_data = model_data$param_alpha_data$param_alpha_plot_data
   param_alpha_homerange_data = model_data$param_alpha_data$param_alpha_homerange_data
+  param_beta_point_data = model_data$param_beta_data$param_beta_point_data
   rm(model_data)
   
   match_s = stages %>% distinct() %>% arrange(stage_idx)
@@ -141,6 +142,15 @@ for (m in seq_along(models$model)) {
     ) %>% left_join(param_alpha_plot_data %>% select(param, name), by = c("param")) %>%
     left_join(match_s, by = c("s" = "stage_idx")) %>% left_join(match_g, by = c("g" = "group_idx"))
   results[[model]][["mu_alpha_plot"]] = mu_alpha_plot
+  
+  mu_beta_point = msom_summary %>% as.data.frame() %>% rownames_to_column("parameter") %>%
+    filter(str_starts(parameter, "mu.beta_point")) %>%
+    mutate(param = str_extract(parameter, "beta_point\\d+")) %>%
+    mutate(
+      p = as.integer(str_match(parameter, "mu\\.beta_point(\\d+)\\[(\\d+)\\]")[,2]),
+      g = as.integer(str_match(parameter, "mu\\.beta_point(\\d+)\\[(\\d+)\\]")[,3])
+    ) %>% left_join(param_beta_point_data %>% select(param, name), by = c("param")) %>% left_join(match_g, by = c("g" = "group_idx"))
+  results[[model]][["mu_beta_point"]] = mu_beta_point
 }
 
 # Guild coefficients ─────────────────────────────────────────────────────────────
@@ -187,7 +197,7 @@ mu_alpha_site$group = factor(mu_alpha_site$group,
 mu_alpha_site = mu_alpha_site %>%
   mutate(pt_alpha = ifelse(`25%` < 0 & `75%` > 0, 0.3, 1))
 
-fig_guilds = ggplot(mu_alpha_site %>% filter(name %in% c("Stand Initiation", "Thinned", "Mature")),
+fig_guilds = ggplot(mu_alpha_site %>% filter(name %in% c("Stand Initiation", "Thinned", "Mature")) %>% filter(!is.na(group)),
        aes(x = mean, y = (model), color = group, alpha = pt_alpha)) +
   facet_wrap(~name) +
   geom_vline(xintercept = 0, color = "gray", linetype = "solid") +
@@ -296,5 +306,41 @@ ggplot(mu_alpha_plot, aes(x = mean, y = fct_rev(name), color = stage, alpha = pt
   )
 
 ggplot(results[["Nesting guild"]][["mu_alpha_plot"]], aes(x = mean, y = name, color = group, shape = stratum_4)) +
+  geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0.1, position = position_dodge(width = 0.5))
+
+ggplot(results[["Foraging guild"]][["mu_alpha_plot"]], aes(x = mean, y = name, color = group, shape = stratum_4)) +
+  geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0.1, position = position_dodge(width = 0.5))
+
+# Species-specific within-stage habitat effects
+ggplot(results[["All species"]][["alpha_plot"]] %>%
+         filter(stratum_4 == "mature", name == "bap_hwd_mean") %>% mutate(species = fct_reorder(species, mean)),
+       aes(x = mean, y = species, color = group, shape = stratum_4)) +
+  geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0.1, position = position_dodge(width = 0.5))
+ggplot(results[["All species"]][["alpha_plot"]] %>%
+         filter(stratum_4 == "standinit", name == "qmd_6_mean") %>% mutate(species = fct_reorder(species, mean)),
+       aes(x = mean, y = species, color = group, shape = stratum_4)) +
+  geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0.1, position = position_dodge(width = 0.5))
+ggplot(results[["All species"]][["alpha_plot"]] %>%
+         filter(stratum_4 == "mature", name == "tree_acre_6_mean") %>% mutate(species = fct_reorder(species, mean)),
+       aes(x = mean, y = species, color = group, shape = stratum_4)) +
+  geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0.1, position = position_dodge(width = 0.5))
+
+
+ggplot(results[["All species"]][["alpha_point"]] %>%
+         filter(name == "dist_road_paved") %>% mutate(species = fct_reorder(species, mean)),
+       aes(x = mean, y = species, color = group)) +
+  geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0.1, position = position_dodge(width = 0.5))
+
+
+# Detection effects
+
+ggplot(results[["All species"]][["mu_beta_point"]],
+       aes(x = mean, y = parameter, color = group)) +
   geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
   geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0.1, position = position_dodge(width = 0.5))

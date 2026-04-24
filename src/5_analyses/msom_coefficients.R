@@ -2,7 +2,7 @@
 # MSOM coefficient estimates
 #
 # CONFIG:
-path_msom = "data/cache/models/V4_msom_V4_nofp_nofp_all.rds"
+path_msom = "data/cache/models/prefinal_msom_jags_nofp_all.rds"
 #
 # INPUT:
 path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
