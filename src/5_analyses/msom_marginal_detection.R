@@ -150,7 +150,7 @@ ggplot(pred_df, aes(x = yday, group = species)) +
     panel.grid.minor = element_blank()
   )
 
-# ---- Optional: one panel per species ---------------------
+# One panel per species ---------------------
 ggplot(pred_df, aes(x = yday)) +
   geom_ribbon(aes(ymin = p_lo, ymax = p_hi),
               fill = "steelblue", alpha = 0.25) +
@@ -172,3 +172,48 @@ ggplot(pred_df, aes(x = yday)) +
     strip.text = element_text(size = 7),
     axis.text  = element_text(size = 6)
   )
+
+# ---- Build mu_curve -----------------------------------------
+mu_v_sims        <- msom$sims.list$mu.v              # [n_iter, n_stages, 1]
+mu_beta3_sims    <- msom$sims.list$mu.beta_point3     # [n_iter]
+mu_beta3_sq_sims <- msom$sims.list$mu.beta_point3_sq  # [n_iter]
+
+mu_v_marg <- apply(mu_v_sims[, , 1], 1, mean)        # [n_iter]
+
+logit_p_mu <- outer(mu_v_marg, rep(1, n_grid)) +
+  outer(mu_beta3_sims, yday_std_seq) +
+  outer(mu_beta3_sq_sims, yday_std_seq^2)
+
+p_mat_mu <- plogis(logit_p_mu)
+
+mu_curve <- tibble(
+  yday   = yday_raw_seq,
+  p_mean = colMeans(p_mat_mu),
+  p_lo   = apply(p_mat_mu, 2, quantile, 0.025),
+  p_hi   = apply(p_mat_mu, 2, quantile, 0.975)
+)
+
+# ---- Plot ---------------------------------------------------
+ggplot() +
+  geom_line(data = pred_df,
+            aes(x = yday, y = p_mean, group = species),
+            color = "black", linewidth = 0.4, alpha = 0.15) +
+  geom_ribbon(data = mu_curve,
+              aes(x = yday, ymin = p_lo, ymax = p_hi),
+              fill = "black", alpha = 0.20) +
+  geom_line(data = mu_curve,
+            aes(x = yday, y = p_mean),
+            color = "black", linewidth = 1.2) +
+  scale_y_continuous(limits = c(0, 1),
+                     labels = scales::percent_format(accuracy = 1)) +
+  scale_x_continuous(
+    breaks = c(91, 121, 152, 182, 213),
+    labels = c("Apr", "May", "Jun", "Jul", "Aug")
+  ) +
+  labs(
+    x        = "Day of year",
+    y        = "p(detection | present)",
+    title    = "Marginal detection probability vs. day of year",
+    subtitle = "Grey lines = species posterior means; black = community mean ± 95% CrI"
+  ) +
+  theme(panel.grid.minor = element_blank())

@@ -5,13 +5,6 @@ path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 
 source("src/global.R")
 
-strata_cols = c(
-  "standinit" = "orange",
-  "compex"  = "forestgreen",
-  "thin"    = "purple",
-  "mature"     = "tan4"
-)
-
 # Load data for multi-species occupancy model --------------------------------------------------
 
 message("Loading data for multi-species occupancy model ", path_msom)
@@ -24,7 +17,9 @@ sites = model_data$sites
 species = model_data$species
 seasons = model_data$seasons
 stages = model_data$stages
-strata = factor(stages$stratum_4, levels = c("standinit", "compex", "thin", "mature"))
+strata = factor(stages$stratum_4,
+                levels = c("standinit", "compex", "thin", "mature"),
+                labels = c("Stand initiation", "Stem exclusion", "Thinned", "Mature"))
 
 message("Loading species trait data from ", path_trait_data)
 species_traits = read_csv(path_trait_data, show_col_types = FALSE) %>% filter(common_name %in% species)
@@ -131,6 +126,10 @@ compute_scenario_occupancy = function(species_to_plot, model_data) {
     )
   }) %>% mutate(scenario = factor(scenario, levels = names(scenarios)))
   
+  richness_df$scenario = factor(richness_df$scenario,
+                                levels = c("standinit", "compex", "thin", "mature"),
+                                labels = c("Stand initation", "Stem exclusion", "Thinned", "Mature"))
+  
   list(species = species_df, richness = richness_df)
 }
 
@@ -154,11 +153,11 @@ results = compute_scenario_occupancy(sp, model_data)
 # Marginal expected focal species richness
 ggplot(results$richness, aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, fill = scenario)) +
   geom_bar(stat = "identity") + geom_errorbar(width = 0.3, color = "gray10") +
-  scale_fill_manual(values = strata_cols, guide = "none") +
+  scale_fill_manual(values = colors_stats, guide = "none") +
   labs(x = "Stage scenario", y = "Marginal expected focal species richness")
 ggplot(results$richness, aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, color = scenario)) +
   geom_linerange(linewidth = 0.8) + geom_point(size = 3) +
-  scale_color_manual(values = strata_cols, guide = "none") +
+  scale_color_manual(values = colors_stats, guide = "none") +
   labs(x = "Stage scenario", y = "Marginal expected focal species richness")
 # FINDINGS:
 # - Highest richness of priority species stand init > mature > thin > compex
@@ -167,7 +166,7 @@ ggplot(results$richness, aes(x = scenario, y = mean, ymin = lower95, ymax = uppe
 # Species-specific marginal expected habitat use probability
 ggplot(results$species, aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, color = scenario)) +
   geom_linerange(linewidth = 0.8) + geom_point(size = 3) +
-  scale_color_manual(values = strata_cols, guide = "none") +
+  scale_color_manual(values = colors_stats, guide = "none") +
   facet_wrap(~ species) +
   labs(x = "Stage scenario", y = "Marginal expected use probability")
 # FINDINGS:
@@ -179,17 +178,55 @@ ggplot(results$species, aes(x = scenario, y = mean, ymin = lower95, ymax = upper
 fig_conpri = ggplot(compute_scenario_occupancy(conpri_species, model_data)$richness,
                     aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, fill = scenario)) +
   geom_bar(stat = "identity") + geom_errorbar(width = 0.3, color = "gray10") +
-  scale_fill_manual(values = strata_cols, guide = "none") +
-  labs(subtitle = "Conservation priority species", x = NULL, y = NULL); print(fig_conpri)
+  scale_fill_manual(values = colors_stats, guide = "none") +
+  labs(subtitle = "Conservation priority species", x = NULL, y = "Expected richness"); print(fig_conpri)
 fig_old_associates = ggplot(compute_scenario_occupancy(old_associates, model_data)$richness,
                     aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, fill = scenario)) +
   geom_bar(stat = "identity") + geom_errorbar(width = 0.3, color = "gray10") +
-  scale_fill_manual(values = strata_cols, guide = "none") +
+  scale_fill_manual(values = colors_stats, guide = "none") +
   labs(subtitle = "Old-forest associates",x = NULL, y = NULL); print(fig_old_associates)
 fig_early_associates = ggplot(compute_scenario_occupancy(early_associates, model_data)$richness,
                             aes(x = scenario, y = mean, ymin = lower95, ymax = upper95, fill = scenario)) +
   geom_bar(stat = "identity") + geom_errorbar(width = 0.3, color = "gray10") +
-  scale_fill_manual(values = strata_cols, guide = "none") +
-  labs(subtitle = "Early-seral associates",x = NULL, y = "Marginal expected group richness"); print(fig_early_associates)
+  scale_fill_manual(values = colors_stats, guide = "none") +
+  labs(subtitle = "Early-seral associates",x = NULL, y = NULL); print(fig_early_associates)
 
-fig_conpri / fig_early_associates / fig_old_associates
+fig_convalue_richness = fig_conpri / fig_early_associates / fig_old_associates
+fig_convalue_richness
+
+ggsave("data/cache/figs/fig_convalue_richness.pdf", fig_convalue_richness,
+       width = 3, height = 8)
+
+
+fig_6BCD = (
+  fig_conpri +
+    theme(
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank()
+      )
+) / (
+  fig_early_associates +
+    theme(
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank()
+    )
+) / (
+  fig_old_associates +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+)
+fig_6BCD
+
+# NOTE: Run msom_marginal_gradient to form combination plot
+if (FALSE) {
+  source("src/msom_marginal_gradient.R")
+  
+  fig_6 = (fig_convalue_gradient + fig_6BCD) +
+    plot_layout(widths = c(3, 2)) +
+    plot_annotation(tag_levels = "A")
+  fig_6
+  
+  ggsave("data/cache/figs/fig_6.pdf", fig_6,
+         width = 11, height = 12)
+}

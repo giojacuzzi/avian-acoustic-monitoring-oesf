@@ -165,8 +165,9 @@ fig_tree_species = dps_long %>%
   summarise(total_density = mean(density, na.rm = TRUE), .groups = "drop") %>%
   ggplot(aes(x = stratum_4, y = total_density, fill = species)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_brewer(palette = "Set3", labels = species_labels) +
-  labs(x = "Developmental stage", y = "Trees / ha", fill = "Tree species") +
+  # scale_fill_brewer(palette = "Set3", labels = species_labels) +
+  scale_fill_manual(values = c("gray50", "#C24841", "#046C9A", "#005502", "#D67236", "#69983A"), labels = species_labels) +
+  labs(x = NULL, y = "Trees / ha", fill = "Tree species") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)); print(fig_tree_species)
 
 data_total$stratum_4 = factor(data_total$stratum_4, levels = c("standinit", "compex", "thin", "mature"))
@@ -282,20 +283,36 @@ metric_labels <- c(
 fig_stage_plot_habitat = data_total %>%
   select(stratum_4, all_of(names(metric_labels))) %>%
   pivot_longer(-stratum_4, names_to = "metric", values_to = "value") %>%
-  mutate(metric = factor(metric, levels = names(metric_labels))) %>%
-  ggplot(aes(x = stratum_4, y = value, fill = stratum_4)) +
+  mutate(metric = factor(metric, levels = names(metric_labels)),
+         stratum_4 = factor(stratum_4, labels = c("Stand initiation", "Stem exclusion", "Thinned", "Mature"))) %>%
+  ggplot(aes(x = stratum_4, y = value, color = stratum_4, fill = stratum_4)) +
   geom_boxplot(outliers = FALSE) +
+  scale_fill_manual(values = alpha(colors_stats, 0.2), name = "Managment stage") +
+  scale_color_manual(values = colors_stats, name = "Managment stage") +
   facet_wrap(~ metric, scales = "free_y", ncol = 3,
              labeller = labeller(metric = metric_labels)) +
-  scale_fill_manual(values = unname(stage_colors)) +
   labs(x = NULL, y = NULL, fill = "Stage") +
   theme(
+    panel.grid.major.y = element_line(color = "gray95", linewidth = 0.4),
     strip.text = element_text(size = 7),
     axis.text.x  = element_blank(),
     axis.ticks.x = element_blank(),
     legend.position = "bottom"
   ); print(fig_stage_plot_habitat)
 
-fig_stage_plot_habitat + fig_tree_species +
-  plot_layout(widths = c(4, 1)) +
-  plot_annotation(tag_levels = "A")
+fig_S_other = data_plot_scale %>%
+  st_drop_geometry() %>%
+  select(elevation, dist_road_paved, dist_watercourse_major) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(fill = "#1F77B4", color = "white", alpha = 0.9) +
+  facet_wrap(~ variable, scales = "free", ncol = 1) +
+  labs(x = NULL, y = "Count")
+
+fig_S_habitat = fig_stage_plot_habitat + (fig_tree_species / fig_S_other +
+                            plot_layout(heights = c(1, 1))) +
+  plot_layout(widths = c(5, 2)) +
+  plot_annotation(tag_levels = "A"); fig_S_habitat
+
+ggsave("data/cache/figs/fig_S_habitat.pdf", fig_S_habitat,
+       width = 10, height = 11)

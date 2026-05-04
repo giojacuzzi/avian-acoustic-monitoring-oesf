@@ -20,6 +20,7 @@ if (!exists("pkgs", envir = .GlobalEnv)) {
     "terra",            # raster data
     "tidyterra",        # raster data manipulation
     "tigris",           # political boundaries
+    "scales",           # scales
     # visualization and plotting
     "ggplot2",
     "ggbeeswarm",       # beeswarm figures
@@ -248,8 +249,29 @@ theme_sleek = function(base_size = 11, base_family = "") {
 theme_set(theme_sleek())
 
 stage_colors = c(
-  "Stand Initiation"      = "orange",
-  "Competitive Exclusion" = "forestgreen",
-  "Thinned"               = "purple",
-  "Mature"                = "tan4"
+  "Stand Initiation"      = "#E07C1F", # "orange",
+  "Competitive Exclusion" = "#2E7D52", # "forestgreen",
+  "Thinned"               = "#B85C50", # "#b2675e", # "purple",
+  "Mature"                = "#8B6240"  # "tan4"
 )
+stage_colors_a = c(
+  "#E07C1F", "#2E7D52", "#B85C50", "#8B6240"
+)
+
+colors_map = c(
+  "#dfc27d", "#1A9850", "#01427A", "#8B5A2B"
+)
+colors_stats = c(
+  "#F2B50B", "#1A9850", "#01427A", "#8B5A2B"
+)
+
+# stage_colors = c(
+#   "standinit"  = "#d8c18a",
+#   "compex"     = "#3c8273",
+#   "thin"       = "#b2675e",
+#   # "underdev"   = "#9b652b",
+#   "old"        = "#5C4033"
+#   # "water"      = "#6495ed",
+#   # "road_paved" = "gray50",
+#   # "other"      = "gray80"
+# )

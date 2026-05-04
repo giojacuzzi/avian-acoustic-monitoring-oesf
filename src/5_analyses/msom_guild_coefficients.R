@@ -200,25 +200,40 @@ mu_alpha_site = mu_alpha_site %>%
 fig_guilds = ggplot(mu_alpha_site %>% filter(name %in% c("Stand Initiation", "Thinned", "Mature")) %>% filter(!is.na(group)),
        aes(x = mean, y = (model), color = group, alpha = pt_alpha)) +
   facet_wrap(~name) +
-  geom_vline(xintercept = 0, color = "gray", linetype = "solid") +
+  geom_vline(xintercept = 0, color = "gray70", linetype = "solid") +
   geom_point(position = position_dodge(width = 0.5, reverse = TRUE), size = 1.25) +
   geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0, linewidth = 0.4, position = position_dodge(width = 0.5, reverse = TRUE)) +
   geom_errorbarh(aes(xmin = `25%`, xmax = `75%`), width = 0, linewidth = 0.8, position = position_dodge(width = 0.5, reverse = TRUE)) +
   scale_x_continuous(expand = expansion(mult = 0.02)) +
   scale_alpha_identity(guide = "none") +
+  # scale_color_manual(values = c("gray20",
+  #                               viridis::turbo(n=10)[2:10]
+  #                               )) +
+  scale_color_manual(values = c(
+    "grey30",
+    hue_pal()(9)
+  )) +
+  # scale_color_manual(values = c(
+  #  "grey30",
+  #   setNames(hue_pal()(5),  nesting),
+  #   setNames(hue_pal()(4),  foraging)
+  # )) +
   labs(x = "Standardized coefficient estimate", y = "", color = "Guild") +
   theme(
     panel.border = element_blank(),
-    axis.line.x  = element_line(color = "grey70"),
-    axis.line.y  = element_line(color = "grey70"),
+    axis.line.x  = element_line(color = "gray70"),
+    axis.line.y  = element_line(color = "gray70"),
     legend.position = "left",
-    panel.grid.major.x = element_line(color = "gray96")
+    panel.grid.major.x = element_line(color = "gray90", linewidth = 0.3)
   ); print(fig_guilds)
+
+ggsave("data/cache/figs/fig_guild_coefs.pdf", fig_guilds,
+       width = 12, height = 3.5)
 
 ggplot(mu_alpha_site %>% filter(name %in% c("Season", "Elevation", "Distance Road", "Distance Watercourse")),
        aes(x = mean, y = (model), color = group)) +
   facet_wrap(~name) +
-  geom_vline(xintercept = 0, color = "gray", linetype = "solid") +
+  geom_vline(xintercept = 0, color = "gray70", linetype = "solid") +
   geom_point(position = position_dodge(width = 0.5, reverse = TRUE), size = 1.25) +
   geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), height = 0, linewidth = 0.4, position = position_dodge(width = 0.5, reverse = TRUE)) +
   geom_errorbarh(aes(xmin = `25%`, xmax = `75%`), height = 0, linewidth = 0.8, position = position_dodge(width = 0.5, reverse = TRUE)) +
@@ -226,7 +241,7 @@ ggplot(mu_alpha_site %>% filter(name %in% c("Season", "Elevation", "Distance Roa
   labs(x = "Standardized coefficient estimate", y = "", color = "Guild") +
   theme(
     legend.position = "left",
-    panel.grid.major.x = element_line(color = "gray96")
+    panel.grid.major.x = element_line(color = "gray90", linewidth = 0.3)
   )
 
 # Species coefficients ─────────────────────────────────────────────────────────────
@@ -238,32 +253,116 @@ alpha_homerange$name = factor(alpha_homerange$name,
 )
 
 alpha_homerange$sp_name = str_to_sentence(alpha_homerange$species)
+
 sp_order <- alpha_homerange |>
   filter(name == "Stand Initiation") |>
   arrange(mean) |>
   pull(sp_name)
 alpha_homerange = alpha_homerange %>%  mutate(
   sp_name = factor(sp_name, levels = sp_order),
-  pt_alpha = if_else(overlap0 == "1", 0.35, 1.0))
-
+  pt_alpha = if_else(overlap0 == "1", 0.45, 1.0))
 fig_species = ggplot(alpha_homerange, aes(y = sp_name, color = name)) +
-  geom_vline(xintercept = 0, linewidth = 0.4, color = "grey70") +
+  geom_vline(xintercept = 0, linewidth = 0.4, color = "gray70") +
   geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`, alpha = pt_alpha), width = 0, linewidth = 0.4) +
   geom_point(aes(x = mean, alpha = pt_alpha), shape = 16, size  = 1.2) +
   scale_x_continuous(expand = expansion(mult = 0.01), breaks = c(-1, 0, 1)) +
   scale_y_discrete(expand = expansion(add = c(0.8, 0.5))) +
   scale_alpha_identity() +
-  scale_color_manual(values = stage_colors) +
+  scale_color_manual(values = colors_stats[c(1,3,4)]) +
   facet_wrap(~ name, nrow = 1) +
   labs(x = "Standardized coefficient estimate", y = NULL) +
   theme(
     panel.border = element_blank(),
-    axis.line.x  = element_line(color = "grey70"),
-    axis.line.y  = element_line(color = "grey70"),
+    axis.line.x  = element_line(color = "gray70"),
+    axis.line.y  = element_line(color = "gray70"),
     axis.text.y = element_text(size = 7),
     panel.grid.major.x = element_line(color = "gray90", linewidth = 0.3),
     legend.position = "none"
   ); print(fig_species)
+ggsave("data/cache/figs/fig_species_coefs.pdf", fig_species,
+       width = 7, height = 7)
+
+## Figure 3
+
+fig_3 = (
+  fig_guilds + theme(
+    legend.position = "right",
+    axis.title.x = element_blank()
+  )
+) / (
+  fig_species
+) + plot_layout(heights = c(1, 2)) + plot_annotation(tag_levels = "A")
+
+
+ggsave("data/cache/figs/fig_3.pdf", fig_3,
+       width = 9, height = 11)
+
+##
+
+{
+  fig_species_standinit = ggplot(alpha_homerange %>% filter(name == "Stand Initiation"),
+                              aes(y = factor(sp_name, levels = alpha_homerange |>
+                                               filter(name == "Stand Initiation") |> arrange(mean) |> pull(sp_name)), color = name)) +
+    geom_vline(xintercept = 0, linewidth = 0.4, color = "grey70") +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`, alpha = pt_alpha), width = 0, linewidth = 0.4) +
+    geom_point(aes(x = mean, alpha = pt_alpha), shape = 16, size  = 1.2) +
+    scale_x_continuous(expand = expansion(mult = 0.01), breaks = c(-1, 0, 1)) +
+    scale_y_discrete(expand = expansion(add = c(0.8, 0.5))) +
+    scale_alpha_identity() +
+    scale_color_manual(values = colors_stats[1]) +
+    facet_wrap(~ name, nrow = 1) +
+    labs(x = "Standardized coefficient estimate", y = NULL) +
+    theme(
+      panel.border = element_blank(), axis.line.x  = element_line(color = "grey70"),
+      axis.line.y  = element_line(color = "grey70"), axis.text.y = element_text(size = 7),
+      panel.grid.major.x = element_line(color = "gray90", linewidth = 0.3),
+      legend.position = "none"
+    ); print(fig_species_standinit)
+  ggsave("data/cache/figs/fig_species_coefs_standinit.pdf", fig_species_standinit,
+         width = 4, height = 7)
+  
+  fig_species_thinned = ggplot(alpha_homerange %>% filter(name == "Thinned"),
+                              aes(y = factor(sp_name, levels = alpha_homerange |>
+                                               filter(name == "Thinned") |> arrange(mean) |> pull(sp_name)), color = name)) +
+    geom_vline(xintercept = 0, linewidth = 0.4, color = "grey70") +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`, alpha = pt_alpha), width = 0, linewidth = 0.4) +
+    geom_point(aes(x = mean, alpha = pt_alpha), shape = 16, size  = 1.2) +
+    scale_x_continuous(expand = expansion(mult = 0.01), breaks = c(-1, 0, 1)) +
+    scale_y_discrete(expand = expansion(add = c(0.8, 0.5))) +
+    scale_alpha_identity() +
+    scale_color_manual(values = colors_stats[3]) +
+    facet_wrap(~ name, nrow = 1) +
+    labs(x = "Standardized coefficient estimate", y = NULL) +
+    theme(
+      panel.border = element_blank(), axis.line.x  = element_line(color = "grey70"),
+      axis.line.y  = element_line(color = "grey70"), axis.text.y = element_text(size = 7),
+      panel.grid.major.x = element_line(color = "gray90", linewidth = 0.3),
+      legend.position = "none"
+    ); print(fig_species_thinned)
+  ggsave("data/cache/figs/fig_species_coefs_thinned.pdf", fig_species_thinned,
+         width = 4, height = 7)
+  
+  fig_species_mature = ggplot(alpha_homerange %>% filter(name == "Mature"),
+         aes(y = factor(sp_name, levels = alpha_homerange |>
+             filter(name == "Mature") |> arrange(mean) |> pull(sp_name)), color = name)) +
+    geom_vline(xintercept = 0, linewidth = 0.4, color = "grey70") +
+    geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`, alpha = pt_alpha), width = 0, linewidth = 0.4) +
+    geom_point(aes(x = mean, alpha = pt_alpha), shape = 16, size  = 1.2) +
+    scale_x_continuous(expand = expansion(mult = 0.01), breaks = c(-1, 0, 1)) +
+    scale_y_discrete(expand = expansion(add = c(0.8, 0.5))) +
+    scale_alpha_identity() +
+    scale_color_manual(values = colors_stats[4]) +
+    facet_wrap(~ name, nrow = 1) +
+    labs(x = "Standardized coefficient estimate", y = NULL) +
+    theme(
+      panel.border = element_blank(), axis.line.x  = element_line(color = "grey70"),
+      axis.line.y  = element_line(color = "grey70"), axis.text.y = element_text(size = 7),
+      panel.grid.major.x = element_line(color = "gray90", linewidth = 0.3),
+      legend.position = "none"
+    ); print(fig_species_mature)
+  ggsave("data/cache/figs/fig_species_coefs_mature.pdf", fig_species_mature,
+         width = 4, height = 7)
+}
 
 # Season effect
 
@@ -289,13 +388,13 @@ mu_alpha_plot$name = factor(mu_alpha_plot$name, levels = c("bap_hwd_mean", "qmd_
 mu_alpha_plot = mu_alpha_plot %>%
   mutate(pt_alpha = ifelse(`25%` < 0 & `75%` > 0, 0.3, 1))
 
-ggplot(mu_alpha_plot, aes(x = mean, y = fct_rev(name), color = stage, alpha = pt_alpha)) +
+fig_stage_plot = ggplot(mu_alpha_plot, aes(x = mean, y = fct_rev(name), color = stage, alpha = pt_alpha)) +
   geom_vline(xintercept = 0, color = "gray") +
   geom_point(position = position_dodge(width = 0.5, reverse = TRUE), size = 2) +
   geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0, linewidth = 0.4, position = position_dodge(width = 0.5, reverse = TRUE)) +
   geom_errorbarh(aes(xmin = `25%`, xmax = `75%`), width = 0, linewidth = 0.8, position = position_dodge(width = 0.5, reverse = TRUE)) +
   scale_x_continuous(expand = expansion(mult = 0.02)) +
-  scale_color_manual(values = stage_colors) +
+  scale_color_manual(values = colors_stats) +
   scale_alpha_identity(guide = "none") +
   labs(x = "Standardized coefficient estimate", y = "", color = "Management stage") +
   theme(
@@ -303,7 +402,10 @@ ggplot(mu_alpha_plot, aes(x = mean, y = fct_rev(name), color = stage, alpha = pt
     axis.line.x  = element_line(color = "grey70"),
     axis.line.y  = element_line(color = "grey70"),
     panel.grid.major.x = element_line(color = "gray90", linewidth = 0.3),
-  )
+  ); print(fig_stage_plot)
+
+ggsave("data/cache/figs/fig_stage_plot.pdf", fig_stage_plot,
+       width = 7, height = 5)
 
 ggplot(results[["Nesting guild"]][["mu_alpha_plot"]], aes(x = mean, y = name, color = group, shape = stratum_4)) +
   geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
@@ -320,10 +422,11 @@ ggplot(results[["All species"]][["alpha_plot"]] %>%
   geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
   geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0.1, position = position_dodge(width = 0.5))
 ggplot(results[["All species"]][["alpha_plot"]] %>%
-         filter(stratum_4 == "standinit", name == "qmd_6_mean") %>% mutate(species = fct_reorder(species, mean)),
+         filter(stratum_4 == "thin", name == "qmd_6_mean") %>% mutate(species = fct_reorder(species, mean)),
        aes(x = mean, y = species, color = group, shape = stratum_4)) +
   geom_vline(xintercept = 0) + geom_point(position = position_dodge(width = 0.5), size = 2) +
-  geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0.1, position = position_dodge(width = 0.5))
+  geom_errorbarh(aes(xmin = `2.5%`, xmax = `97.5%`), width = 0.1, position = position_dodge(width = 0.5)) +
+  labs(title = "qmd_6_mean")
 ggplot(results[["All species"]][["alpha_plot"]] %>%
          filter(stratum_4 == "mature", name == "tree_acre_6_mean") %>% mutate(species = fct_reorder(species, mean)),
        aes(x = mean, y = species, color = group, shape = stratum_4)) +

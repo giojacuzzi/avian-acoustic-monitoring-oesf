@@ -5,13 +5,6 @@ path_trait_data = "data/cache/2_traits/1_agg_traits/trait_data.csv"
 
 source("src/global.R")
 
-strata_cols = c(
-  "standinit" = "orange",
-  "compex"  = "forestgreen",
-  "thin"    = "purple",
-  "mature"     = "tan4"
-)
-
 # Load data for multi-species occupancy model --------------------------------------------------
 
 message("Loading data for multi-species occupancy model ", path_msom)
@@ -59,10 +52,10 @@ names(mean_plot) = names(stage_idx_map)
 
 # Stage colors
 stage_colors = c(
-  standinit = "#E8A838",
-  compex    = "#4CAF6B",
-  thin      = "#8B5DB5",
-  mature    = "#8B5E3C"
+  standinit = colors_stats[1],
+  compex    = colors_stats[2],
+  thin      = colors_stats[3],
+  mature    = colors_stats[4]
 )
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -641,24 +634,24 @@ plot_gradient_concat_facet = function(pred_df) {
     
     scale_x_continuous(
       breaks = c(0, 0.5, 1, 1.5, 2, 2.5, 3),
-      labels = c("0:1", "1:1", "0:1", "1:1", "0:1", "1:1", "0:1"),
+      labels = c("1:0", "1:1", "1:0", "1:1", "1:0", "1:1", "1:0"),
       expand = c(0.01, 0)
     ) +
     scale_y_continuous(
       breaks = c(0, 0.5, 1),
-      # labels = scales::percent(),
+      labels = scales::percent_format(),
       expand = c(0, 0)
     ) +
     coord_cartesian(clip = "off") +
     labs(
-      x = "Pairwise homerange composition (%)",
-      y = "Predicted occupancy probability (%)"
+      x = "Pairwise homerange composition ratio",
+      y = "Predicted occupancy probability"
     ) +
     theme_classic() +
     theme(
       plot.margin        = margin(20, 20, 20, 20),
       strip.background   = element_blank(),
-      strip.text.y.right = element_text(angle = 0, hjust = 0, size = 8, face = "italic"),
+      strip.text.y.right = element_text(angle = 0, hjust = 0, size = 8),
       panel.spacing      = unit(0.3, "lines"),
       panel.grid.major.y = element_line(color = "grey92", linewidth = 0.3),
       axis.text.x        = element_text(size = 7),
@@ -687,7 +680,11 @@ for (sp in species) {
 
 # Multiple species — vertically faceted, ordered by peak stage
 multi_pred = predict_gradient_concat_multi(intersect(conpri_species, species), n_grid = 101)
-plot_gradient_concat_facet(multi_pred)
+fig_convalue_gradient = plot_gradient_concat_facet(multi_pred)
+fig_convalue_gradient
+
+ggsave("data/cache/figs/fig_convalue_gradient.pdf", fig_convalue_gradient,
+       width = 5, height = 8)
 # FINDINGS:
 # - Standinit and mature promote the maximum probability of use across focal species, while compex does not enhance probability for any species.
 # - Mature may function as long-term marginal habitat for RuHm, PnSk, OlSiFly
