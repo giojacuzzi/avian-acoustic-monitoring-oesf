@@ -2,9 +2,9 @@
 # Community composition analyses, propagating posterior uncertainty
 #
 # CONFIG:
-binary_not_psi = TRUE # Summarize latent occurrence states across years as binary (max) or probabilities (psi)
-thin = 20 # Number of iterations to thin from the z posterior to speed up computation (0 or more)
-nperm = 99 # TODO: 999 (for p value) or 0 permutations
+binary_not_psi = FALSE # Summarize latent occurrence states across years as binary (max) or probabilities (psi)
+thin = 0 # Number of iterations to thin from the z posterior to speed up computation (0 or more)
+nperm = 0 # TODO: 999 (for p value) or 0 permutations
 # INPUT:
 path_msom                                = "data/cache/models/prefinal_msom_jags_nofp_all.rds"
 path_trait_data                          = "data/cache/2_traits/1_agg_traits/trait_data.csv"
@@ -124,15 +124,25 @@ print(fig_pcoa_sites)
 
 ## NMDS (note that k = 3)
 {
-  nmds_k3 = metaMDS(diss_matrix_mean, distance = "bray", trymax = 500, k=3)
-  nmds_k3$stress; stressplot(nmds_k3)
-  nmds_df = as_tibble(scores(nmds_k3, display = "sites")) %>% mutate(stage = stages, site = sites)
+  nmds_k2 = metaMDS(diss_matrix_mean, distance = "bray", trymax = 1000, k=2)
+  nmds_stress = nmds_k2$stress; stressplot(nmds_k2)
+  nmds_df = as_tibble(scores(nmds_k2, display = "sites")) %>% mutate(stage = stages, site = sites)
+  
+  # nmds_k3 = metaMDS(diss_matrix_mean, distance = "bray", trymax = 500, k=3)
+  # nmds_k3$stress; stressplot(nmds_k3)
+  # nmds_df = as_tibble(scores(nmds_k3, display = "sites")) %>% mutate(stage = stages, site = sites)
   
   fig_nmds_color = ggplot(nmds_df, aes(x = NMDS1, y = NMDS2, color = stage)) +
     geom_point(size = 2, alpha = 0.8) + stat_ellipse(level = 0.95, aes(fill = stage), geom = "polygon") +
     # geom_text(aes(label = site), size = 2.5, vjust = -0.5) +
     scale_color_manual(values = colors_stats) + scale_fill_manual(values = alpha(colors_stats, 0.1)) +
-    theme(legend.position = "none") + labs(title= "nmds_k3")
+    theme(legend.position = "none") + labs(title= "nmds_k3") +
+    annotate("text",
+             x = Inf, y = -Inf,
+             color = "gray40",
+             label = paste0("Stress = ", round(nmds_stress, 2)),
+             hjust = 1.05, vjust = -0.5,
+             size = 3.5, fontface = "italic")
 }
 print(fig_nmds_color)
 

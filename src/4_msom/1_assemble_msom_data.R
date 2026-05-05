@@ -160,6 +160,19 @@ for (i in species) {
 ylist[["american robin"]][["2020"]]
 any(ylist[["bewick's wren"]][["2020"]] == 1, na.rm = TRUE)
 
+# Total number of sites per season
+sapply(names(ylist[[1]]), function(s) {
+  mat = ylist[[1]][[s]]
+  sum(apply(mat, 1, function(x) any(!is.na(x))))
+})
+
+# Total number of seasons per site
+years_surveyed <- rowSums(sapply(names(ylist[[1]]), function(s) {
+  mat <- ylist[[1]][[s]]
+  apply(mat, 1, function(x) any(!is.na(x)))
+}))
+data.frame(site = names(years_surveyed), seasons_surveyed = years_surveyed, row.names = NULL)
+
 # Exclude species that were not detected -----------------------------------------------------------
 
 # Determine naive species site occurence per year and in total

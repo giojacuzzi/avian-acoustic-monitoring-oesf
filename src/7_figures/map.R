@@ -55,6 +55,25 @@ fig_study_area = ggplot() +
 ggsave("data/cache/figs/fig_study_area.pdf", fig_study_area,
        width = 9, height = 7)
 
+# Study area acreage:
+round(st_area(st_union(landscape_planning_units)) %>% set_units("acres"))
+
+{
+  # Union the planning units and convert to SpatVector
+  lpu_union <- st_union(landscape_planning_units) |> vect()
+  
+  # Mask raster to the unioned planning units
+  rast_masked <- mask(crop(rast_cover, lpu_union), lpu_union)
+  
+  # Get frequency table
+  freq_table <- freq(rast_masked)
+  
+  # Calculate percentages
+  freq_table$percent <- freq_table$count / sum(freq_table$count) * 100
+  
+  print(freq_table, digits = 2)
+}
+
 # ---------------------------------------------------------------------
 
 # wadnr_units_all = st_read("data/environment/GIS Data/WA_DNR_Units/WA_DNR_Units.shp", quiet = TRUE) %>%
